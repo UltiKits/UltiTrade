@@ -1028,19 +1028,8 @@ class TradeServiceTest {
     class Shutdown {
 
         @Test
-        @DisplayName("shutdown should cancel cleanup task")
-        void cancelCleanupTask() throws Exception {
-            org.bukkit.scheduler.BukkitTask mockTask = mock(org.bukkit.scheduler.BukkitTask.class);
-            UltiTradeTestHelper.setField(service, "cleanupTask", mockTask);
-
-            service.shutdown();
-
-            verify(mockTask).cancel();
-        }
-
-        @Test
-        @DisplayName("shutdown should handle null cleanup task")
-        void nullCleanupTask() {
+        @DisplayName("shutdown should handle empty state without errors")
+        void emptyShutdown() {
             // Should not throw
             service.shutdown();
         }
@@ -1107,6 +1096,515 @@ class TradeServiceTest {
         void playSoundNullPlayer() {
             // Should not throw exception
             service.playSound(null, org.bukkit.Sound.BLOCK_NOTE_BLOCK_PLING);
+        }
+    }
+
+    @Nested
+    @DisplayName("Cleanup Expired Requests")
+    class CleanupExpiredRequests {
+
+        @Test
+        @DisplayName("cleanupExpiredRequests should remove expired requests")
+        void removeExpiredRequests() throws Exception {
+            Map<UUID, TradeRequest> pendingRequests = UltiTradeTestHelper.getField(service, "pendingRequests");
+
+            TradeRequest expired = new TradeRequest(uuid1, uuid2);
+            // Make it expired via reflection
+            java.lang.reflect.Field timestampField = TradeRequest.class.getDeclaredField("timestamp");
+            timestampField.setAccessible(true);
+            timestampField.set(expired, System.currentTimeMillis() - 60000L);
+            pendingRequests.put(uuid2, expired);
+
+            service.cleanupExpiredRequests();
+
+            assertThat(pendingRequests).isEmpty();
+        }
+
+        @Test
+        @DisplayName("cleanupExpiredRequests should keep valid requests")
+        void keepValidRequests() throws Exception {
+            Map<UUID, TradeRequest> pendingRequests = UltiTradeTestHelper.getField(service, "pendingRequests");
+
+            TradeRequest valid = new TradeRequest(uuid1, uuid2);
+            pendingRequests.put(uuid2, valid);
+
+            service.cleanupExpiredRequests();
+
+            assertThat(pendingRequests).containsKey(uuid2);
+        }
+
+        @Test
+        @DisplayName("cleanupExpiredRequests should notify online receiver")
+        void notifyOnlineReceiver() throws Exception {
+            Map<UUID, TradeRequest> pendingRequests = UltiTradeTestHelper.getField(service, "pendingRequests");
+
+            TradeRequest expired = new TradeRequest(uuid1, uuid2);
+            java.lang.reflect.Field timestampField = TradeRequest.class.getDeclaredField("timestamp");
+            timestampField.setAccessible(true);
+            timestampField.set(expired, System.currentTimeMillis() - 60000L);
+            pendingRequests.put(uuid2, expired);
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            service.cleanupExpiredRequests();
+
+            verify(player2).sendMessage(anyString());
+        }
+
+        @Test
+        @DisplayName("cleanupExpiredRequests should handle offline receiver")
+        void handleOfflineReceiver() throws Exception {
+            Map<UUID, TradeRequest> pendingRequests = UltiTradeTestHelper.getField(service, "pendingRequests");
+
+            TradeRequest expired = new TradeRequest(uuid1, uuid2);
+            java.lang.reflect.Field timestampField = TradeRequest.class.getDeclaredField("timestamp");
+            timestampField.setAccessible(true);
+            timestampField.set(expired, System.currentTimeMillis() - 60000L);
+            pendingRequests.put(uuid2, expired);
+
+            // Bukkit.getPlayer returns null by default - should not throw
+            service.cleanupExpiredRequests();
+
+            assertThat(pendingRequests).isEmpty();
+        }
+
+        @Test
+        @DisplayName("cleanupExpiredRequests should handle empty map")
+        void emptyMap() {
+            // Should not throw
+            service.cleanupExpiredRequests();
+        }
+    }
+
+    @Nested
+    @DisplayName("Complete Trade - Additional Paths")
+    class CompleteTradeAdditional {
+
+        @Test
+        @DisplayName("completeTrade should transfer money from player2 with tax")
+        void moneyTransferFromPlayer2() throws Exception {
+            when(config.getTradeTax()).thenReturn(0.1);
+            when(config.isEnableExpTrade()).thenReturn(false);
+
+            TradeSession session = new TradeSession(player1, player2);
+            session.setMoney(uuid2, 200.0);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            service.completeTrade(session);
+
+            // player2 offered 200, tax = 20, player1 gets 180
+            verify(economy).withdrawPlayer(player2, 200.0);
+            verify(economy).depositPlayer(player1, 180.0);
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.COMPLETED);
+        }
+
+        @Test
+        @DisplayName("completeTrade should transfer experience from player2 with tax")
+        void expTransferFromPlayer2() throws Exception {
+            when(config.isEnableExpTrade()).thenReturn(true);
+            when(config.getExpTaxRate()).thenReturn(0.1);
+            when(config.isEnableMoneyTrade()).thenReturn(false);
+            UltiTradeTestHelper.setField(service, "economy", null);
+
+            TradeSession session = new TradeSession(player1, player2);
+            session.setExp(uuid2, 200);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            // Player2 has enough exp
+            when(player2.getLevel()).thenReturn(30);
+            when(player2.getExp()).thenReturn(0.5f);
+            when(player2.getExpToLevel()).thenReturn(50);
+
+            service.completeTrade(session);
+
+            // player1 should receive 200 - 10% = 180
+            verify(player1).giveExp(180);
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.COMPLETED);
+        }
+
+        @Test
+        @DisplayName("completeTrade should cancel if player2 has insufficient exp")
+        void player2InsufficientExp() throws Exception {
+            when(config.isEnableExpTrade()).thenReturn(true);
+            when(config.isEnableMoneyTrade()).thenReturn(false);
+            UltiTradeTestHelper.setField(service, "economy", null);
+
+            TradeSession session = new TradeSession(player1, player2);
+            session.setExp(uuid2, 10000);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            when(player2.getLevel()).thenReturn(1);
+            when(player2.getExp()).thenReturn(0.0f);
+            when(player2.getExpToLevel()).thenReturn(0);
+
+            service.completeTrade(session);
+
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+        }
+
+        @Test
+        @DisplayName("completeTrade should handle item overflow (drops)")
+        void itemOverflow() throws Exception {
+            when(config.isEnableExpTrade()).thenReturn(false);
+
+            TradeSession session = new TradeSession(player1, player2);
+            ItemStack diamond = new ItemStack(Material.DIAMOND, 64);
+            session.setItem(uuid1, 0, diamond);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            // Simulate inventory full - overflow
+            HashMap<Integer, ItemStack> overflow = new HashMap<>();
+            overflow.put(0, diamond);
+            when(player2.getInventory().addItem(any(ItemStack.class))).thenReturn(overflow);
+
+            service.completeTrade(session);
+
+            // Should drop the overflowed items
+            verify(player2.getWorld()).dropItemNaturally(eq(player2.getLocation()), eq(diamond));
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.COMPLETED);
+        }
+
+        @Test
+        @DisplayName("completeTrade should play success effects with particles enabled")
+        void successEffectsWithParticles() throws Exception {
+            when(config.isEnableExpTrade()).thenReturn(false);
+            when(config.isEnableSounds()).thenReturn(true);
+            when(config.isEnableParticles()).thenReturn(true);
+
+            TradeSession session = new TradeSession(player1, player2);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            service.completeTrade(session);
+
+            // Verify success sound played
+            verify(player1).playSound(any(Location.class), eq(org.bukkit.Sound.ENTITY_PLAYER_LEVELUP), eq(1.0f), eq(1.0f));
+            verify(player2).playSound(any(Location.class), eq(org.bukkit.Sound.ENTITY_PLAYER_LEVELUP), eq(1.0f), eq(1.0f));
+            // Verify particles spawned
+            verify(player1.getWorld()).spawnParticle(eq(org.bukkit.Particle.VILLAGER_HAPPY), any(Location.class), anyInt(), anyDouble(), anyDouble(), anyDouble(), anyDouble());
+            verify(player2.getWorld()).spawnParticle(eq(org.bukkit.Particle.VILLAGER_HAPPY), any(Location.class), anyInt(), anyDouble(), anyDouble(), anyDouble(), anyDouble());
+        }
+
+        @Test
+        @DisplayName("completeTrade should skip particles when disabled")
+        void successEffectsNoParticles() throws Exception {
+            when(config.isEnableExpTrade()).thenReturn(false);
+            when(config.isEnableSounds()).thenReturn(true);
+            when(config.isEnableParticles()).thenReturn(false);
+
+            TradeSession session = new TradeSession(player1, player2);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            service.completeTrade(session);
+
+            verify(player1.getWorld(), never()).spawnParticle(any(org.bukkit.Particle.class), any(Location.class), anyInt(), anyDouble(), anyDouble(), anyDouble(), anyDouble());
+        }
+
+        @Test
+        @DisplayName("completeTrade should send both players bidirectional money and exp")
+        void bidirectionalMoneyAndExp() throws Exception {
+            when(config.getTradeTax()).thenReturn(0.0);
+            when(config.getExpTaxRate()).thenReturn(0.0);
+            when(config.isEnableExpTrade()).thenReturn(true);
+
+            TradeSession session = new TradeSession(player1, player2);
+            session.setMoney(uuid1, 50.0);
+            session.setMoney(uuid2, 100.0);
+            session.setExp(uuid1, 30);
+            session.setExp(uuid2, 60);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            // Both have enough
+            when(player1.getLevel()).thenReturn(30);
+            when(player1.getExp()).thenReturn(0.5f);
+            when(player1.getExpToLevel()).thenReturn(50);
+            when(player2.getLevel()).thenReturn(30);
+            when(player2.getExp()).thenReturn(0.5f);
+            when(player2.getExpToLevel()).thenReturn(50);
+
+            service.completeTrade(session);
+
+            // Money
+            verify(economy).withdrawPlayer(player1, 50.0);
+            verify(economy).depositPlayer(player2, 50.0);
+            verify(economy).withdrawPlayer(player2, 100.0);
+            verify(economy).depositPlayer(player1, 100.0);
+            // Exp
+            verify(player2).giveExp(30);
+            verify(player1).giveExp(60);
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.COMPLETED);
+        }
+    }
+
+    @Nested
+    @DisplayName("Cancel Trade - Additional Paths")
+    class CancelTradeAdditional {
+
+        @Test
+        @DisplayName("cancelTrade should return items from both players")
+        void returnItemsFromBothPlayers() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            ItemStack diamond = new ItemStack(Material.DIAMOND, 10);
+            ItemStack gold = new ItemStack(Material.GOLD_INGOT, 5);
+            session.setItem(uuid1, 0, diamond);
+            session.setItem(uuid2, 0, gold);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+            when(player1.getInventory().addItem(any(ItemStack.class))).thenReturn(new HashMap<>());
+            when(player2.getInventory().addItem(any(ItemStack.class))).thenReturn(new HashMap<>());
+
+            service.cancelTrade(session, "test reason");
+
+            verify(player1.getInventory()).addItem(diamond);
+            verify(player2.getInventory()).addItem(gold);
+        }
+
+        @Test
+        @DisplayName("cancelTrade should drop overflowed items on cancel")
+        void cancelOverflowDrops() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            ItemStack diamond = new ItemStack(Material.DIAMOND, 64);
+            session.setItem(uuid1, 0, diamond);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            HashMap<Integer, ItemStack> overflow = new HashMap<>();
+            overflow.put(0, diamond);
+            when(player1.getInventory().addItem(any(ItemStack.class))).thenReturn(overflow);
+
+            service.cancelTrade(session, "test");
+
+            verify(player1.getWorld()).dropItemNaturally(eq(player1.getLocation()), eq(diamond));
+        }
+
+        @Test
+        @DisplayName("cancelTrade should play fail effects with particles")
+        void cancelFailEffects() throws Exception {
+            when(config.isEnableSounds()).thenReturn(true);
+            when(config.isEnableParticles()).thenReturn(true);
+
+            TradeSession session = new TradeSession(player1, player2);
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            service.cancelTrade(session, "test");
+
+            verify(player1).playSound(any(Location.class), eq(org.bukkit.Sound.ENTITY_VILLAGER_NO), eq(1.0f), eq(1.0f));
+            verify(player1.getWorld()).spawnParticle(eq(org.bukkit.Particle.SMOKE_NORMAL), any(Location.class), anyInt(), anyDouble(), anyDouble(), anyDouble(), anyDouble());
+        }
+    }
+
+    @Nested
+    @DisplayName("Start Trade")
+    class StartTrade {
+
+        @Test
+        @DisplayName("startTrade should create session and open GUIs")
+        void startTradeCreatesSession() throws Exception {
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            service.startTrade(player1, player2);
+
+            assertThat(service.isTrading(uuid1)).isTrue();
+            assertThat(service.isTrading(uuid2)).isTrue();
+            verify(player1).openInventory(any(org.bukkit.inventory.Inventory.class));
+            verify(player2).openInventory(any(org.bukkit.inventory.Inventory.class));
+        }
+
+        @Test
+        @DisplayName("startTrade should play chest open sound")
+        void startTradeSound() throws Exception {
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            service.startTrade(player1, player2);
+
+            verify(player1).playSound(any(Location.class), eq(org.bukkit.Sound.BLOCK_CHEST_OPEN), eq(1.0f), eq(1.0f));
+            verify(player2).playSound(any(Location.class), eq(org.bukkit.Sound.BLOCK_CHEST_OPEN), eq(1.0f), eq(1.0f));
+        }
+    }
+
+    @Nested
+    @DisplayName("Confirmation Logic - Additional Paths")
+    class ConfirmationAdditional {
+
+        @Test
+        @DisplayName("confirmTrade should show confirm page for large money trades")
+        void largeMoneyTrade() throws Exception {
+            when(config.getConfirmThreshold()).thenReturn(100.0);
+
+            TradeSession session = new TradeSession(player1, player2);
+            session.setMoney(uuid1, 500.0);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            service.confirmTrade(player1);
+
+            // Should close inventory and schedule confirm page
+            verify(player1).closeInventory();
+            // The player should NOT be confirmed yet (waiting for confirm page)
+            assertThat(session.isConfirmed(uuid1)).isFalse();
+        }
+
+        @Test
+        @DisplayName("confirmTrade should skip confirm page if already confirmed once")
+        void alreadyConfirmedSkipsPage() throws Exception {
+            when(config.getConfirmThreshold()).thenReturn(100.0);
+
+            TradeSession session = new TradeSession(player1, player2);
+            session.setMoney(uuid1, 500.0);
+            session.setConfirmed(uuid1, true); // Already confirmed once
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            service.confirmTrade(player1);
+
+            // Should proceed with confirmation (already confirmed, so this re-confirms)
+            assertThat(session.isConfirmed(uuid1)).isTrue();
+        }
+
+        @Test
+        @DisplayName("confirmTrade should show confirm page for large exp trades")
+        void largeExpTrade() throws Exception {
+            when(config.getConfirmThreshold()).thenReturn(100.0);
+
+            TradeSession session = new TradeSession(player1, player2);
+            session.setExp(uuid1, 500);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            service.confirmTrade(player1);
+
+            verify(player1).closeInventory();
+            assertThat(session.isConfirmed(uuid1)).isFalse();
+        }
+    }
+
+    @Nested
+    @DisplayName("Shutdown - Additional Paths")
+    class ShutdownAdditional {
+
+        @Test
+        @DisplayName("shutdown should cleanup boss bars")
+        void cleanupBossBars() throws Exception {
+            org.bukkit.boss.BossBar bar = mock(org.bukkit.boss.BossBar.class);
+            org.bukkit.scheduler.BukkitTask task = mock(org.bukkit.scheduler.BukkitTask.class);
+
+            Map<UUID, org.bukkit.boss.BossBar> bossBars = UltiTradeTestHelper.getField(service, "requestBossBars");
+            Map<UUID, org.bukkit.scheduler.BukkitTask> tasks = UltiTradeTestHelper.getField(service, "bossBarTasks");
+            bossBars.put(uuid1, bar);
+            tasks.put(uuid1, task);
+
+            service.shutdown();
+
+            verify(bar).removeAll();
+            verify(task).cancel();
+            assertThat(bossBars).isEmpty();
+            assertThat(tasks).isEmpty();
         }
     }
 }

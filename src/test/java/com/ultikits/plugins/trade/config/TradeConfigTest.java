@@ -157,5 +157,152 @@ class TradeConfigTest {
             config.setEnableSounds(false);
             assertThat(config.isEnableSounds()).isFalse();
         }
+
+        @Test
+        @DisplayName("Should set and get enable exp trade")
+        void enableExpTrade() {
+            config.setEnableExpTrade(false);
+            assertThat(config.isEnableExpTrade()).isFalse();
+        }
+
+        @Test
+        @DisplayName("Should set and get enable shift click")
+        void enableShiftClick() {
+            config.setEnableShiftClick(false);
+            assertThat(config.isEnableShiftClick()).isFalse();
+        }
+
+        @Test
+        @DisplayName("Should set and get exp tax rate")
+        void expTaxRate() {
+            config.setExpTaxRate(0.15);
+            assertThat(config.getExpTaxRate()).isEqualTo(0.15);
+        }
+
+        @Test
+        @DisplayName("Should set and get cleanup interval hours")
+        void cleanupIntervalHours() {
+            config.setCleanupIntervalHours(48);
+            assertThat(config.getCleanupIntervalHours()).isEqualTo(48);
+        }
+
+        @Test
+        @DisplayName("Should set and get enable particles")
+        void enableParticles() {
+            config.setEnableParticles(false);
+            assertThat(config.isEnableParticles()).isFalse();
+        }
+
+        @Test
+        @DisplayName("Should set and get enable bossbar")
+        void enableBossbar() {
+            config.setEnableBossbar(false);
+            assertThat(config.isEnableBossbar()).isFalse();
+        }
+
+        @Test
+        @DisplayName("Should set and get enable clickable buttons")
+        void enableClickableButtons() {
+            config.setEnableClickableButtons(false);
+            assertThat(config.isEnableClickableButtons()).isFalse();
+        }
+
+        @Test
+        @DisplayName("Should set and get gui title")
+        void guiTitle() {
+            config.setGuiTitle("&eCustom Title");
+            assertThat(config.getGuiTitle()).isEqualTo("&eCustom Title");
+        }
+
+        @Test
+        @DisplayName("Should set and get request sent message")
+        void requestSentMessage() {
+            config.setRequestSentMessage("&aSent to {PLAYER}");
+            assertThat(config.getRequestSentMessage()).isEqualTo("&aSent to {PLAYER}");
+        }
+
+        @Test
+        @DisplayName("Should set and get request received message")
+        void requestReceivedMessage() {
+            config.setRequestReceivedMessage("&eRequest from {PLAYER}");
+            assertThat(config.getRequestReceivedMessage()).isEqualTo("&eRequest from {PLAYER}");
+        }
+
+        @Test
+        @DisplayName("Should set and get request timeout message")
+        void requestTimeoutMessage() {
+            config.setRequestTimeoutMessage("&cTimed out!");
+            assertThat(config.getRequestTimeoutMessage()).isEqualTo("&cTimed out!");
+        }
+
+        @Test
+        @DisplayName("Should set and get trade complete message")
+        void tradeCompleteMessage() {
+            config.setTradeCompleteMessage("&aDone!");
+            assertThat(config.getTradeCompleteMessage()).isEqualTo("&aDone!");
+        }
+
+        @Test
+        @DisplayName("Should set and get trade cancelled message")
+        void tradeCancelledMessage() {
+            config.setTradeCancelledMessage("&cCancelled!");
+            assertThat(config.getTradeCancelledMessage()).isEqualTo("&cCancelled!");
+        }
+
+        @Test
+        @DisplayName("Should set and get trade disabled message")
+        void tradeDisabledMessage() {
+            config.setTradeDisabledMessage("&cDisabled!");
+            assertThat(config.getTradeDisabledMessage()).isEqualTo("&cDisabled!");
+        }
+
+        @Test
+        @DisplayName("Should set and get player blocked message")
+        void playerBlockedMessage() {
+            config.setPlayerBlockedMessage("&cBlocked!");
+            assertThat(config.getPlayerBlockedMessage()).isEqualTo("&cBlocked!");
+        }
+
+        @Test
+        @DisplayName("Should set and get toggle on message")
+        void toggleOnMessage() {
+            config.setToggleOnMessage("&aEnabled!");
+            assertThat(config.getToggleOnMessage()).isEqualTo("&aEnabled!");
+        }
+
+        @Test
+        @DisplayName("Should set and get toggle off message")
+        void toggleOffMessage() {
+            config.setToggleOffMessage("&cDisabled!");
+            assertThat(config.getToggleOffMessage()).isEqualTo("&cDisabled!");
+        }
+
+        @Test
+        @DisplayName("Should set and get block success message")
+        void blockSuccessMessage() {
+            config.setBlockSuccessMessage("&aBlocked {PLAYER}");
+            assertThat(config.getBlockSuccessMessage()).isEqualTo("&aBlocked {PLAYER}");
+        }
+
+        @Test
+        @DisplayName("Should set and get unblock success message")
+        void unblockSuccessMessage() {
+            config.setUnblockSuccessMessage("&aUnblocked {PLAYER}");
+            assertThat(config.getUnblockSuccessMessage()).isEqualTo("&aUnblocked {PLAYER}");
+        }
+
+        @Test
+        @DisplayName("Should set and get already blocked message")
+        void alreadyBlockedMessage() {
+            config.setAlreadyBlockedMessage("&cAlready blocked!");
+            assertThat(config.getAlreadyBlockedMessage()).isEqualTo("&cAlready blocked!");
+        }
+
+        @Test
+        @DisplayName("Should set and get not blocked message")
+        void notBlockedMessage() {
+            config.setNotBlockedMessage("&cNot blocked!");
+            assertThat(config.getNotBlockedMessage()).isEqualTo("&cNot blocked!");
+        }
     }
 }

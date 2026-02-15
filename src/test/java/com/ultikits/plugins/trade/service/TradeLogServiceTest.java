@@ -41,6 +41,7 @@ class TradeLogServiceTest {
         service = new TradeLogService();
 
         // Inject dependencies via reflection
+        UltiTradeTestHelper.setField(service, "plugin", UltiTradeTestHelper.getMockPlugin());
         UltiTradeTestHelper.setField(service, "config", config);
         UltiTradeTestHelper.setField(service, "logOperator", logOperator);
         UltiTradeTestHelper.setField(service, "settingsOperator", settingsOperator);
@@ -649,6 +650,184 @@ class TradeLogServiceTest {
 
             verify(org.bukkit.Bukkit.getServer().getScheduler(), never())
                     .runTaskAsynchronously(any(), any(Runnable.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("Logging (enabled)")
+    class LoggingEnabled {
+
+        @Test
+        @DisplayName("logCompletedTrade should schedule async task when enabled")
+        void logCompletedTradeEnabled() throws Exception {
+            when(config.isEnableTradeLog()).thenReturn(true);
+            UltiTradeTestHelper.setField(service, "bukkitPlugin", org.bukkit.Bukkit.getPluginManager().getPlugin("UltiTools"));
+
+            com.ultikits.plugins.trade.entity.TradeSession session = new com.ultikits.plugins.trade.entity.TradeSession(player, player);
+
+            UUID otherUuid = UUID.randomUUID();
+            Player other = UltiTradeTestHelper.createMockPlayer("OtherPlayer", otherUuid);
+
+            service.logCompletedTrade(session, player, other, 5.0, 10);
+
+            verify(org.bukkit.Bukkit.getServer().getScheduler())
+                    .runTaskAsynchronously(any(), any(Runnable.class));
+        }
+
+        @Test
+        @DisplayName("logCancelledTrade should schedule async task when enabled")
+        void logCancelledTradeEnabled() throws Exception {
+            when(config.isEnableTradeLog()).thenReturn(true);
+            UltiTradeTestHelper.setField(service, "bukkitPlugin", org.bukkit.Bukkit.getPluginManager().getPlugin("UltiTools"));
+
+            com.ultikits.plugins.trade.entity.TradeSession session = new com.ultikits.plugins.trade.entity.TradeSession(player, player);
+
+            service.logCancelledTrade(session, "test reason");
+
+            verify(org.bukkit.Bukkit.getServer().getScheduler())
+                    .runTaskAsynchronously(any(), any(Runnable.class));
+        }
+
+        @Test
+        @DisplayName("logCompletedTrade async task should insert log and update stats")
+        void logCompletedTradeAsync() throws Exception {
+            when(config.isEnableTradeLog()).thenReturn(true);
+            UltiTradeTestHelper.setField(service, "bukkitPlugin", org.bukkit.Bukkit.getPluginManager().getPlugin("UltiTools"));
+
+            com.ultikits.plugins.trade.entity.TradeSession session = new com.ultikits.plugins.trade.entity.TradeSession(player, player);
+            session.setMoney(playerUuid, 100.0);
+            session.setExp(playerUuid, 50);
+
+            UUID otherUuid = UUID.randomUUID();
+            Player other = UltiTradeTestHelper.createMockPlayer("OtherPlayer", otherUuid);
+
+            // Capture the Runnable
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            org.mockito.ArgumentCaptor<Runnable> captor = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+
+            service.logCompletedTrade(session, player, other, 5.0, 10);
+
+            verify(scheduler).runTaskAsynchronously(any(), captor.capture());
+
+            // Mock the query chain for updatePlayerStats -> getOrCreateSettings
+            when(settingsOperator.query()).thenReturn(queryBuilder);
+            when(queryBuilder.where(anyString())).thenReturn(queryBuilder);
+            when(queryBuilder.eq(any())).thenReturn(queryBuilder);
+            when(queryBuilder.list()).thenReturn(Collections.emptyList());
+
+            // Run the async task
+            captor.getValue().run();
+
+            // Should insert a log
+            verify(logOperator).insert(any(TradeLogData.class));
+        }
+
+        @Test
+        @DisplayName("logCancelledTrade async task should insert cancelled log")
+        void logCancelledTradeAsync() throws Exception {
+            when(config.isEnableTradeLog()).thenReturn(true);
+            UltiTradeTestHelper.setField(service, "bukkitPlugin", org.bukkit.Bukkit.getPluginManager().getPlugin("UltiTools"));
+
+            com.ultikits.plugins.trade.entity.TradeSession session = new com.ultikits.plugins.trade.entity.TradeSession(player, player);
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(any(UUID.class))).thenReturn(player);
+
+            org.bukkit.scheduler.BukkitScheduler scheduler = server.getScheduler();
+            org.mockito.ArgumentCaptor<Runnable> captor = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+
+            service.logCancelledTrade(session, "Player left");
+
+            verify(scheduler).runTaskAsynchronously(any(), captor.capture());
+
+            // Run the async task
+            captor.getValue().run();
+
+            // Should insert a log
+            verify(logOperator).insert(any(TradeLogData.class));
+        }
+
+        @Test
+        @DisplayName("logCompletedTrade should handle exception in async task")
+        void logCompletedTradeException() throws Exception {
+            when(config.isEnableTradeLog()).thenReturn(true);
+            UltiTradeTestHelper.setField(service, "bukkitPlugin", org.bukkit.Bukkit.getPluginManager().getPlugin("UltiTools"));
+
+            com.ultikits.plugins.trade.entity.TradeSession session = new com.ultikits.plugins.trade.entity.TradeSession(player, player);
+            UUID otherUuid = UUID.randomUUID();
+            Player other = UltiTradeTestHelper.createMockPlayer("OtherPlayer", otherUuid);
+
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            org.mockito.ArgumentCaptor<Runnable> captor = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+
+            doThrow(new RuntimeException("DB error")).when(logOperator).insert(any());
+
+            service.logCompletedTrade(session, player, other, 0, 0);
+
+            verify(scheduler).runTaskAsynchronously(any(), captor.capture());
+
+            // Should not throw
+            captor.getValue().run();
+        }
+
+        @Test
+        @DisplayName("logCancelledTrade should handle exception in async task")
+        void logCancelledTradeException() throws Exception {
+            when(config.isEnableTradeLog()).thenReturn(true);
+            UltiTradeTestHelper.setField(service, "bukkitPlugin", org.bukkit.Bukkit.getPluginManager().getPlugin("UltiTools"));
+
+            com.ultikits.plugins.trade.entity.TradeSession session = new com.ultikits.plugins.trade.entity.TradeSession(player, player);
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(any(UUID.class))).thenReturn(player);
+
+            org.bukkit.scheduler.BukkitScheduler scheduler = server.getScheduler();
+            org.mockito.ArgumentCaptor<Runnable> captor = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+
+            doThrow(new RuntimeException("DB error")).when(logOperator).insert(any());
+
+            service.logCancelledTrade(session, "test");
+
+            verify(scheduler).runTaskAsynchronously(any(), captor.capture());
+
+            // Should not throw
+            captor.getValue().run();
+        }
+    }
+
+    @Nested
+    @DisplayName("Save Settings")
+    class SaveSettings {
+
+        @Test
+        @DisplayName("saveSettings should schedule async update")
+        void saveSettingsAsync() throws Exception {
+            UltiTradeTestHelper.setField(service, "bukkitPlugin", org.bukkit.Bukkit.getPluginManager().getPlugin("UltiTools"));
+
+            PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, "TestPlayer");
+            service.saveSettings(settings);
+
+            verify(org.bukkit.Bukkit.getServer().getScheduler())
+                    .runTaskAsynchronously(any(), any(Runnable.class));
+        }
+
+        @Test
+        @DisplayName("saveSettings should handle exception in async task")
+        void saveSettingsException() throws Exception {
+            UltiTradeTestHelper.setField(service, "bukkitPlugin", org.bukkit.Bukkit.getPluginManager().getPlugin("UltiTools"));
+
+            PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, "TestPlayer");
+
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            org.mockito.ArgumentCaptor<Runnable> captor = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+
+            doThrow(new RuntimeException("DB error")).when(settingsOperator).update(any());
+
+            service.saveSettings(settings);
+
+            verify(scheduler).runTaskAsynchronously(any(), captor.capture());
+
+            // Should not throw
+            captor.getValue().run();
         }
     }
 }

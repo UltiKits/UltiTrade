@@ -301,5 +301,66 @@ class TradeCommandTest {
 
             verify(player).sendMessage(contains("交易状态"));
         }
+
+        @Test
+        @DisplayName("Should show trade enabled status in green")
+        void showTradeEnabledStatus() {
+            when(logService.isTradeEnabled(playerUuid)).thenReturn(true);
+
+            command.help(player);
+
+            verify(player).sendMessage(contains("已开启"));
+        }
+
+        @Test
+        @DisplayName("Should show trade disabled status in red")
+        void showTradeDisabledStatus() {
+            when(logService.isTradeEnabled(playerUuid)).thenReturn(false);
+
+            command.help(player);
+
+            verify(player).sendMessage(contains("已关闭"));
+        }
+
+        @Test
+        @DisplayName("Should show all available commands")
+        void showAllCommands() {
+            when(logService.isTradeEnabled(playerUuid)).thenReturn(true);
+
+            command.help(player);
+
+            verify(player).sendMessage(contains("/trade accept"));
+            verify(player).sendMessage(contains("/trade deny"));
+            verify(player).sendMessage(contains("/trade cancel"));
+            verify(player).sendMessage(contains("/trade toggle"));
+            verify(player).sendMessage(contains("/trade block"));
+            verify(player).sendMessage(contains("/trade unblock"));
+        }
+    }
+
+    @Nested
+    @DisplayName("handleHelp")
+    class HandleHelp {
+
+        @Test
+        @DisplayName("handleHelp should delegate to help for Player")
+        void handleHelpForPlayer() {
+            when(logService.isTradeEnabled(playerUuid)).thenReturn(true);
+
+            command.handleHelp(player);
+
+            verify(player, atLeastOnce()).sendMessage(contains("UltiTrade"));
+        }
+
+        @Test
+        @DisplayName("handleHelp should not throw for non-Player sender")
+        void handleHelpForNonPlayer() {
+            org.bukkit.command.CommandSender consoleSender = mock(org.bukkit.command.CommandSender.class);
+
+            // Should not throw - just silently return
+            command.handleHelp(consoleSender);
+
+            verify(consoleSender, never()).sendMessage(anyString());
+        }
     }
 }

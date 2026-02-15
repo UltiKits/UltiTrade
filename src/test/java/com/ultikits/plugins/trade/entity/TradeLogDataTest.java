@@ -278,4 +278,143 @@ class TradeLogDataTest {
             assertThat(summary).contains("CANCELLED");
         }
     }
+
+    @Nested
+    @DisplayName("Lombok Equals and HashCode")
+    class EqualsAndHashCode {
+
+        @Test
+        @DisplayName("Should be equal to itself")
+        void equalToSelf() {
+            assertThat(logData).isEqualTo(logData);
+        }
+
+        @Test
+        @DisplayName("Should have consistent hashCode")
+        void consistentHashCode() {
+            int hash1 = logData.hashCode();
+            int hash2 = logData.hashCode();
+            assertThat(hash1).isEqualTo(hash2);
+        }
+
+        @Test
+        @DisplayName("Should not equal null")
+        void notEqualToNull() {
+            assertThat(logData).isNotEqualTo(null);
+        }
+
+        @Test
+        @DisplayName("Should not equal different type")
+        void notEqualToDifferentType() {
+            assertThat(logData).isNotEqualTo("a string");
+        }
+
+        @Test
+        @DisplayName("Two instances with same data should be equal")
+        void equalInstances() {
+            TradeLogData other = new TradeLogData(tradeId, player1Uuid, "Player1", player2Uuid, "Player2");
+            other.setTradeTime(logData.getTradeTime());
+            assertThat(logData).isEqualTo(other);
+        }
+
+        @Test
+        @DisplayName("Different tradeId should not be equal")
+        void differentTradeId() {
+            TradeLogData other = new TradeLogData(UUID.randomUUID(), player1Uuid, "Player1", player2Uuid, "Player2");
+            assertThat(logData).isNotEqualTo(other);
+        }
+    }
+
+    @Nested
+    @DisplayName("Lombok ToString")
+    class ToString {
+
+        @Test
+        @DisplayName("Should generate toString with field values")
+        void toStringContainsFields() {
+            String str = logData.toString();
+            assertThat(str).isNotNull();
+            assertThat(str).contains("TradeLogData");
+            assertThat(str).contains(tradeId.toString());
+        }
+    }
+
+    @Nested
+    @DisplayName("Additional Setters")
+    class AdditionalSetters {
+
+        @Test
+        @DisplayName("Should set and get tradeId")
+        void setTradeId() {
+            String newId = UUID.randomUUID().toString();
+            logData.setTradeId(newId);
+            assertThat(logData.getTradeId()).isEqualTo(newId);
+        }
+
+        @Test
+        @DisplayName("Should set and get player1Uuid")
+        void setPlayer1Uuid() {
+            String newUuid = UUID.randomUUID().toString();
+            logData.setPlayer1Uuid(newUuid);
+            assertThat(logData.getPlayer1Uuid()).isEqualTo(newUuid);
+        }
+
+        @Test
+        @DisplayName("Should set and get player2Uuid")
+        void setPlayer2Uuid() {
+            String newUuid = UUID.randomUUID().toString();
+            logData.setPlayer2Uuid(newUuid);
+            assertThat(logData.getPlayer2Uuid()).isEqualTo(newUuid);
+        }
+
+        @Test
+        @DisplayName("Should set and get player1Name")
+        void setPlayer1Name() {
+            logData.setPlayer1Name("NewName1");
+            assertThat(logData.getPlayer1Name()).isEqualTo("NewName1");
+        }
+
+        @Test
+        @DisplayName("Should set and get player2Name")
+        void setPlayer2Name() {
+            logData.setPlayer2Name("NewName2");
+            assertThat(logData.getPlayer2Name()).isEqualTo("NewName2");
+        }
+
+        @Test
+        @DisplayName("Should set and get player1ItemsJson directly")
+        void setPlayer1ItemsJson() {
+            logData.setPlayer1ItemsJson("[{\"type\":\"DIAMOND\"}]");
+            assertThat(logData.getPlayer1ItemsJson()).isEqualTo("[{\"type\":\"DIAMOND\"}]");
+        }
+
+        @Test
+        @DisplayName("Should set and get player2ItemsJson directly")
+        void setPlayer2ItemsJson() {
+            logData.setPlayer2ItemsJson("[{\"type\":\"GOLD_INGOT\"}]");
+            assertThat(logData.getPlayer2ItemsJson()).isEqualTo("[{\"type\":\"GOLD_INGOT\"}]");
+        }
+
+        @Test
+        @DisplayName("Should set and get tradeTime")
+        void setTradeTime() {
+            long time = 123456789L;
+            logData.setTradeTime(time);
+            assertThat(logData.getTradeTime()).isEqualTo(time);
+        }
+
+        @Test
+        @DisplayName("Should set and get status")
+        void setStatus() {
+            logData.setStatus("CUSTOM_STATUS");
+            assertThat(logData.getStatus()).isEqualTo("CUSTOM_STATUS");
+        }
+
+        @Test
+        @DisplayName("Should set and get cancelReason")
+        void setCancelReason() {
+            logData.setCancelReason("Custom reason");
+            assertThat(logData.getCancelReason()).isEqualTo("Custom reason");
+        }
+    }
 }

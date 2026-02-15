@@ -88,6 +88,129 @@ class SerializedItemStackTest {
 
             assertThat(serialized.getLore()).containsExactly("Line 1", "Line 2");
         }
+
+        @Test
+        @DisplayName("Should serialize item with enchantments")
+        void itemWithEnchantments() {
+            Enchantment sharpness = mock(Enchantment.class);
+            org.bukkit.NamespacedKey key = mock(org.bukkit.NamespacedKey.class);
+            when(key.getKey()).thenReturn("sharpness");
+            when(sharpness.getKey()).thenReturn(key);
+
+            Map<Enchantment, Integer> enchants = new HashMap<>();
+            enchants.put(sharpness, 5);
+
+            ItemMeta meta = mock(ItemMeta.class);
+
+            ItemStack item = mock(ItemStack.class);
+            when(item.getType()).thenReturn(Material.DIAMOND_SWORD);
+            when(item.getAmount()).thenReturn(1);
+            when(item.getItemMeta()).thenReturn(meta);
+            when(item.getEnchantments()).thenReturn(enchants);
+
+            SerializedItemStack serialized = SerializedItemStack.fromItemStack(item);
+
+            assertThat(serialized.getEnchantments()).containsEntry("sharpness", 5);
+        }
+
+        @Test
+        @DisplayName("Should serialize item with durability")
+        void itemWithDurability() {
+            org.bukkit.inventory.meta.Damageable damageable = mock(org.bukkit.inventory.meta.Damageable.class);
+            // Damageable extends ItemMeta
+            when(damageable.getDamage()).thenReturn(50);
+            when(damageable.hasDisplayName()).thenReturn(false);
+            when(damageable.hasLore()).thenReturn(false);
+            when(damageable.hasCustomModelData()).thenReturn(false);
+            when(damageable.isUnbreakable()).thenReturn(false);
+            when(damageable.getItemFlags()).thenReturn(Collections.emptySet());
+
+            ItemStack item = mock(ItemStack.class);
+            when(item.getType()).thenReturn(Material.DIAMOND_PICKAXE);
+            when(item.getAmount()).thenReturn(1);
+            when(item.getItemMeta()).thenReturn(damageable);
+            when(item.getEnchantments()).thenReturn(Collections.emptyMap());
+
+            SerializedItemStack serialized = SerializedItemStack.fromItemStack(item);
+
+            // Material.DIAMOND_PICKAXE.getMaxDurability() returns the real enum value
+            short expectedMax = Material.DIAMOND_PICKAXE.getMaxDurability();
+            assertThat(serialized.getMaxDurability()).isEqualTo((int) expectedMax);
+            assertThat(serialized.getDurability()).isEqualTo((int) expectedMax - 50);
+        }
+
+        @Test
+        @DisplayName("Should serialize item with custom model data")
+        void itemWithCustomModelData() {
+            ItemMeta meta = mock(ItemMeta.class);
+            when(meta.hasCustomModelData()).thenReturn(true);
+            when(meta.getCustomModelData()).thenReturn(42);
+
+            ItemStack item = mock(ItemStack.class);
+            when(item.getType()).thenReturn(Material.DIAMOND);
+            when(item.getAmount()).thenReturn(1);
+            when(item.getItemMeta()).thenReturn(meta);
+            when(item.getEnchantments()).thenReturn(Collections.emptyMap());
+
+            SerializedItemStack serialized = SerializedItemStack.fromItemStack(item);
+
+            assertThat(serialized.getCustomModelData()).isEqualTo(42);
+        }
+
+        @Test
+        @DisplayName("Should serialize item with item flags")
+        void itemWithItemFlags() {
+            ItemMeta meta = mock(ItemMeta.class);
+            when(meta.getItemFlags()).thenReturn(new java.util.HashSet<>(Arrays.asList(
+                    org.bukkit.inventory.ItemFlag.HIDE_ENCHANTS,
+                    org.bukkit.inventory.ItemFlag.HIDE_ATTRIBUTES
+            )));
+
+            ItemStack item = mock(ItemStack.class);
+            when(item.getType()).thenReturn(Material.DIAMOND_SWORD);
+            when(item.getAmount()).thenReturn(1);
+            when(item.getItemMeta()).thenReturn(meta);
+            when(item.getEnchantments()).thenReturn(Collections.emptyMap());
+
+            SerializedItemStack serialized = SerializedItemStack.fromItemStack(item);
+
+            assertThat(serialized.getItemFlags()).hasSize(2);
+            assertThat(serialized.getItemFlags()).contains("HIDE_ENCHANTS", "HIDE_ATTRIBUTES");
+        }
+
+        @Test
+        @DisplayName("Should serialize unbreakable item")
+        void unbreakableItem() {
+            ItemMeta meta = mock(ItemMeta.class);
+            when(meta.isUnbreakable()).thenReturn(true);
+            when(meta.getItemFlags()).thenReturn(Collections.emptySet());
+
+            ItemStack item = mock(ItemStack.class);
+            when(item.getType()).thenReturn(Material.DIAMOND_SWORD);
+            when(item.getAmount()).thenReturn(1);
+            when(item.getItemMeta()).thenReturn(meta);
+            when(item.getEnchantments()).thenReturn(Collections.emptyMap());
+
+            SerializedItemStack serialized = SerializedItemStack.fromItemStack(item);
+
+            assertThat(serialized.isUnbreakable()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Should handle item with null meta")
+        void nullMeta() {
+            ItemStack item = mock(ItemStack.class);
+            when(item.getType()).thenReturn(Material.DIAMOND);
+            when(item.getAmount()).thenReturn(1);
+            when(item.getItemMeta()).thenReturn(null);
+            when(item.getEnchantments()).thenReturn(Collections.emptyMap());
+
+            SerializedItemStack serialized = SerializedItemStack.fromItemStack(item);
+
+            assertThat(serialized).isNotNull();
+            assertThat(serialized.getType()).isEqualTo("DIAMOND");
+            assertThat(serialized.getDisplayName()).isNull();
+        }
     }
 
     @Nested

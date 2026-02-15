@@ -287,5 +287,104 @@ class PlayerTradeSettingsTest {
             settings.setPlayerName("NewName");
             assertThat(settings.getPlayerName()).isEqualTo("NewName");
         }
+
+        @Test
+        @DisplayName("Should set and get player uuid")
+        void setPlayerUuid() {
+            String newUuid = UUID.randomUUID().toString();
+            settings.setPlayerUuid(newUuid);
+            assertThat(settings.getPlayerUuid()).isEqualTo(newUuid);
+        }
+
+        @Test
+        @DisplayName("Should set and get blocked players json")
+        void setBlockedPlayersJson() {
+            settings.setBlockedPlayersJson("[\"uuid1\",\"uuid2\"]");
+            assertThat(settings.getBlockedPlayersJson()).isEqualTo("[\"uuid1\",\"uuid2\"]");
+        }
+    }
+
+    @Nested
+    @DisplayName("Lombok Equals and HashCode")
+    class EqualsAndHashCode {
+
+        @Test
+        @DisplayName("Should be equal to itself")
+        void equalToSelf() {
+            assertThat(settings).isEqualTo(settings);
+        }
+
+        @Test
+        @DisplayName("Should have consistent hashCode")
+        void consistentHashCode() {
+            int hash1 = settings.hashCode();
+            int hash2 = settings.hashCode();
+            assertThat(hash1).isEqualTo(hash2);
+        }
+
+        @Test
+        @DisplayName("Should not equal null")
+        void notEqualToNull() {
+            assertThat(settings).isNotEqualTo(null);
+        }
+
+        @Test
+        @DisplayName("Should not equal different type")
+        void notEqualToDifferentType() {
+            assertThat(settings).isNotEqualTo("string");
+        }
+
+        @Test
+        @DisplayName("Two instances with same data should be equal")
+        void equalInstances() {
+            PlayerTradeSettings other = new PlayerTradeSettings(playerUuid, "TestPlayer");
+            assertThat(settings).isEqualTo(other);
+        }
+
+        @Test
+        @DisplayName("Different playerUuid should not be equal")
+        void differentUuid() {
+            PlayerTradeSettings other = new PlayerTradeSettings(UUID.randomUUID(), "TestPlayer");
+            assertThat(settings).isNotEqualTo(other);
+        }
+
+        @Test
+        @DisplayName("Different tradeEnabled should not be equal")
+        void differentTradeEnabled() {
+            PlayerTradeSettings other = new PlayerTradeSettings(playerUuid, "TestPlayer");
+            other.setTradeEnabled(false);
+            assertThat(settings).isNotEqualTo(other);
+        }
+
+        @Test
+        @DisplayName("Different totalTrades should not be equal")
+        void differentTotalTrades() {
+            PlayerTradeSettings other = new PlayerTradeSettings(playerUuid, "TestPlayer");
+            other.setTotalTrades(5);
+            assertThat(settings).isNotEqualTo(other);
+        }
+    }
+
+    @Nested
+    @DisplayName("Lombok ToString")
+    class ToString {
+
+        @Test
+        @DisplayName("Should generate toString with field values")
+        void toStringContainsFields() {
+            String str = settings.toString();
+            assertThat(str).isNotNull();
+            assertThat(str).contains("PlayerTradeSettings");
+            assertThat(str).contains(playerUuid.toString());
+            assertThat(str).contains("TestPlayer");
+        }
+
+        @Test
+        @DisplayName("toString should include trade stats")
+        void toStringIncludesStats() {
+            settings.incrementTradeStats(100.0, 50);
+            String str = settings.toString();
+            assertThat(str).contains("totalTrades=1");
+        }
     }
 }
