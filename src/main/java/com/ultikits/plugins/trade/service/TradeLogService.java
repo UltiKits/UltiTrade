@@ -259,7 +259,7 @@ public class TradeLogService {
         
         PlayerTradeSettings settings;
         if (existing != null && !existing.isEmpty()) {
-            settings = existing.get(0);
+            settings = selectCanonicalSettings(existing);
             // Update name if changed
             if (!playerName.equals(settings.getPlayerName())) {
                 settings.setPlayerName(playerName);
@@ -292,12 +292,18 @@ public class TradeLogService {
             .list();
         
         if (existing != null && !existing.isEmpty()) {
-            PlayerTradeSettings settings = existing.get(0);
+            PlayerTradeSettings settings = selectCanonicalSettings(existing);
             settingsCache.put(playerUuid, settings);
             return settings;
         }
         
         return null;
+    }
+
+    private PlayerTradeSettings selectCanonicalSettings(List<PlayerTradeSettings> existing) {
+        return existing.stream()
+            .min(Comparator.comparing(PlayerTradeSettings::getId, Comparator.nullsLast(String::compareTo)))
+            .orElse(existing.get(0));
     }
     
     /**

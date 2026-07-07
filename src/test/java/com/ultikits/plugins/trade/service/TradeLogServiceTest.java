@@ -76,6 +76,25 @@ class TradeLogServiceTest {
         }
 
         @Test
+        @DisplayName("getOrCreateSettings should select canonical lowest-id settings when duplicate rows exist")
+        void getOrCreateSettingsDuplicateRowsSelectLowestId() {
+            PlayerTradeSettings duplicate = new PlayerTradeSettings(playerUuid, "Duplicate");
+            duplicate.setId("settings-200");
+            PlayerTradeSettings canonical = new PlayerTradeSettings(playerUuid, "TestPlayer");
+            canonical.setId("settings-100");
+            when(settingsOperator.query()).thenReturn(queryBuilder);
+        when(queryBuilder.where(anyString())).thenReturn(queryBuilder);
+        when(queryBuilder.eq(any())).thenReturn(queryBuilder);
+        when(queryBuilder.list())
+                    .thenReturn(Arrays.asList(duplicate, canonical));
+
+            PlayerTradeSettings result = service.getOrCreateSettings(playerUuid, "TestPlayer");
+
+            assertThat(result).isSameAs(canonical);
+            verify(settingsOperator, never()).insert(any());
+        }
+
+        @Test
         @DisplayName("getOrCreateSettings should create new settings if not found")
         void createNewSettings() {
             when(settingsOperator.query()).thenReturn(queryBuilder);
@@ -179,6 +198,24 @@ class TradeLogServiceTest {
             PlayerTradeSettings result = service.getSettings(playerUuid);
 
             assertThat(result).isSameAs(existing);
+        }
+
+        @Test
+        @DisplayName("getSettings should select canonical lowest-id settings when duplicate rows exist")
+        void getSettingsDuplicateRowsSelectLowestId() {
+            PlayerTradeSettings duplicate = new PlayerTradeSettings(playerUuid, "Duplicate");
+            duplicate.setId("settings-200");
+            PlayerTradeSettings canonical = new PlayerTradeSettings(playerUuid, "TestPlayer");
+            canonical.setId("settings-100");
+            when(settingsOperator.query()).thenReturn(queryBuilder);
+        when(queryBuilder.where(anyString())).thenReturn(queryBuilder);
+        when(queryBuilder.eq(any())).thenReturn(queryBuilder);
+        when(queryBuilder.list())
+                    .thenReturn(Arrays.asList(duplicate, canonical));
+
+            PlayerTradeSettings result = service.getSettings(playerUuid);
+
+            assertThat(result).isSameAs(canonical);
         }
 
         @Test
