@@ -142,7 +142,7 @@ enableClickableButtons: true # 启用聊天可点击按钮
 
 ## 🔧 技术架构
 
-- **框架**: UltiTools-API 6.2.0+
+- **框架**: UltiTools-API 6.2.1+
 - **注解驱动**: `@Service`, `@Autowired`, `@CmdMapping`, `@Table`, `@Scheduled`
 - **数据持久化**: Query DSL + DataOperator ORM
 - **依赖注入**: UltiTools IoC 容器
