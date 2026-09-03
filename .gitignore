@@ -29,4 +29,8 @@ target/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Tooling artifacts
+.factorypath
+PROJECT.md
 CLAUDE.md
