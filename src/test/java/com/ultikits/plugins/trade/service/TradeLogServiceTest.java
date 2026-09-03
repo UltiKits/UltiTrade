@@ -867,4 +867,116 @@ class TradeLogServiceTest {
             captor.getValue().run();
         }
     }
+
+    @Nested
+    @DisplayName("Init and Cleanup Scheduling")
+    class InitAndCleanupScheduling {
+
+        @Test
+        @DisplayName("init should wire the data operators and schedule cleanup when trade logging is enabled")
+        void initSchedulesCleanupWhenEnabled() throws Exception {
+            when(config.isEnableTradeLog()).thenReturn(true);
+            when(config.getCleanupIntervalHours()).thenReturn(24);
+
+            service.init();
+
+            verify(UltiTradeTestHelper.getMockPlugin()).getDataOperator(TradeLogData.class);
+            verify(UltiTradeTestHelper.getMockPlugin()).getDataOperator(PlayerTradeSettings.class);
+
+            long expectedTicks = 24L * 60L * 60L * 20L;
+            verify(org.bukkit.Bukkit.getServer().getScheduler()).runTaskTimerAsynchronously(
+                    any(), any(Runnable.class), eq(expectedTicks), eq(expectedTicks));
+        }
+
+        @Test
+        @DisplayName("init should skip cleanup scheduling entirely when trade logging is disabled")
+        void initSkipsCleanupWhenDisabled() throws Exception {
+            when(config.isEnableTradeLog()).thenReturn(false);
+
+            service.init();
+
+            verify(org.bukkit.Bukkit.getServer().getScheduler(), never())
+                    .runTaskTimerAsynchronously(any(), any(Runnable.class), anyLong(), anyLong());
+        }
+    }
+
+    @Nested
+    @DisplayName("Cleanup Old Logs")
+    class CleanupOldLogs {
+
+        /**
+         * Captures the runnable init() schedules for periodic cleanup and returns it,
+         * without actually running it yet.
+         */
+        private Runnable scheduleAndCaptureCleanupTask() throws Exception {
+            when(config.isEnableTradeLog()).thenReturn(true);
+            // init() re-wires logOperator/settingsOperator from plugin.getDataOperator(...),
+            // which would otherwise replace this test's own logOperator mock with a fresh one
+            // that verify() calls below can never see.
+            when(UltiTradeTestHelper.getMockPlugin().getDataOperator(TradeLogData.class))
+                    .thenReturn(logOperator);
+
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            org.mockito.ArgumentCaptor<Runnable> captor = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+
+            service.init();
+
+            verify(scheduler).runTaskTimerAsynchronously(any(), captor.capture(), anyLong(), anyLong());
+            return captor.getValue();
+        }
+
+        @Test
+        @DisplayName("cleanupOldLogs should delete only logs older than the retention window and report the count")
+        void deletesExpiredLogsOnly() throws Exception {
+            when(config.getLogRetentionDays()).thenReturn(30);
+            Runnable cleanupTask = scheduleAndCaptureCleanupTask();
+
+            TradeLogData expired = mock(TradeLogData.class);
+            when(expired.getTradeTime()).thenReturn(System.currentTimeMillis() - 40L * 24 * 60 * 60 * 1000);
+            when(expired.getId()).thenReturn("expired-log");
+
+            TradeLogData fresh = mock(TradeLogData.class);
+            when(fresh.getTradeTime()).thenReturn(System.currentTimeMillis());
+            when(fresh.getId()).thenReturn("fresh-log");
+
+            when(logOperator.getAll()).thenReturn(Arrays.asList(expired, fresh));
+
+            cleanupTask.run();
+
+            verify(logOperator).delById("expired-log");
+            verify(logOperator, never()).delById("fresh-log");
+            verify(UltiTradeTestHelper.getMockLogger()).info(contains("1"));
+        }
+
+        @Test
+        @DisplayName("cleanupOldLogs should not log anything when no logs are expired")
+        void reportsNothingWhenNoneExpired() throws Exception {
+            when(config.getLogRetentionDays()).thenReturn(30);
+            Runnable cleanupTask = scheduleAndCaptureCleanupTask();
+
+            TradeLogData fresh = mock(TradeLogData.class);
+            when(fresh.getTradeTime()).thenReturn(System.currentTimeMillis());
+
+            when(logOperator.getAll()).thenReturn(Collections.singletonList(fresh));
+
+            cleanupTask.run();
+
+            verify(logOperator, never()).delById(any());
+            verify(UltiTradeTestHelper.getMockLogger(), never()).info(anyString());
+        }
+
+        @Test
+        @DisplayName("cleanupOldLogs should swallow a data-layer exception without propagating it")
+        void swallowsDataLayerException() throws Exception {
+            when(config.getLogRetentionDays()).thenReturn(30);
+            Runnable cleanupTask = scheduleAndCaptureCleanupTask();
+
+            when(logOperator.getAll()).thenThrow(new RuntimeException("DB unavailable"));
+
+            // Should not throw
+            cleanupTask.run();
+
+            verify(UltiTradeTestHelper.getMockLogger()).warn(any(Exception.class), anyString());
+        }
+    }
 }
