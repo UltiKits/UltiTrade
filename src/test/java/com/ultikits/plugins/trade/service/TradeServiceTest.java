@@ -1640,6 +1640,13 @@ class TradeServiceTest {
 
             service.init();
 
+            // Positively prove the mid-branch was reached: `economy` starts null and
+            // hasEconomy() is already false in the initial state, so the end-state
+            // assertion alone would also pass under a mutation that short-circuits
+            // setupEconomy() right after the Vault-presence check, never reaching the
+            // registration lookup. Mirrors initMoneyTradeDisabled's never()-call proof
+            // for the opposite branch.
+            verify(server.getServicesManager()).getRegistration(Economy.class);
             assertThat(service.hasEconomy()).isFalse();
         }
 
