@@ -160,6 +160,16 @@ class TradeSessionTest {
         }
 
         @Test
+        @DisplayName("setItem with null should remove player2's item")
+        void removeItemPlayer2() {
+            ItemStack item = new ItemStack(Material.GOLD_INGOT, 5);
+            session.setItem(uuid2, 1, item);
+            session.setItem(uuid2, 1, null);
+
+            assertThat(session.getPlayerItems(uuid2)).doesNotContainKey(1);
+        }
+
+        @Test
         @DisplayName("setItem should reset confirmation")
         void resetConfirmationOnSetItem() {
             session.setConfirmed(uuid1, true);

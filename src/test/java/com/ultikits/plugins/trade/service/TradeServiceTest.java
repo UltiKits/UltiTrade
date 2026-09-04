@@ -1607,4 +1607,265 @@ class TradeServiceTest {
             assertThat(tasks).isEmpty();
         }
     }
+
+    @Nested
+    @DisplayName("Init and Economy Setup")
+    class InitAndEconomySetup {
+
+        @Test
+        @DisplayName("init should warn and leave economy unset when Vault plugin is absent")
+        void initWithoutVault() throws Exception {
+            UltiTradeTestHelper.setField(service, "plugin", UltiTradeTestHelper.getMockPlugin());
+            UltiTradeTestHelper.setField(service, "economy", null);
+            when(config.isEnableMoneyTrade()).thenReturn(true);
+            // Vault absent: PluginManager.getPlugin("Vault") returns null by default
+
+            service.init();
+
+            assertThat(service.hasEconomy()).isFalse();
+            verify(UltiTradeTestHelper.getMockLogger()).warn("Vault not found! Money trading disabled.");
+        }
+
+        @Test
+        @DisplayName("init should leave economy unset when Vault is present but no provider is registered")
+        void initVaultPresentNoProvider() throws Exception {
+            UltiTradeTestHelper.setField(service, "plugin", UltiTradeTestHelper.getMockPlugin());
+            UltiTradeTestHelper.setField(service, "economy", null);
+            when(config.isEnableMoneyTrade()).thenReturn(true);
+
+            org.bukkit.plugin.Plugin vaultPlugin = mock(org.bukkit.plugin.Plugin.class);
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPluginManager().getPlugin("Vault")).thenReturn(vaultPlugin);
+            when(server.getServicesManager().getRegistration(Economy.class)).thenReturn(null);
+
+            service.init();
+
+            // Positively prove the mid-branch was reached: `economy` starts null and
+            // hasEconomy() is already false in the initial state, so the end-state
+            // assertion alone would also pass under a mutation that short-circuits
+            // setupEconomy() right after the Vault-presence check, never reaching the
+            // registration lookup. Mirrors initMoneyTradeDisabled's never()-call proof
+            // for the opposite branch.
+            verify(server.getServicesManager()).getRegistration(Economy.class);
+            assertThat(service.hasEconomy()).isFalse();
+        }
+
+        @Test
+        @DisplayName("init should adopt the registered Vault economy provider when one is available")
+        void initVaultPresentWithProvider() throws Exception {
+            UltiTradeTestHelper.setField(service, "plugin", UltiTradeTestHelper.getMockPlugin());
+            UltiTradeTestHelper.setField(service, "economy", null);
+            when(config.isEnableMoneyTrade()).thenReturn(true);
+
+            org.bukkit.plugin.Plugin vaultPlugin = mock(org.bukkit.plugin.Plugin.class);
+            Economy vaultEconomy = mock(Economy.class);
+            @SuppressWarnings("unchecked")
+            org.bukkit.plugin.RegisteredServiceProvider<Economy> registration =
+                    mock(org.bukkit.plugin.RegisteredServiceProvider.class);
+            when(registration.getProvider()).thenReturn(vaultEconomy);
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPluginManager().getPlugin("Vault")).thenReturn(vaultPlugin);
+            when(server.getServicesManager().getRegistration(Economy.class)).thenReturn(registration);
+
+            service.init();
+
+            assertThat(service.hasEconomy()).isTrue();
+            assertThat(service.getEconomy()).isSameAs(vaultEconomy);
+        }
+
+        @Test
+        @DisplayName("init should skip economy setup entirely when money trading is disabled")
+        void initMoneyTradeDisabled() throws Exception {
+            UltiTradeTestHelper.setField(service, "plugin", UltiTradeTestHelper.getMockPlugin());
+            UltiTradeTestHelper.setField(service, "economy", null);
+            when(config.isEnableMoneyTrade()).thenReturn(false);
+
+            org.bukkit.plugin.Plugin vaultPlugin = mock(org.bukkit.plugin.Plugin.class);
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPluginManager().getPlugin("Vault")).thenReturn(vaultPlugin);
+
+            service.init();
+
+            // If setupEconomy() had run, Vault's presence alone would have triggered a
+            // services-manager lookup regardless of whether a provider exists; proving that
+            // lookup never happened is what shows the whole method was skipped, not just its
+            // outcome.
+            verify(server.getServicesManager(), never()).getRegistration(any());
+            assertThat(service.hasEconomy()).isFalse();
+        }
+    }
+
+    @Nested
+    @DisplayName("Request BossBar Countdown")
+    class RequestBossBarCountdown {
+
+        @Test
+        @DisplayName("countdown turns the bar pink between six and ten seconds remaining")
+        void countdownTurnsPinkNearExpiry() throws Exception {
+            when(config.getMaxDistance()).thenReturn(0);
+            when(config.getRequestTimeout()).thenReturn(11);
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            org.bukkit.boss.BossBar bar = mock(org.bukkit.boss.BossBar.class);
+            when(server.createBossBar(anyString(), any(org.bukkit.boss.BarColor.class), any(org.bukkit.boss.BarStyle.class)))
+                    .thenReturn(bar);
+
+            org.bukkit.scheduler.BukkitScheduler scheduler = server.getScheduler();
+            org.mockito.ArgumentCaptor<Runnable> captor = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+
+            service.sendRequest(player1, player2);
+
+            verify(scheduler).runTaskTimer(any(), captor.capture(), anyLong(), anyLong());
+
+            // First tick: 11 - 1 = 10 seconds remaining -> pink, not yet red
+            captor.getValue().run();
+
+            verify(bar).setColor(org.bukkit.boss.BarColor.PINK);
+            verify(bar, never()).setColor(org.bukkit.boss.BarColor.RED);
+        }
+
+        @Test
+        @DisplayName("countdown turns the bar red within the final five seconds")
+        void countdownTurnsRedNearExpiry() throws Exception {
+            when(config.getMaxDistance()).thenReturn(0);
+            when(config.getRequestTimeout()).thenReturn(6);
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            org.bukkit.boss.BossBar bar = mock(org.bukkit.boss.BossBar.class);
+            when(server.createBossBar(anyString(), any(org.bukkit.boss.BarColor.class), any(org.bukkit.boss.BarStyle.class)))
+                    .thenReturn(bar);
+
+            org.bukkit.scheduler.BukkitScheduler scheduler = server.getScheduler();
+            org.mockito.ArgumentCaptor<Runnable> captor = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+
+            service.sendRequest(player1, player2);
+
+            verify(scheduler).runTaskTimer(any(), captor.capture(), anyLong(), anyLong());
+
+            // First tick: 6 - 1 = 5 seconds remaining -> red
+            captor.getValue().run();
+
+            verify(bar).setColor(org.bukkit.boss.BarColor.RED);
+        }
+
+        @Test
+        @DisplayName("countdown removes the boss bar and cancels its task when time expires")
+        void countdownExpiryRemovesBar() throws Exception {
+            when(config.getMaxDistance()).thenReturn(0);
+            when(config.getRequestTimeout()).thenReturn(1);
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            org.bukkit.boss.BossBar bar = mock(org.bukkit.boss.BossBar.class);
+            when(server.createBossBar(anyString(), any(org.bukkit.boss.BarColor.class), any(org.bukkit.boss.BarStyle.class)))
+                    .thenReturn(bar);
+
+            org.bukkit.scheduler.BukkitScheduler scheduler = server.getScheduler();
+            org.mockito.ArgumentCaptor<Runnable> captor = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+
+            service.sendRequest(player1, player2);
+
+            verify(scheduler).runTaskTimer(any(), captor.capture(), anyLong(), anyLong());
+
+            Map<UUID, org.bukkit.scheduler.BukkitTask> bossBarTasks =
+                    UltiTradeTestHelper.getField(service, "bossBarTasks");
+            org.bukkit.scheduler.BukkitTask task = bossBarTasks.get(uuid2);
+
+            // First tick: 1 - 1 = 0 seconds remaining -> expiry
+            captor.getValue().run();
+
+            verify(bar).removeAll();
+            verify(task).cancel();
+
+            Map<UUID, org.bukkit.boss.BossBar> requestBossBars =
+                    UltiTradeTestHelper.getField(service, "requestBossBars");
+            assertThat(requestBossBars).doesNotContainKey(uuid2);
+            assertThat(bossBarTasks).doesNotContainKey(uuid2);
+        }
+    }
+
+    @Nested
+    @DisplayName("Accept Request - Additional Paths")
+    class AcceptRequestAdditional {
+
+        @Test
+        @DisplayName("acceptRequest should start the trade when the requester is online")
+        void acceptRequestStartsTrade() throws Exception {
+            Map<UUID, TradeRequest> pendingRequests = UltiTradeTestHelper.getField(service, "pendingRequests");
+            TradeRequest request = new TradeRequest(uuid2, uuid1);
+            pendingRequests.put(uuid1, request);
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+            when(player2.isOnline()).thenReturn(true);
+
+            boolean result = service.acceptRequest(player1);
+
+            assertThat(result).isTrue();
+            assertThat(service.isTrading(uuid1)).isTrue();
+            assertThat(service.isTrading(uuid2)).isTrue();
+            verify(player1).openInventory(any(org.bukkit.inventory.Inventory.class));
+            verify(player2).openInventory(any(org.bukkit.inventory.Inventory.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("Complete/Cancel Trade - Player2 Overflow Mirror")
+    class OverflowMirror {
+
+        @Test
+        @DisplayName("completeTrade should drop player2's overflowed items onto player1 when player1's inventory is full")
+        void completeTradeOverflowFromPlayer2() throws Exception {
+            when(config.isEnableExpTrade()).thenReturn(false);
+
+            TradeSession session = new TradeSession(player1, player2);
+            ItemStack emerald = new ItemStack(Material.EMERALD, 64);
+            session.setItem(uuid2, 0, emerald);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            HashMap<Integer, ItemStack> overflow = new HashMap<>();
+            overflow.put(0, emerald);
+            when(player1.getInventory().addItem(any(ItemStack.class))).thenReturn(overflow);
+
+            service.completeTrade(session);
+
+            verify(player1.getWorld()).dropItemNaturally(eq(player1.getLocation()), eq(emerald));
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.COMPLETED);
+        }
+
+        @Test
+        @DisplayName("cancelTrade should drop player2's overflowed items back to player2 when their inventory is full")
+        void cancelTradeOverflowFromPlayer2() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            ItemStack emerald = new ItemStack(Material.EMERALD, 64);
+            session.setItem(uuid2, 0, emerald);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            HashMap<Integer, ItemStack> overflow = new HashMap<>();
+            overflow.put(0, emerald);
+            when(player2.getInventory().addItem(any(ItemStack.class))).thenReturn(overflow);
+
+            service.cancelTrade(session, "test");
+
+            verify(player2.getWorld()).dropItemNaturally(eq(player2.getLocation()), eq(emerald));
+        }
+    }
 }
