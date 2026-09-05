@@ -1,6 +1,5 @@
 package com.ultikits.plugins.trade.entity;
 
-import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.junit.jupiter.api.*;
@@ -127,10 +126,21 @@ class TradeSessionTest {
     @DisplayName("Item Management")
     class ItemManagement {
 
+        // TradeSession is a plain POJO (Map<Integer, ItemStack> storage) — it never touches a
+        // Bukkit registry. Per the phase's triage rule (14-CONTEXT.md), the registry access these
+        // tests used to hit came only from this test's own fixture construction
+        // (new ItemStack(Material.X) is registry-backed as of Paper 1.21), not from any production
+        // code path — confirmed by isolating this class (`mvn -B test -Dtest=TradeSessionTest`)
+        // both before and after this fix: the production class under test never references
+        // Material/Registry/ItemStack construction anywhere. Fixture-only, per CONTEXT.md's own
+        // precedent (UltiBot's DamageSource.builder(...) -> mock(DamageSource.class)): replaced
+        // with mock(ItemStack.class), which needs no live server, since every assertion below only
+        // needs a distinguishable opaque value stored in and retrieved from a Map.
+
         @Test
         @DisplayName("setItem should add item for player1")
         void setItemPlayer1() {
-            ItemStack item = new ItemStack(Material.DIAMOND, 10);
+            ItemStack item = mock(ItemStack.class);
             session.setItem(uuid1, 0, item);
 
             Map<Integer, ItemStack> items = session.getPlayerItems(uuid1);
@@ -141,7 +151,7 @@ class TradeSessionTest {
         @Test
         @DisplayName("setItem should add item for player2")
         void setItemPlayer2() {
-            ItemStack item = new ItemStack(Material.GOLD_INGOT, 5);
+            ItemStack item = mock(ItemStack.class);
             session.setItem(uuid2, 1, item);
 
             Map<Integer, ItemStack> items = session.getPlayerItems(uuid2);
@@ -152,7 +162,7 @@ class TradeSessionTest {
         @Test
         @DisplayName("setItem with null should remove item")
         void removeItem() {
-            ItemStack item = new ItemStack(Material.DIAMOND, 10);
+            ItemStack item = mock(ItemStack.class);
             session.setItem(uuid1, 0, item);
             session.setItem(uuid1, 0, null);
 
@@ -162,7 +172,7 @@ class TradeSessionTest {
         @Test
         @DisplayName("setItem with null should remove player2's item")
         void removeItemPlayer2() {
-            ItemStack item = new ItemStack(Material.GOLD_INGOT, 5);
+            ItemStack item = mock(ItemStack.class);
             session.setItem(uuid2, 1, item);
             session.setItem(uuid2, 1, null);
 
@@ -175,7 +185,7 @@ class TradeSessionTest {
             session.setConfirmed(uuid1, true);
             session.setConfirmed(uuid2, true);
 
-            session.setItem(uuid1, 0, new ItemStack(Material.DIAMOND));
+            session.setItem(uuid1, 0, mock(ItemStack.class));
 
             assertThat(session.isConfirmed(uuid1)).isFalse();
             assertThat(session.isConfirmed(uuid2)).isFalse();
@@ -184,7 +194,7 @@ class TradeSessionTest {
         @Test
         @DisplayName("getOtherPlayerItems should return correct items")
         void getOtherPlayerItems() {
-            ItemStack item = new ItemStack(Material.DIAMOND, 10);
+            ItemStack item = mock(ItemStack.class);
             session.setItem(uuid1, 0, item);
 
             Map<Integer, ItemStack> otherItems = session.getOtherPlayerItems(uuid2);
@@ -195,9 +205,9 @@ class TradeSessionTest {
         @Test
         @DisplayName("Should handle multiple items per player")
         void multipleItems() {
-            session.setItem(uuid1, 0, new ItemStack(Material.DIAMOND, 10));
-            session.setItem(uuid1, 1, new ItemStack(Material.GOLD_INGOT, 5));
-            session.setItem(uuid2, 0, new ItemStack(Material.EMERALD, 3));
+            session.setItem(uuid1, 0, mock(ItemStack.class));
+            session.setItem(uuid1, 1, mock(ItemStack.class));
+            session.setItem(uuid2, 0, mock(ItemStack.class));
 
             assertThat(session.getPlayerItems(uuid1)).hasSize(2);
             assertThat(session.getPlayerItems(uuid2)).hasSize(1);
