@@ -4,6 +4,7 @@ import com.ultikits.plugins.trade.UltiTradeTestHelper;
 import com.ultikits.plugins.trade.config.TradeConfig;
 import com.ultikits.plugins.trade.entity.TradeRequest;
 import com.ultikits.plugins.trade.entity.TradeSession;
+import com.cryptomorin.xseries.particles.XParticle;
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -1326,8 +1327,8 @@ class TradeServiceTest {
             verify(player1).playSound(any(Location.class), eq(org.bukkit.Sound.ENTITY_PLAYER_LEVELUP), eq(1.0f), eq(1.0f));
             verify(player2).playSound(any(Location.class), eq(org.bukkit.Sound.ENTITY_PLAYER_LEVELUP), eq(1.0f), eq(1.0f));
             // Verify particles spawned
-            verify(player1.getWorld()).spawnParticle(eq(org.bukkit.Particle.VILLAGER_HAPPY), any(Location.class), anyInt(), anyDouble(), anyDouble(), anyDouble(), anyDouble());
-            verify(player2.getWorld()).spawnParticle(eq(org.bukkit.Particle.VILLAGER_HAPPY), any(Location.class), anyInt(), anyDouble(), anyDouble(), anyDouble(), anyDouble());
+            verify(player1.getWorld()).spawnParticle(eq(XParticle.HAPPY_VILLAGER.get()), any(Location.class), anyInt(), anyDouble(), anyDouble(), anyDouble(), anyDouble());
+            verify(player2.getWorld()).spawnParticle(eq(XParticle.HAPPY_VILLAGER.get()), any(Location.class), anyInt(), anyDouble(), anyDouble(), anyDouble(), anyDouble());
         }
 
         @Test
@@ -1476,7 +1477,7 @@ class TradeServiceTest {
             service.cancelTrade(session, "test");
 
             verify(player1).playSound(any(Location.class), eq(org.bukkit.Sound.ENTITY_VILLAGER_NO), eq(1.0f), eq(1.0f));
-            verify(player1.getWorld()).spawnParticle(eq(org.bukkit.Particle.SMOKE_NORMAL), any(Location.class), anyInt(), anyDouble(), anyDouble(), anyDouble(), anyDouble());
+            verify(player1.getWorld()).spawnParticle(eq(XParticle.SMOKE.get()), any(Location.class), anyInt(), anyDouble(), anyDouble(), anyDouble(), anyDouble());
         }
     }
 

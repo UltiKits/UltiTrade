@@ -10,6 +10,7 @@ import com.ultikits.ultitools.annotations.Autowired;
 import com.ultikits.ultitools.annotations.Scheduled;
 import com.ultikits.ultitools.annotations.Service;
 
+import com.cryptomorin.xseries.particles.XParticle;
 import net.md_5.bungee.api.chat.ClickEvent;
 import net.md_5.bungee.api.chat.HoverEvent;
 import net.md_5.bungee.api.chat.TextComponent;
@@ -730,22 +731,32 @@ public class TradeService {
         
         if (config.isEnableParticles()) {
             Location loc = player.getLocation().add(0, 1, 0);
-            player.getWorld().spawnParticle(Particle.VILLAGER_HAPPY, loc, 30, 0.5, 0.5, 0.5, 0.1);
+            Particle happyVillager = XParticle.HAPPY_VILLAGER.get();
+            if (happyVillager != null) {
+                player.getWorld().spawnParticle(happyVillager, loc, 30, 0.5, 0.5, 0.5, 0.1);
+            } else {
+                plugin.getLogger().warn("XParticle.HAPPY_VILLAGER resolved to null on this server version; skipping success particle effect.");
+            }
             player.getWorld().spawnParticle(Particle.END_ROD, loc, 15, 0.3, 0.5, 0.3, 0.05);
         }
     }
-    
+
     /**
      * Play fail effects (sound + particles).
      */
     private void playFailEffects(Player player) {
         if (player == null) return;
-        
+
         playSound(player, Sound.ENTITY_VILLAGER_NO);
-        
+
         if (config.isEnableParticles()) {
             Location loc = player.getLocation().add(0, 1, 0);
-            player.getWorld().spawnParticle(Particle.SMOKE_NORMAL, loc, 20, 0.3, 0.3, 0.3, 0.05);
+            Particle smoke = XParticle.SMOKE.get();
+            if (smoke != null) {
+                player.getWorld().spawnParticle(smoke, loc, 20, 0.3, 0.3, 0.3, 0.05);
+            } else {
+                plugin.getLogger().warn("XParticle.SMOKE resolved to null on this server version; skipping fail particle effect.");
+            }
         }
     }
     
