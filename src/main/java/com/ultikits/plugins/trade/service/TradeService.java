@@ -10,6 +10,7 @@ import com.ultikits.ultitools.annotations.Autowired;
 import com.ultikits.ultitools.annotations.Scheduled;
 import com.ultikits.ultitools.annotations.Service;
 
+import com.cryptomorin.xseries.particles.XParticle;
 import net.md_5.bungee.api.chat.ClickEvent;
 import net.md_5.bungee.api.chat.HoverEvent;
 import net.md_5.bungee.api.chat.TextComponent;
@@ -730,7 +731,7 @@ public class TradeService {
         
         if (config.isEnableParticles()) {
             Location loc = player.getLocation().add(0, 1, 0);
-            player.getWorld().spawnParticle(Particle.VILLAGER_HAPPY, loc, 30, 0.5, 0.5, 0.5, 0.1);
+            player.getWorld().spawnParticle(XParticle.HAPPY_VILLAGER.get(), loc, 30, 0.5, 0.5, 0.5, 0.1);
             player.getWorld().spawnParticle(Particle.END_ROD, loc, 15, 0.3, 0.5, 0.3, 0.05);
         }
     }
@@ -745,7 +746,7 @@ public class TradeService {
         
         if (config.isEnableParticles()) {
             Location loc = player.getLocation().add(0, 1, 0);
-            player.getWorld().spawnParticle(Particle.SMOKE_NORMAL, loc, 20, 0.3, 0.3, 0.3, 0.05);
+            player.getWorld().spawnParticle(XParticle.SMOKE.get(), loc, 20, 0.3, 0.3, 0.3, 0.05);
         }
     }
     
