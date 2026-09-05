@@ -12,7 +12,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        java-version: ['17', '21']
+        # JDK 17 was dropped here: paper-api 1.21.11's class files are bytecode version 65
+        # (Java 21). A JDK 17 javac cannot even read them ("bad class file ... wrong version
+        # 65.0, should be 61.0"), so that leg failed at compilation, not at the tests this
+        # migration expects to be red. Bytecode output stays Java 8 (pom's <source>/<target>);
+        # only the toolchain needs to be 21, matching the framework's own build (see root
+        # UltiTools-Reborn CLAUDE.md, "Java 8 bytecode, JDK 21 toolchain").
+        java-version: ['21']
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
