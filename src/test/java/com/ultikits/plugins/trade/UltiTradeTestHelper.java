@@ -14,7 +14,6 @@ import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
 import org.bukkit.entity.Player;
-import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.ItemFactory;
 import org.bukkit.inventory.PlayerInventory;
@@ -24,6 +23,12 @@ import org.bukkit.plugin.ServicesManager;
 import org.bukkit.scheduler.BukkitScheduler;
 
 import org.bukkit.scheduler.BukkitTask;
+import org.mockbukkit.mockbukkit.MockBukkit;
+import org.mockbukkit.mockbukkit.ServerMock;
+import org.mockbukkit.mockbukkit.inventory.InventoryMock;
+import org.mockbukkit.mockbukkit.plugin.PluginManagerMock;
+import org.mockbukkit.mockbukkit.scheduler.BukkitSchedulerMock;
+import org.mockbukkit.mockbukkit.services.ServicesManagerMock;
 
 import java.lang.reflect.Field;
 import java.util.UUID;
@@ -73,16 +78,38 @@ public final class UltiTradeTestHelper {
     }
 
     /**
-     * Set up a minimal Bukkit server mock so that Bukkit static methods work.
+     * Set up a live test-time Bukkit server so that registry-backed production code (real
+     * {@code ItemStack} construction, {@code Sound}, {@code Enchantment}, {@code Bukkit.getUnsafe()})
+     * resolves, while every existing {@code when(server.getX())} call site in this module's test
+     * suite keeps working exactly as before.
+     * <p>
+     * {@code MockBukkit.mock()} returns a real, functioning {@link ServerMock} — {@code Registry}/
+     * {@code Material}/{@code Sound} resolution and real {@code ItemStack} construction both need
+     * this live instance, not a bare Mockito mock (measured: a bare {@code mock(Server.class)}
+     * cannot satisfy {@code Bukkit.getTag(...)}, which Paper 1.21's registry population calls
+     * internally). Wrapping the live server in a Mockito {@code spy()} lets every method this test
+     * suite already stubs (scheduler, item factory, boss bars, {@code getPlayer(uuid)}, ...)
+     * continue to be stubbed with {@code when(...)}, while every other method — in particular the
+     * registry/tag resolution production code needs — delegates to the real, working
+     * implementation instead of a bare mock returning {@code null}.
      */
     private static void setupBukkitServer() throws Exception {
-        Server server = mock(Server.class);
-        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        MockBukkitSupport.ensureCleanState();
+        ServerMock realServer = MockBukkit.mock();
+        Server server = spy(realServer);
+        // ServerMock.getScheduler() has a covariant return type (BukkitSchedulerMock, not the bare
+        // BukkitScheduler interface) — Mockito's spy stubbing enforces the concrete method's actual
+        // declared return type, so the stub value must itself be a BukkitSchedulerMock or the stub
+        // is rejected with "WrongTypeOfReturnValue ... should return BukkitSchedulerMock" (measured).
+        BukkitScheduler scheduler = mock(BukkitSchedulerMock.class);
         ItemFactory itemFactory = mock(ItemFactory.class);
 
-        PluginManager pluginManager = mock(PluginManager.class);
+        // getPluginManager()/getServicesManager()/createInventory(...) are likewise covariant on
+        // ServerMock (PluginManagerMock/ServicesManagerMock/InventoryMock respectively) — same
+        // reasoning as the scheduler above.
+        PluginManager pluginManager = mock(PluginManagerMock.class);
 
-        ServicesManager servicesManager = mock(ServicesManager.class);
+        ServicesManager servicesManager = mock(ServicesManagerMock.class);
         BossBar mockBossBar = mock(BossBar.class);
 
         BukkitTask mockBukkitTask = mock(BukkitTask.class);
@@ -93,15 +120,20 @@ public final class UltiTradeTestHelper {
         lenient().when(scheduler.runTaskLater(any(), any(Runnable.class), anyLong()))
                 .thenReturn(mockBukkitTask);
 
-        lenient().when(server.getScheduler()).thenReturn(scheduler);
-        lenient().when(server.getItemFactory()).thenReturn(itemFactory);
-        lenient().when(server.getPluginManager()).thenReturn(pluginManager);
-        lenient().when(server.getServicesManager()).thenReturn(servicesManager);
-        lenient().when(server.getLogger()).thenReturn(Logger.getLogger("MockBukkit"));
-        lenient().when(server.createBossBar(anyString(), any(BarColor.class), any(BarStyle.class)))
-                .thenReturn(mockBossBar);
-        lenient().when(server.createInventory(any(), anyInt(), anyString()))
-                .thenReturn(mock(Inventory.class));
+        // NOTE: server is a spy() over a real, live MockBukkit ServerMock (not a bare mock()).
+        // when(spy.method()) invokes the REAL method first, which corrupts Mockito's return-type
+        // tracking once a later thenReturn(...) supplies a different concrete type (measured:
+        // "WrongTypeOfReturnValue ... cannot be returned by getScheduler()"). doReturn(...).when(spy)
+        // never invokes the real method, which is the documented-safe way to stub a spy.
+        lenient().doReturn(scheduler).when(server).getScheduler();
+        lenient().doReturn(itemFactory).when(server).getItemFactory();
+        lenient().doReturn(pluginManager).when(server).getPluginManager();
+        lenient().doReturn(servicesManager).when(server).getServicesManager();
+        lenient().doReturn(Logger.getLogger("MockBukkit")).when(server).getLogger();
+        lenient().doReturn(mockBossBar).when(server)
+                .createBossBar(anyString(), any(BarColor.class), any(BarStyle.class));
+        lenient().doReturn(mock(InventoryMock.class)).when(server)
+                .createInventory(any(), anyInt(), anyString());
         lenient().when(itemFactory.isApplicable(any(), any(ItemStack.class))).thenReturn(true);
 
         // Return a mock ItemMeta so that ItemStack.getItemMeta() is non-null
@@ -115,7 +147,7 @@ public final class UltiTradeTestHelper {
      * Clean up state.
      */
     public static void tearDown() throws Exception {
-        setStaticField(Bukkit.class, "server", null);
+        MockBukkitSupport.safeUnmock();
     }
 
     public static UltiTrade getMockPlugin() {
