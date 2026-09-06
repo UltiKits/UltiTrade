@@ -6,7 +6,6 @@ import org.bukkit.inventory.ItemStack;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockbukkit.mockbukkit.MockBukkit;
 
 import java.util.UUID;
 
@@ -22,17 +21,23 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * Every assertion below therefore depends on the <em>live server</em> path, not the
  * ServiceLoader-only path — see {@code 14-RESEARCH.md} Pitfall 2 and {@code 14-VALIDATION.md}'s
  * "Sentinel Design Constraint".
+ * <p>
+ * Deliberately bootstraps through {@link UltiTradeTestHelper#setUp()} — the module's one shared
+ * test-time bootstrap entry point, used by every other test class in this suite — rather than
+ * calling {@code MockBukkit.mock()} itself. A sentinel that mocks its own unrelated live server
+ * stays green even after the shared bootstrap ({@code UltiTradeTestHelper.setupBukkitServer()})
+ * is removed or broken, which defeats the reopen guard this class exists to provide.
  */
 class UltiTradeRegistrySentinelTest {
 
     @BeforeEach
-    void setUp() {
-        MockBukkit.mock();
+    void setUp() throws Exception {
+        UltiTradeTestHelper.setUp();
     }
 
     @AfterEach
-    void tearDown() {
-        MockBukkit.unmock();
+    void tearDown() throws Exception {
+        UltiTradeTestHelper.tearDown();
     }
 
     @Test
