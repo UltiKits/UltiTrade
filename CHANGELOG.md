@@ -32,7 +32,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   players to confirm again, so a trade no longer completes on terms such as `trade-tax`, `exp-tax-rate`
   or `confirm-threshold` that the reload changed after a player confirmed. A trade in which either
   player offered experience is likewise cancelled if `enable-exp-trade` is off when it completes,
-  instead of the items being exchanged without the experience (UltiKits/UltiTrade#26).
+  instead of the items being exchanged without the experience, and the chat amount prompt refuses an
+  experience amount while `enable-exp-trade` is off (UltiKits/UltiTrade#26).
 - `/ul reload UltiTrade` now redraws every open trade window from the reloaded configuration, so its
   title, money and experience availability and taxes match what the trade will charge. Every offer is
   kept as it was. An open large-trade confirmation page is replaced with a trade window, although on
@@ -62,8 +63,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   不可用时，聊天输入金额提示也会拒绝金币数额，而不是接受它（UltiKits/UltiTrade#26）。
 - `/ul reload UltiTrade` 现在会清除所有已有确认的进行中交易的确认状态，并提示双方重新确认，因此交易不会再按
   玩家确认后被重载修改的条款（如 `trade-tax`、`exp-tax-rate`、`confirm-threshold`）完成。同样，若任一方出价了
-  经验，而交易完成时 `enable-exp-trade` 已关闭，该交易会被取消，而不是在不转移经验的情况下交换物品
-  （UltiKits/UltiTrade#26）。
+  经验，而交易完成时 `enable-exp-trade` 已关闭，该交易会被取消，而不是在不转移经验的情况下交换物品；
+  `enable-exp-trade` 关闭时，聊天输入提示也会拒绝经验数额（UltiKits/UltiTrade#26）。
 - `/ul reload UltiTrade` 现在会按重载后的配置重绘所有已打开的交易界面，使其标题、金币与经验交易的可用状态和税率
   与交易实际收取的一致；所有出价保持不变。已打开的大额交易确认页会被替换为交易界面，但在当前版本中该确认页因
   UltiKits/UltiTrade#23 不会保持打开（UltiKits/UltiTrade#27）。

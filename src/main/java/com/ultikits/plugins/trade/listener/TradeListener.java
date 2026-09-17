@@ -312,6 +312,13 @@ public class TradeListener implements Listener {
                 session.setMoney(player.getUniqueId(), value);
                 player.sendMessage(ChatColor.GREEN + "已设置交易金币: " + value);
             } else {
+                // A reload may have turned experience trading off since the prompt opened
+                // (UltiKits/UltiTrade#26). Without it the amount stays unchanged.
+                if (!config.isEnableExpTrade()) {
+                    player.sendMessage(ChatColor.RED + "经验交易当前不可用！");
+                    reopenGUI(player);
+                    return;
+                }
                 // Check experience
                 int expValue = (int) value;
                 if (tradeService.getTotalExperience(player) < expValue) {
