@@ -727,6 +727,25 @@ class TradeListenerTest {
         }
 
         @Test
+        @DisplayName("provider still held but enable-money-trade already false in memory: the money amount is refused (UltiKits/UltiTrade#26)")
+        void moneyInputRefusedWhenMoneyTradeOffButProviderHeld() throws Exception {
+            addToWaitingForInput(uuid1, 0); // MONEY
+
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            net.milkbowl.vault.economy.Economy heldEconomy = UltiTradeTestHelper.createMockEconomy();
+            when(tradeService.getEconomy()).thenReturn(heldEconomy);
+            when(config.isEnableMoneyTrade()).thenReturn(false);
+
+            AsyncPlayerChatEvent event = new AsyncPlayerChatEvent(false, player1, "500", new HashSet<>());
+
+            listener.onPlayerChat(event);
+
+            assertThat(session.getPlayerMoney(uuid1)).isEqualTo(0.0);
+            verify(player1).sendMessage(contains("\u91D1\u5E01\u4EA4\u6613\u5F53\u524D\u4E0D\u53EF\u7528")); // "金币交易当前不可用"
+        }
+
+        @Test
         @DisplayName("Should reject exp input exceeding available exp")
         void rejectInsufficientExp() throws Exception {
             addToWaitingForInput(uuid1, 1); // EXPERIENCE

@@ -312,6 +312,40 @@ class TradeReloadReconciliationTest {
         }
 
         @Test
+        @DisplayName("the accepting player offered the money: a reload that turns money trading off still cancels the trade")
+        void counterpartyMoneyAfterDisableCancelsTrade() throws Exception {
+            session.setMoney(offerer.getUniqueId(), 0.0);
+            session.setMoney(counterparty.getUniqueId(), 1000.0);
+            session.setConfirmed(offerer.getUniqueId(), true);
+
+            reload("enable-money-trade: false\n");
+            tradeService.confirmTrade(counterparty);
+
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+            verify(vaultEconomy, never()).withdrawPlayer(any(Player.class), anyDouble());
+            verify(vaultEconomy, never()).depositPlayer(any(Player.class), anyDouble());
+            verify(counterpartyInventory, never()).addItem(offererItem);
+            verify(offererInventory, never()).addItem(counterpartyItem);
+            verify(sessionLog, never()).logCompletedTrade(any(), any(), any(), anyDouble(), anyInt());
+            verify(counterparty).sendMessage(contains(MONEY_UNAVAILABLE_REASON));
+        }
+
+        @Test
+        @DisplayName("provider still held but enable-money-trade already false in memory (hook not reached): the money trade is cancelled")
+        void heldProviderWithMoneyTradeOffCancelsTrade() throws Exception {
+            session.setConfirmed(offerer.getUniqueId(), true);
+
+            // Only the configuration changes: onReload() is not run, so the provider stays held.
+            loadConfig("enable-money-trade: false\n");
+            assertThat(tradeService.getEconomy()).isSameAs(vaultEconomy);
+            tradeService.confirmTrade(counterparty);
+
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+            verify(vaultEconomy, never()).withdrawPlayer(any(Player.class), anyDouble());
+            verify(vaultEconomy, never()).depositPlayer(any(Player.class), anyDouble());
+        }
+
+        @Test
         @DisplayName("no money offered: a reload that turns money trading off does not stop an item-only trade")
         void itemOnlyTradeStillCompletes() throws Exception {
             session.setMoney(offerer.getUniqueId(), 0.0);
@@ -402,6 +436,21 @@ class TradeReloadReconciliationTest {
             verify(first, never()).cancel();
             verify(scheduler, times(1)).runTaskTimerAsynchronously(any(), any(Runnable.class), anyLong(), anyLong());
             assertThat((BukkitTask) UltiTradeTestHelper.getField(logService, "cleanupTask")).isSameAs(first);
+        }
+
+        @Test
+        @DisplayName("logging on, off, on again with the same interval: a cleanup task is scheduled again")
+        void onOffOnSameIntervalRestartsTask() throws Exception {
+            loadConfig("enable-trade-log: true\ncleanup-interval-hours: 24\n");
+            logService.init();
+
+            reload("enable-trade-log: false\ncleanup-interval-hours: 24\n");
+            verify(first, times(1)).cancel();
+            reload("enable-trade-log: true\ncleanup-interval-hours: 24\n");
+
+            long day = 24L * 60L * 60L * 20L;
+            verify(scheduler, times(2)).runTaskTimerAsynchronously(any(), any(Runnable.class), eq(day), eq(day));
+            assertThat((BukkitTask) UltiTradeTestHelper.getField(logService, "cleanupTask")).isSameAs(second);
         }
 
         @Test
