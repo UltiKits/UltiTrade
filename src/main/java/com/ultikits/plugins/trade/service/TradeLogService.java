@@ -58,6 +58,24 @@ public class TradeLogService {
         settingsOperator = plugin.getDataOperator(PlayerTradeSettings.class);
 
         // Start cleanup task
+        startCleanupTaskIfEnabled();
+    }
+
+    /**
+     * Reconcile the periodic log cleanup task with the current {@code enable-trade-log} and
+     * {@code cleanup-interval-hours} values after a configuration reload (UltiKits/UltiTrade#26).
+     * The running task, if any, is cancelled first, so repeated reloads never leave more than one
+     * task scheduled.
+     */
+    public void reloadCleanupTask() {
+        if (cleanupTask != null) {
+            cleanupTask.cancel();
+            cleanupTask = null;
+        }
+        startCleanupTaskIfEnabled();
+    }
+
+    private void startCleanupTaskIfEnabled() {
         if (config.isEnableTradeLog()) {
             long cleanupInterval = config.getCleanupIntervalHours() * 60L * 60L * 20L; // Convert hours to ticks
             cleanupTask = Bukkit.getScheduler().runTaskTimerAsynchronously(

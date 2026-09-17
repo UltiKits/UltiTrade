@@ -88,6 +88,29 @@ class UltiTradeTest {
         }
 
         @Test
+        @DisplayName("onReload reconciles the cleanup task, then the economy provider, once each (UltiKits/UltiTrade#26)")
+        void onReloadReconcilesBothServices() {
+            doCallRealMethod().when(plugin).onReload();
+
+            plugin.onReload();
+
+            InOrder order = inOrder(logService, tradeService);
+            order.verify(logService, times(1)).reloadCleanupTask();
+            order.verify(tradeService, times(1)).reloadEconomy();
+            verifyNoMoreInteractions(logService, tradeService);
+        }
+
+        @Test
+        @DisplayName("onReload with neither service bean present does nothing and does not throw")
+        void onReloadWithoutBeans() {
+            when(plugin.getContext().getBean(TradeService.class)).thenReturn(null);
+            when(plugin.getContext().getBean(TradeLogService.class)).thenReturn(null);
+            doCallRealMethod().when(plugin).onReload();
+
+            assertThatCode(() -> plugin.onReload()).doesNotThrowAnyException();
+        }
+
+        @Test
         @DisplayName("a second onUnregister does not unregister the expansion again")
         void secondOnUnregisterDoesNotDoubleUnregister() throws Exception {
             TradePlaceholderExpansion expansion = mock(TradePlaceholderExpansion.class);

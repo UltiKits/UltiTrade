@@ -120,6 +120,21 @@ public class TradeService {
     }
     
     /**
+     * Reconcile the Vault economy provider with the current {@code enable-money-trade} value after
+     * a configuration reload (UltiKits/UltiTrade#26). When money trading is enabled the provider
+     * lookup is re-run, so a {@code false} to {@code true} change takes effect without a restart;
+     * when it is disabled the provider is dropped. The lookup registers nothing, so repeated
+     * reloads are safe.
+     */
+    public void reloadEconomy() {
+        if (config.isEnableMoneyTrade()) {
+            setupEconomy();
+        } else {
+            economy = null;
+        }
+    }
+
+    /**
      * Check if economy is available.
      */
     public boolean hasEconomy() {

@@ -60,6 +60,24 @@ public class UltiTrade extends UltiToolsPlugin {
     }
 
     /**
+     * Reconcile the services with configuration values they capture at startup. The framework
+     * calls this after it has re-read {@code config/trade.yml}, so both services see the new
+     * values (UltiKits/UltiTrade#26).
+     */
+    @Override
+    protected void onReload() {
+        TradeLogService logService = getContext().getBean(TradeLogService.class);
+        if (logService != null) {
+            logService.reloadCleanupTask();
+        }
+
+        TradeService tradeService = getContext().getBean(TradeService.class);
+        if (tradeService != null) {
+            tradeService.reloadEconomy();
+        }
+    }
+
+    /**
      * Initialize all services required by the plugin.
      * Services are retrieved from the IoC container and initialized in order.
      */
