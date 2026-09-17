@@ -20,7 +20,10 @@ for UAT execution and issue reconciliation — the public description of these f
   `placeholder`, `persistence`, `gate`. This module has no `gate` rows (0 `@ConditionalOnConfig`
   sites, confirmed below) — the Kind stays in the vocabulary for cross-repository consistency
   even though it does not appear below. Unlike UltiChat and UltiRemoteBag, this module DOES carry
-  `placeholder` rows (`TradePlaceholderExpansion`).
+  `placeholder` rows (`TradePlaceholderExpansion`). The three rows under `## Lifecycle Hooks` are
+  `event` rows with no `@EventHandler` site behind them: module unload and `/ul reload` are
+  framework-invoked lifecycle steps, not commands this repository maps or config reads, so `event`
+  is the closest-fitting Kind.
 - **Tier**, exactly three: `player`, `admin`, `internal`. Judged from what the feature is for,
   not from whether it carries a permission string.
 - **Manual**, exactly three: `detailed`, `brief`, `none`.
@@ -47,23 +50,26 @@ for UAT execution and issue reconciliation — the public description of these f
   here as a plain, sourced observation, with the filed issue number, never as advice on how to fix
   it.
 - **A note on this module's actual language behaviour, read before any other row below:** this
-  module ships a complete, accurate `lang/en.yml` and `lang/zh.yml` (73 keys each, faithfully
-  paired) that are **never consulted** by real key anywhere in this module's source. Every
+  module ships a complete, accurate `lang/en.yml` and `lang/zh.yml` (62 keys each, faithfully
+  paired, measured after `UltiKits/UltiTrade#15`'s lifecycle-hook migration removed the
+  `trade_reloaded` key together with the only log line it described) that are **never consulted** by real key anywhere in this module's source. Every
   player-facing string in `TradeCommand`, `TradeService`, `TradeGUI`, `TradeConfirmPage`, and
   `TradeListener` is a hardcoded Simplified Chinese literal; `TradeConfig`'s 13 message keys are
-  likewise Chinese-only string defaults with no i18n indirection at all. The only three
-  `i18n(...)` calls in the whole module (`UltiTrade.java`, enable/disable/reload log lines) pass a
+  likewise Chinese-only string defaults with no i18n indirection at all. The only two
+  `i18n(...)` calls in the whole module (`UltiTrade.java`, enable/disable log lines) pass a
   raw CHINESE SENTENCE as the lookup key itself (e.g. a call meaning literally `i18n("UltiTrade enabled!")`, but written with the Chinese text as the key) rather than one
-  of the 73 real keys (`trade_enabled`, etc.) — confirmed by reading
+  of the 62 real keys (`trade_enabled`, etc.) — confirmed by reading
   `entities/Language.java#getLocalizedText`: a dictionary miss returns the input string
-  unchanged, so these three calls print the same Chinese text under `language: en` as under
+  unchanged, so these two calls print the same Chinese text under `language: en` as under
   `language: zh`. **Setting `language: en` therefore has zero observable effect anywhere in this
   module**, despite the framework's default `supported()` scan (`interfaces/Localized.java`)
   finding both `en` and `zh` lang files and letting the module resolve to `en` without error.
   Filed as `UltiKits/UltiTrade#16`. Every Feature/Expected quotation below is therefore given in
   its real, shipped form — Chinese, in English gloss — never in the unused English lang key's
-  text, and no row below carries a `language: en` precondition, because that precondition would
-  produce a false expectation.
+  text, and no checklist row carries a `language: en` precondition for this module's own strings,
+  because that precondition would produce a false expectation (`UAT-CHECKLIST.md`'s
+  `ultitrade.lifecycle.reload` and `ultitrade.lifecycle.reload-money-trade` set it only for two
+  framework-owned console lines).
 
 ### Reconciliation command family
 
@@ -118,7 +124,7 @@ players; `TradeListener#onPlayerInteractEntity` is a second entry point for the 
 | ultitrade.request.deny | Decline the sender's own pending incoming trade request; notifies the original requester if still online | command | `/trade deny` | ultitrade.use | player | player | brief | TradeCommand#deny, TradeService#denyRequest |
 | ultitrade.request.send | Send a trade request to a named, currently-ONLINE player, subject to both players' trade-toggle state, either player's blocklist, distance/cross-world restrictions, and no already-active trade on either side; on send, notifies the target (clickable accept/deny chat buttons or plain text depending on `enable-clickable-buttons`) and shows a countdown BossBar if `enable-bossbar` is true; if the target had ALREADY sent a request to this same sender, the trade auto-starts immediately instead of queuing a second request | command | `/trade <player>` | ultitrade.use | player | player | brief | TradeCommand#sendRequest, TradeService#sendRequest |
 | ultitrade.request.shift-click | Send the same trade request as `.send`, triggered by shift+right-clicking another online player instead of typing a command; independently re-checks `ultitrade.use` in code (this is not a `@CmdMapping`, so the framework's own validator chain never runs for it) | event | shift+right-click another online player while `enable-shift-click` is true | ultitrade.use (checked in code, not via the validator chain) | n/a | player | brief | TradeListener#onPlayerInteractEntity |
-| ultitrade.request.timeout-cleanup | Every 10 seconds (`@Scheduled(period = 200)`), expire any pending trade request older than `request-timeout` seconds, removing its BossBar and notifying the intended recipient | scheduled | runs automatically every 200 ticks (10s, fixed) while at least one trade request is pending | n/a | n/a | internal | brief | TradeService#cleanupExpiredRequests |
+| ultitrade.request.timeout-cleanup | Every 10 seconds (`@Scheduled(period = 200)`), expire any pending trade request older than the `request-timeout` in force when that request was sent, removing its BossBar and notifying the intended recipient | scheduled | runs automatically every 200 ticks (10s, fixed) while at least one trade request is pending | n/a | n/a | internal | brief | TradeService#cleanupExpiredRequests |
 
 ## Trading Preferences
 
@@ -149,7 +155,7 @@ imperative GUI base classes.
 | ultitrade.session.item-remove | Remove a previously placed item from one of the sender's own item slots back into the sender's own inventory, resetting both sides' confirmation. If the sender's inventory is completely full at that moment, the item is LOST — `TradeListener#onInventoryClick`'s remove-item branch discards `Inventory#addItem`'s overflow return value instead of dropping it, unlike `TradeService#cancelTrade`/`#completeTrade`, which both drop overflow at the player's feet. Known product defect, `UltiKits/UltiTrade#20` | event | click a "your items" slot in `TradeGUI` that already holds a placed item | n/a | n/a | player | detailed | TradeListener#onInventoryClick |
 | ultitrade.session.quit-cancels | If either participant quits the server while a trade is active, the trade is cancelled immediately and items are returned as in `.cancel` | event | disconnect from the server while in an active trade | n/a | n/a | player | detailed | TradeListener#onPlayerQuit, TradeService#cancelTrade |
 | ultitrade.session.confirm-page | The second-step confirmation window for a large trade (5-row raw `InventoryHolder`): an info item summarizing what each side gives/receives after tax, and Confirm/Cancel buttons. Item preview is narrower than it looks: `TradeConfirmPage#displayItems` writes its "N more items..." indicator to `startSlot + displaySlots - 1` — the SAME index as the 3rd preview slot — so a side with 4 or more items shows only 2 real item previews plus the indicator, not 3 previews plus a genuine 4th slot; a side with exactly 3 items shows all 3 with no indicator. Known product defect, `UltiKits/UltiTrade#22`. Cancel returns to `TradeGUI` WITHOUT cancelling the trade itself. Separately, and more seriously: this page's own Confirm button never checks whether both sides have now confirmed and never calls `completeTrade` — unlike the below-threshold direct-confirm path — so a large trade (at or above `confirm-threshold`) can NEVER complete through the normal confirm flow — a defect that is, in current shipped code, masked by the more fundamental `UltiKits/UltiTrade#23` above: by the time this page opens at all, the underlying trade has ALREADY been auto-cancelled, so neither the Cancel nor the Confirm button on this page has any effect on a live trade (Cancel's own `isTrading` check fails, so `TradeGUI` does not reopen; Confirm mutates the orphaned session and still sends the OTHER player a "confirmed the trade" message, which is misleading once the trade is already dead). Known product defects, `UltiKits/UltiTrade#21` and `#23` | gui | opened by `ultitrade.session.confirm-large` | n/a | n/a | player | detailed | TradeConfirmPage#TradeConfirmPage, TradeConfirmPage#initializeGUI, TradeConfirmPage#displayItems, TradeService#confirmTrade |
-| ultitrade.session.start | Both players' `TradeGUI` windows open simultaneously once a request is accepted or auto-started | gui | opened by `ultitrade.request.accept` or the auto-start path of `ultitrade.request.send` | n/a | n/a | player | brief | TradeService#startTrade, TradeGUI#TradeGUI |
+| ultitrade.session.start | Both players' `TradeGUI` windows open simultaneously once a request is accepted or auto-started. Every click inside `TradeGUI` is cancelled before its action runs, so no display or control item (glass panes, the money and experience slot items, the buttons) can be taken out of the window by any click type, whether money or experience trading is on or off | gui | opened by `ultitrade.request.accept` or the auto-start path of `ultitrade.request.send` | n/a | n/a | player | brief | TradeService#startTrade, TradeGUI#TradeGUI, TradeListener#onInventoryClick |
 
 ## Placeholders
 
@@ -169,6 +175,48 @@ persisted `PlayerTradeSettings`, so it reflects the value as of the player's las
 | ultitrade.placeholder.total-trades | Total number of trades the target has completed | placeholder | `%ultitrade_total_trades%` | n/a | n/a | player | none | TradePlaceholderExpansion#onRequest |
 | ultitrade.placeholder.trade-enabled | Raw boolean string of the target's own trade-toggle state; two aliases (`trade_enabled`, `enabled`) return the identical `"true"`/`"false"` string | placeholder | `%ultitrade_trade_enabled%` or `%ultitrade_enabled%` | n/a | n/a | player | none | TradePlaceholderExpansion#onRequest |
 | ultitrade.placeholder.trade-enabled-display | Localized (Chinese-only, regardless of `language`) two-character Chinese "on"/"off" rendering of the same toggle state as `.trade-enabled`; two aliases (`trade_enabled_display`, `enabled_display`) return the identical value | placeholder | `%ultitrade_trade_enabled_display%` or `%ultitrade_enabled_display%` | n/a | n/a | player | brief | TradePlaceholderExpansion#onRequest |
+
+## Lifecycle Hooks
+
+`UltiTrade#onUnregister()` is the extension-point hook the framework's `final`
+`UltiToolsPlugin#unregisterSelf()` invokes as of UltiTools 6.3.0, before the framework's own
+command and listener cleanup for this module. Before `UltiKits/UltiTrade#15`'s lifecycle-hook
+migration this module overrode `unregisterSelf()`/`reloadSelf()` directly, completely replacing the
+framework's own steps; its reload override only logged a line and was deleted rather than renamed.
+`/ul reload UltiTrade` runs the framework's own reload steps (config reload, language refresh,
+`@ConditionalOnConfig` drift report, and the framework's per-module `Module 'UltiTrade' reloaded.`
+INFO line) and then, as of `UltiKits/UltiTrade#26`, this module's `UltiTrade#onReload()` hook, which
+re-runs the Vault economy lookup (`TradeService#reloadEconomy`) and reschedules the old-log cleanup
+task (`TradeLogService#reloadCleanupTask`), because `enable-money-trade`, `enable-trade-log` and
+`cleanup-interval-hours` are applied through state the services set up when they start. A reload
+that changes neither `enable-trade-log` nor `cleanup-interval-hours` leaves the running cleanup task
+and its countdown untouched; changing either reschedules the task (or, with `enable-trade-log: false`,
+stops it), and a rescheduled task first runs one full new interval after the reload. The hook
+also voids the confirmations of every open trade and tells both players to confirm again, because a
+reload may change the terms they confirmed (`trade-tax`, `exp-tax-rate`, `confirm-threshold`); a
+trade that carries experience is cancelled at completion when `enable-exp-trade` is off. It then
+redraws every open trade window from the reloaded configuration (title, money and experience
+availability, `trade-tax`, `exp-tax-rate`), keeping every offer exactly as the session holds it and
+redrawing each player's window in isolation; on a server without `InventoryView#setTitle` only the
+title keeps its previous text. An open large-trade confirmation page is replaced with a trade window,
+although on current builds that page does not stay open because of `UltiKits/UltiTrade#23`
+(`UltiKits/UltiTrade#27`). The two kinds of value are treated differently on purpose: the terms of a
+deal (taxes, threshold, which offers are allowed) always follow the reloaded configuration, which is why
+open windows are redrawn and confirmations voided, while a pending trade request keeps the
+`request-timeout` it was sent with, because that is a promise to the receiving player of how long they
+have; a changed timeout applies to requests sent after the reload. An exception from
+one reconciliation is logged at SEVERE, naming the keys it could not apply, and the other still runs. Neither hook is reachable through a command
+this repository maps itself, so all three rows below are `event`-Kind, not `command`-Kind.
+`ultitrade.lifecycle.reload` records what `/ul reload UltiTrade` now changes for an operator:
+`ConfigManager#reloadConfigs` re-initialises, in place, the same `TradeConfig` instance the
+container injected into `TradeService`, and `TradeService` reads its getters at call time.
+`ultitrade.lifecycle.reload-money-trade` records the start-up-captured case the hook exists for.
+
+| ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
+|---|---|---|---|---|---|---|---|---|
+| ultitrade.lifecycle.reload | `/ul reload UltiTrade` re-reads `config/trade.yml` into the running module, so an edited value such as `max-distance` applies to the next trade request without a restart; `max-distance` needs no reload work from this module's `onReload()` hook. With `enable-money-trade: true` and a Vault economy provider registered the module prints no reload line of its own; with money trading on and Vault or its provider missing, each reload logs the module's warning `Vault not found! Money trading disabled.` or `No Vault economy provider is registered! Money trading disabled.`; with money trading off it performs no lookup and logs nothing. Before `UltiKits/UltiTrade#15` the module's reload override replaced the framework's reload and only logged, so an edit took effect only after a restart | event | `/ul reload UltiTrade` (framework calls `reloadSelf()`, which reloads configuration, refreshes language, reports `@ConditionalOnConfig` drift and logs its own per-module line) | n/a | n/a | admin | brief | TradeService#sendRequest |
+| ultitrade.lifecycle.reload-money-trade | `/ul reload UltiTrade` applies an edited `enable-money-trade` in both directions: after a `false` to `true` edit the trade GUI offers money trading without a restart (a gold nugget in the money slot, and clicking it opens the chat amount prompt), and after a `true` to `false` edit it shows the disabled barrier instead. `UltiTrade#onReload()` re-runs the Vault economy lookup, or drops the provider when money trading is off; the same hook also reschedules the old-log cleanup task, so `enable-trade-log` and `cleanup-interval-hours` edits apply without a restart too (that half is evidenced by unit tests only, because observing a cleanup run on a server takes at least an hour). A trade that already carries money when money trading becomes unavailable is cancelled when it completes: no money moves, each side gets back its own items, and both players are told money trading is currently unavailable (also unit-test evidenced). Before `UltiKits/UltiTrade#26` the lookup and the task were set up only when the module started, so turning money trading on took effect only after a restart | event | `/ul reload UltiTrade` (framework calls `reloadSelf()`, which reloads configuration first and then invokes this hook) | n/a | n/a | admin | brief | UltiTrade#onReload, TradeService#reloadEconomy, TradeLogService#reloadCleanupTask, TradeService#completeTrade |
+| ultitrade.lifecycle.unload | When the module is unloaded (for example by `/upm uninstall UltiTrade`), shut down `TradeService` then `TradeLogService`, unregister the `ultitrade` PlaceholderAPI expansion if one was registered and clear the reference so a repeated unload cannot unregister it twice, then log the module's own "disabled" console line (the Chinese literal in `UltiTrade#onUnregister`, printed identically under either `language`, `UltiKits/UltiTrade#16`) | event | unload the `UltiTrade` module at runtime (framework calls `unregisterSelf()`, which invokes this hook before its own command/listener cleanup) | n/a | n/a | admin | brief | UltiTrade#onUnregister |
 
 ## Data persistence
 
@@ -202,16 +250,16 @@ site instead of reading the configured (also Chinese-only) message.
 | ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
 |---|---|---|---|---|---|---|---|---|
 | ultitrade.config.trade.allow-cross-world | Whether a trade request may be sent across two different worlds. Only actually checked when `max-distance` is above 0 — the whole distance/cross-world block is nested inside `if (config.getMaxDistance() > 0)`, so setting `max-distance: 0` (which disables the distance check entirely, per that key's own row) ALSO silently disables this key's own cross-world restriction, allowing cross-world trades regardless of its value | config | `config/trade.yml: allow-cross-world (default: false, only enforced while max-distance is above 0)` | n/a | n/a | admin | brief | TradeService#sendRequest |
-| ultitrade.config.trade.cleanup-interval-hours | Interval, in hours, at which `ultitrade.persistence.log-retention`'s background task runs | config | `config/trade.yml: cleanup-interval-hours (default: 24)` | n/a | n/a | admin | brief | TradeLogService#init |
+| ultitrade.config.trade.cleanup-interval-hours | Interval, in hours, at which `ultitrade.persistence.log-retention`'s background task runs | config | `config/trade.yml: cleanup-interval-hours (default: 24)` | n/a | n/a | admin | brief | TradeLogService#init, TradeLogService#reloadCleanupTask |
 | ultitrade.config.trade.confirm-threshold | Money-or-experience amount at or above which `ultitrade.session.confirm-large`'s second confirmation step is required | config | `config/trade.yml: confirm-threshold (default: 10000)` | n/a | n/a | admin | brief | TradeService#confirmTrade |
 | ultitrade.config.trade.enable-bossbar | Whether a countdown BossBar is shown to the recipient of a pending trade request | config | `config/trade.yml: enable-bossbar (default: true)` | n/a | n/a | admin | brief | TradeService#sendRequest |
 | ultitrade.config.trade.enable-clickable-buttons | Whether an incoming trade-request notification uses clickable chat buttons (Accept/Deny running the commands directly) rather than plain instructional text | config | `config/trade.yml: enable-clickable-buttons (default: true)` | n/a | n/a | admin | brief | TradeService#notifyTradeRequest |
 | ultitrade.config.trade.enable-exp-trade | Whether experience may be included in a trade at all; when false, both sides' experience slots show a disabled/barrier item instead | config | `config/trade.yml: enable-exp-trade (default: true)` | n/a | n/a | admin | brief | TradeGUI#updateExpDisplay, TradeService#completeTrade |
-| ultitrade.config.trade.enable-money-trade | Whether Vault-backed money trading is set up at all; when false, `hasEconomy()` is always false regardless of whether Vault is installed | config | `config/trade.yml: enable-money-trade (default: true)` | n/a | n/a | admin | brief | TradeService#init, TradeService#hasEconomy |
+| ultitrade.config.trade.enable-money-trade | Whether Vault-backed money trading is set up at all; when false, `hasEconomy()` is always false regardless of whether Vault is installed | config | `config/trade.yml: enable-money-trade (default: true)` | n/a | n/a | admin | brief | TradeService#init, TradeService#reloadEconomy, TradeService#hasEconomy |
 | ultitrade.config.trade.enable-particles | Whether success/failure particle effects play at the end of a trade | config | `config/trade.yml: enable-particles (default: true)` | n/a | n/a | admin | none | TradeService#playSuccessEffects, TradeService#playFailEffects |
 | ultitrade.config.trade.enable-shift-click | Whether `ultitrade.request.shift-click` is active at all | config | `config/trade.yml: enable-shift-click (default: true)` | n/a | n/a | admin | brief | TradeListener#onPlayerInteractEntity |
 | ultitrade.config.trade.enable-sounds | Master switch for every sound effect this module plays | config | `config/trade.yml: enable-sounds (default: true)` | n/a | n/a | admin | brief | TradeService#playSound |
-| ultitrade.config.trade.enable-trade-log | Whether a completed or cancelled trade is written to `trade_logs`, and whether the retention-cleanup background task runs at all | config | `config/trade.yml: enable-trade-log (default: true)` | n/a | n/a | admin | brief | TradeLogService#init, TradeLogService#logCompletedTrade |
+| ultitrade.config.trade.enable-trade-log | Whether a completed or cancelled trade is written to `trade_logs`, and whether the retention-cleanup background task runs at all | config | `config/trade.yml: enable-trade-log (default: true)` | n/a | n/a | admin | brief | TradeLogService#init, TradeLogService#reloadCleanupTask, TradeLogService#logCompletedTrade |
 | ultitrade.config.trade.exp-tax-rate | Fraction of offered experience deducted as tax on a completed trade (0 disables) | config | `config/trade.yml: exp-tax-rate (default: 0.0)` | n/a | n/a | admin | brief | TradeService#completeTrade |
 | ultitrade.config.trade.gui-title | The `TradeGUI` inventory title template, with a `{PLAYER}` placeholder for the other participant's name | config | `config/trade.yml: gui-title (default: a Chinese-language template meaning "Trading with {PLAYER}")` | n/a | n/a | admin | brief | TradeGUI#TradeGUI |
 | ultitrade.config.trade.log-retention-days | Age, in days, past which a `trade_logs` row is deleted by the retention-cleanup task | config | `config/trade.yml: log-retention-days (default: 30)` | n/a | n/a | admin | brief | TradeLogService#cleanupOldLogs |
@@ -229,6 +277,6 @@ site instead of reading the configured (also Chinese-only) message.
 | ultitrade.config.trade.messages.trade-complete | Message shown to both sides on a successfully completed trade | config | `config/trade.yml: messages.trade-complete (default: a Chinese-language message meaning "Trade complete!")` | n/a | n/a | admin | brief | TradeService#completeTrade |
 | ultitrade.config.trade.messages.trade-disabled | Message shown to a sender whose target currently has trading toggled off | config | `config/trade.yml: messages.trade-disabled (default: a Chinese-language message meaning "The other party has disabled trading!")` | n/a | n/a | admin | brief | TradeService#sendRequest |
 | ultitrade.config.trade.messages.unblock-success | Declared as the unblock-success confirmation message; `/trade unblock` actually sends a different, hardcoded Chinese literal instead of reading this key. Known product defect, `UltiKits/UltiTrade#17` | config | `config/trade.yml: messages.unblock-success (default: a Chinese-language message meaning "Removed {PLAYER} from your trade blacklist!", has no effect, see UltiKits/UltiTrade#17)` | n/a | n/a | admin | brief | TradeConfig#unblockSuccessMessage (declared, never read outside this class) |
-| ultitrade.config.trade.request-timeout | Seconds a sent trade request remains valid before `ultitrade.request.timeout-cleanup` expires it; also the countdown length shown on the recipient's BossBar | config | `config/trade.yml: request-timeout (default: 30)` | n/a | n/a | admin | brief | TradeService#sendRequest, TradeService#showRequestBossBar, TradeService#cleanupExpiredRequests |
+| ultitrade.config.trade.request-timeout | Seconds a sent trade request remains valid before `ultitrade.request.timeout-cleanup` expires it; also the countdown length shown on the recipient's BossBar | config | `config/trade.yml: request-timeout (default: 30)` | n/a | n/a | admin | brief | TradeService#sendRequest, TradeRequest#isExpired, TradeService#showRequestBossBar, TradeService#cleanupExpiredRequests |
 | ultitrade.config.trade.trade-tax | Fraction of offered money deducted as tax on a completed trade (0 disables) | config | `config/trade.yml: trade-tax (default: 0.0)` | n/a | n/a | admin | brief | TradeService#completeTrade |
 | ultitrade.config.trade.trade-timeout | Declared as the trade-window timeout in seconds; no scheduled task or check in this module's source reads it to actually expire an open `TradeGUI` session by elapsed time — a trade only ends via explicit cancel/complete/quit/GUI-close, never by this timer. Known product defect, `UltiKits/UltiTrade#18` | config | `config/trade.yml: trade-timeout (default: 120, has no effect, see UltiKits/UltiTrade#18)` | n/a | n/a | admin | brief | TradeConfig#tradeTimeout (declared, never read outside this class) |
