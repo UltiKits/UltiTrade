@@ -229,6 +229,12 @@ class TradeListenerTest {
         }
     }
 
+    /**
+     * The click event here is a Mockito mock, so these cases prove only that every click is
+     * cancelled; that a cancelled click moves no item, and that the place and remove actions move
+     * exactly the one offered item, is proven by {@code placeItemClearsCursorAndStoresOneCopy} and the
+     * session item tests.
+     */
     @Nested
     @DisplayName("display items in the trade window can never be taken (UltiKits/UltiTrade#25)")
     class DisplayItemsCannotBeTaken {
@@ -316,6 +322,36 @@ class TradeListenerTest {
 
             assertCancelledAndNothingMoved(event);
             verify(player1).closeInventory();
+        }
+
+        @Test
+        @DisplayName("a click outside the window (raw slot -999) while the trade window is open is cancelled too")
+        void clickOutsideWindowIsCancelled() {
+            InventoryClickEvent event = click(-999, ClickType.LEFT, null);
+
+            listener.onInventoryClick(event);
+
+            verify(event).setCancelled(true);
+        }
+
+        @Test
+        @DisplayName("placing an item from the cursor stores one copy in the session and clears the cursor, so the item is not in both places")
+        void placeItemClearsCursorAndStoresOneCopy() {
+            ItemStack offered = new ItemStack(Material.DIAMOND, 4);
+            InventoryClickEvent event = click(TradeGUI.YOUR_SLOTS[0], ClickType.LEFT, new ItemStack(Material.LIME_STAINED_GLASS_PANE));
+            when(event.getCursor()).thenReturn(offered);
+            InventoryView view = mock(InventoryView.class);
+            when(event.getView()).thenReturn(view);
+
+            listener.onInventoryClick(event);
+
+            verify(event).setCancelled(true);
+            verify(view).setCursor(null);
+            assertThat(session.getPlayerItems(uuid1)).hasSize(1);
+            ItemStack stored = session.getPlayerItems(uuid1).get(0);
+            assertThat(stored.getType()).isEqualTo(Material.DIAMOND);
+            assertThat(stored.getAmount()).isEqualTo(4);
+            verify(player1.getInventory(), never()).addItem(any(ItemStack.class));
         }
 
         @ParameterizedTest(name = "{0}")

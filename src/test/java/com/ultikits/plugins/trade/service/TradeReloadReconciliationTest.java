@@ -103,6 +103,7 @@ class TradeReloadReconciliationTest {
         when(context.getBean(TradeService.class)).thenReturn(tradeService);
         when(context.getBean(TradeLogService.class)).thenReturn(logService);
         doReturn(context).when(plugin).getContext();
+        doReturn(UltiTradeTestHelper.getMockLogger()).when(plugin).getLogger();
     }
 
     @AfterEach
@@ -361,10 +362,13 @@ class TradeReloadReconciliationTest {
             when(offererTop.getHolder()).thenReturn(page);
             openWindow(counterparty, counterpartyTop);
 
-            clearInvocations(server);
+            Inventory windowContents = server.createInventory(null, 54, "probe");
+            clearInvocations(server, windowContents);
 
             reload("enable-money-trade: true\ntrade-tax: 0.5\n");
 
+            // The replacement window shows the offer the session holds, not empty placeholders.
+            verify(windowContents).setItem(TradeGUI.YOUR_SLOTS[0], diamond);
             verify(server, atLeastOnce()).createInventory(
                     argThat(holder -> holder instanceof TradeGUI && ((TradeGUI) holder).getViewer() == offerer),
                     eq(54), anyString());
@@ -376,17 +380,60 @@ class TradeReloadReconciliationTest {
         @Test
         @DisplayName("redrawing the windows neither loses nor duplicates anything offered")
         void redrawKeepsOffersIntact() throws Exception {
-            openWindow(offerer, offererTop);
+            TradeGUI offererWindow = openWindow(offerer, offererTop);
             openWindow(counterparty, counterpartyTop);
+            Inventory windowContents = offererWindow.getInventory();
+            clearInvocations(windowContents);
 
             reload("enable-money-trade: true\ntrade-tax: 0.25\n");
 
+            // The windows were redrawn from the reloaded tax (stale before: no tax lore at all) ...
+            ArgumentCaptor<ItemStack> moneySlot = ArgumentCaptor.forClass(ItemStack.class);
+            verify(windowContents, atLeastOnce()).setItem(eq(TradeGUI.YOUR_MONEY_SLOT), moneySlot.capture());
+            assertThat(moneySlot.getAllValues()).anySatisfy(item -> assertThat(plainLore(item))
+                    .contains("\u7A0E\u7387: 25.0%")); // "税率: 25.0%"
+            verify(windowContents).setItem(TradeGUI.YOUR_SLOTS[0], diamond);
+            verify(windowContents).setItem(TradeGUI.YOUR_SLOTS[0], emerald);
+            // ... and the redraw neither lost nor duplicated an offer.
             assertThat(session.getPlayerItems(offerer.getUniqueId())).containsExactly(entry(0, diamond));
             assertThat(session.getPlayerItems(counterparty.getUniqueId())).containsExactly(entry(0, emerald));
             assertThat(session.getPlayerMoney(offerer.getUniqueId())).isEqualTo(1000.0);
             verify(offererInventory, never()).addItem(any(ItemStack.class));
             verify(counterpartyInventory, never()).addItem(any(ItemStack.class));
             assertThat(session.getState()).isEqualTo(TradeSession.TradeState.TRADING);
+        }
+
+        @Test
+        @DisplayName("a server without InventoryView#setTitle: the reload still completes and every window is still redrawn")
+        void missingSetTitleDoesNotAbortReload() throws Exception {
+            openWindow(offerer, offererTop);
+            TradeGUI counterpartyWindow = openWindow(counterparty, counterpartyTop);
+            doThrow(new NoSuchMethodError("org.bukkit.inventory.InventoryView.setTitle(Ljava/lang/String;)V"))
+                    .when(offererView).setTitle(anyString());
+            doThrow(new NoSuchMethodError("org.bukkit.inventory.InventoryView.setTitle(Ljava/lang/String;)V"))
+                    .when(counterpartyView).setTitle(anyString());
+            Inventory windowContents = counterpartyWindow.getInventory();
+            clearInvocations(windowContents);
+
+            reload("enable-money-trade: true\ntrade-tax: 0.5\n");
+
+            verify(windowContents).setItem(TradeGUI.YOUR_SLOTS[0], diamond);
+            verify(windowContents).setItem(TradeGUI.YOUR_SLOTS[0], emerald);
+        }
+
+        @Test
+        @DisplayName("one player's window failing to redraw is logged at SEVERE with that player's name, and the other player's window is still redrawn")
+        void onePlayersRedrawFailureDoesNotStopTheOthers() throws Exception {
+            TradeGUI counterpartyWindow = openWindow(counterparty, counterpartyTop);
+            RuntimeException failure = new IllegalStateException("view unavailable");
+            when(offererView.getTopInventory()).thenThrow(failure);
+            Inventory windowContents = counterpartyWindow.getInventory();
+            clearInvocations(windowContents);
+
+            reload("enable-money-trade: true\ntrade-tax: 0.5\n");
+
+            verify(windowContents).setItem(TradeGUI.YOUR_SLOTS[0], emerald);
+            verify(UltiTradeTestHelper.getMockLogger()).error(eq(failure), contains("Offerer"));
         }
     }
 
