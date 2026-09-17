@@ -196,8 +196,11 @@ also voids the confirmations of every open trade and tells both players to confi
 reload may change the terms they confirmed (`trade-tax`, `exp-tax-rate`, `confirm-threshold`); a
 trade that carries experience is cancelled at completion when `enable-exp-trade` is off. It then
 redraws every open trade window from the reloaded configuration (title, money and experience
-availability, `trade-tax`, `exp-tax-rate`) and replaces an open large-trade confirmation page with a
-trade window, keeping every offer exactly as the session holds it (`UltiKits/UltiTrade#27`). An exception from
+availability, `trade-tax`, `exp-tax-rate`), keeping every offer exactly as the session holds it and
+redrawing each player's window in isolation; on a server without `InventoryView#setTitle` only the
+title keeps its previous text. An open large-trade confirmation page is replaced with a trade window,
+although on current builds that page does not stay open because of `UltiKits/UltiTrade#23`
+(`UltiKits/UltiTrade#27`). An exception from
 one reconciliation is logged at SEVERE, naming the keys it could not apply, and the other still runs. Neither hook is reachable through a command
 this repository maps itself, so all three rows below are `event`-Kind, not `command`-Kind.
 `ultitrade.lifecycle.reload` records what `/ul reload UltiTrade` now changes for an operator:
