@@ -20,7 +20,9 @@ for UAT execution and issue reconciliation — the public description of these f
   `placeholder`, `persistence`, `gate`. This module has no `gate` rows (0 `@ConditionalOnConfig`
   sites, confirmed below) — the Kind stays in the vocabulary for cross-repository consistency
   even though it does not appear below. Unlike UltiChat and UltiRemoteBag, this module DOES carry
-  `placeholder` rows (`TradePlaceholderExpansion`).
+  `placeholder` rows (`TradePlaceholderExpansion`). The one row under `## Lifecycle Hooks` is an
+  `event` row with no `@EventHandler` site behind it: `onUnregister()` is a framework-invoked
+  callback, not a player-triggered command or a config read, so `event` is the closest-fitting Kind.
 - **Tier**, exactly three: `player`, `admin`, `internal`. Judged from what the feature is for,
   not from whether it carries a permission string.
 - **Manual**, exactly three: `detailed`, `brief`, `none`.
@@ -47,16 +49,17 @@ for UAT execution and issue reconciliation — the public description of these f
   here as a plain, sourced observation, with the filed issue number, never as advice on how to fix
   it.
 - **A note on this module's actual language behaviour, read before any other row below:** this
-  module ships a complete, accurate `lang/en.yml` and `lang/zh.yml` (73 keys each, faithfully
-  paired) that are **never consulted** by real key anywhere in this module's source. Every
+  module ships a complete, accurate `lang/en.yml` and `lang/zh.yml` (62 keys each, faithfully
+  paired, measured after `UltiKits/UltiTrade#15`'s lifecycle-hook migration removed the
+  `trade_reloaded` key together with the only log line it described) that are **never consulted** by real key anywhere in this module's source. Every
   player-facing string in `TradeCommand`, `TradeService`, `TradeGUI`, `TradeConfirmPage`, and
   `TradeListener` is a hardcoded Simplified Chinese literal; `TradeConfig`'s 13 message keys are
-  likewise Chinese-only string defaults with no i18n indirection at all. The only three
-  `i18n(...)` calls in the whole module (`UltiTrade.java`, enable/disable/reload log lines) pass a
+  likewise Chinese-only string defaults with no i18n indirection at all. The only two
+  `i18n(...)` calls in the whole module (`UltiTrade.java`, enable/disable log lines) pass a
   raw CHINESE SENTENCE as the lookup key itself (e.g. a call meaning literally `i18n("UltiTrade enabled!")`, but written with the Chinese text as the key) rather than one
-  of the 73 real keys (`trade_enabled`, etc.) — confirmed by reading
+  of the 62 real keys (`trade_enabled`, etc.) — confirmed by reading
   `entities/Language.java#getLocalizedText`: a dictionary miss returns the input string
-  unchanged, so these three calls print the same Chinese text under `language: en` as under
+  unchanged, so these two calls print the same Chinese text under `language: en` as under
   `language: zh`. **Setting `language: en` therefore has zero observable effect anywhere in this
   module**, despite the framework's default `supported()` scan (`interfaces/Localized.java`)
   finding both `en` and `zh` lang files and letting the module resolve to `en` without error.
@@ -169,6 +172,22 @@ persisted `PlayerTradeSettings`, so it reflects the value as of the player's las
 | ultitrade.placeholder.total-trades | Total number of trades the target has completed | placeholder | `%ultitrade_total_trades%` | n/a | n/a | player | none | TradePlaceholderExpansion#onRequest |
 | ultitrade.placeholder.trade-enabled | Raw boolean string of the target's own trade-toggle state; two aliases (`trade_enabled`, `enabled`) return the identical `"true"`/`"false"` string | placeholder | `%ultitrade_trade_enabled%` or `%ultitrade_enabled%` | n/a | n/a | player | none | TradePlaceholderExpansion#onRequest |
 | ultitrade.placeholder.trade-enabled-display | Localized (Chinese-only, regardless of `language`) two-character Chinese "on"/"off" rendering of the same toggle state as `.trade-enabled`; two aliases (`trade_enabled_display`, `enabled_display`) return the identical value | placeholder | `%ultitrade_trade_enabled_display%` or `%ultitrade_enabled_display%` | n/a | n/a | player | brief | TradePlaceholderExpansion#onRequest |
+
+## Lifecycle Hooks
+
+`UltiTrade#onUnregister()` is the extension-point hook the framework's `final`
+`UltiToolsPlugin#unregisterSelf()` invokes as of UltiTools 6.3.0, before the framework's own
+command and listener cleanup for this module. Before `UltiKits/UltiTrade#15`'s lifecycle-hook
+migration this module overrode `unregisterSelf()`/`reloadSelf()` directly, completely replacing the
+framework's own steps; its reload override only logged a line and was deleted rather than renamed,
+so this module has no `onReload()` hook and `/ul reload UltiTrade` now runs only the framework's own
+reload steps (config reload, language refresh, `@ConditionalOnConfig` drift report, and the
+framework's per-module `Module 'UltiTrade' reloaded.` INFO line). The hook is not reachable through a
+command this repository maps itself, so the row below is `event`-Kind, not `command`-Kind.
+
+| ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
+|---|---|---|---|---|---|---|---|---|
+| ultitrade.lifecycle.unload | When the module is unloaded (for example by `/upm uninstall UltiTrade`), shut down `TradeService` then `TradeLogService`, unregister the `ultitrade` PlaceholderAPI expansion if one was registered and clear the reference so a repeated unload cannot unregister it twice, then log the module's own "disabled" console line (the Chinese literal in `UltiTrade#onUnregister`, printed identically under either `language`, `UltiKits/UltiTrade#16`) | event | unload the `UltiTrade` module at runtime (framework calls `unregisterSelf()`, which invokes this hook before its own command/listener cleanup) | n/a | n/a | admin | brief | UltiTrade#onUnregister |
 
 ## Data persistence
 

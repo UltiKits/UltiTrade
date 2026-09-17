@@ -46,7 +46,7 @@ public class UltiTrade extends UltiToolsPlugin {
     }
 
     @Override
-    public void unregisterSelf() {
+    protected void onUnregister() {
         // Shutdown services
         shutdownServices();
 
@@ -57,11 +57,6 @@ public class UltiTrade extends UltiToolsPlugin {
         }
 
         getLogger().info(i18n("UltiTrade 已禁用！"));
-    }
-
-    @Override
-    public void reloadSelf() {
-        getLogger().info(i18n("UltiTrade 配置已重载！"));
     }
 
     /**
