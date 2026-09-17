@@ -54,16 +54,23 @@ public class TradeGUI implements InventoryHolder {
         this.session = session;
         this.viewer = viewer;
         
-        Player other = Bukkit.getPlayer(session.getOtherPlayer(viewer.getUniqueId()));
-        String title = tradeService.getConfig().getGuiTitle()
-            .replace("{PLAYER}", other != null ? other.getName() : "???");
-        
-        this.inventory = Bukkit.createInventory(this, 54, 
-            ChatColor.translateAlternateColorCodes('&', title));
+        this.inventory = Bukkit.createInventory(this, 54, buildTitle());
         
         initializeGUI();
     }
     
+    /**
+     * Build the window title from the current {@code gui-title} configuration value.
+     *
+     * @return the colour-translated title naming the other player
+     */
+    public String buildTitle() {
+        Player other = Bukkit.getPlayer(session.getOtherPlayer(viewer.getUniqueId()));
+        String title = tradeService.getConfig().getGuiTitle()
+            .replace("{PLAYER}", other != null ? other.getName() : "???");
+        return ChatColor.translateAlternateColorCodes('&', title);
+    }
+
     /**
      * Initialize GUI elements.
      */

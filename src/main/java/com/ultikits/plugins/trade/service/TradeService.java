@@ -21,6 +21,8 @@ import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.InventoryHolder;
+import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.RegisteredServiceProvider;
@@ -174,6 +176,39 @@ public class TradeService {
                 Player player = Bukkit.getPlayer(participant);
                 if (player != null) {
                     player.sendMessage(ChatColor.YELLOW + RECONFIRM_AFTER_RELOAD_MESSAGE);
+                }
+            }
+        }
+    }
+
+    /**
+     * Redraw every open trade window from the reloaded configuration (UltiKits/UltiTrade#27).
+     * <p>
+     * An open trade window shows values a reload can change: the title ({@code gui-title}),
+     * money and experience availability, and the money and experience tax
+     * ({@code trade-tax}, {@code exp-tax-rate}). A window is redrawn in place, which keeps it open
+     * and so does not trigger the close-cancels-the-trade handling. An open large-trade
+     * confirmation page, which also shows the taxes and {@code confirm-threshold}, is replaced by
+     * a trade window built from the reloaded configuration. Offers are read from the session, so
+     * nothing offered is added, removed or returned.
+     */
+    public void refreshOpenTradeWindowsAfterReload() {
+        for (TradeSession session : activeSessions.values()) {
+            for (UUID participant : new UUID[] {session.getPlayer1(), session.getPlayer2()}) {
+                Player player = Bukkit.getPlayer(participant);
+                InventoryView view = player == null ? null : player.getOpenInventory();
+                if (view == null || view.getTopInventory() == null) {
+                    continue;
+                }
+                InventoryHolder holder = view.getTopInventory().getHolder();
+                if (holder instanceof TradeGUI) {
+                    TradeGUI gui = (TradeGUI) holder;
+                    gui.update();
+                    view.setTitle(gui.buildTitle());
+                } else if (holder instanceof TradeConfirmPage) {
+                    TradeGUI gui = new TradeGUI(this, session, player);
+                    gui.update();
+                    player.openInventory(gui.getInventory());
                 }
             }
         }

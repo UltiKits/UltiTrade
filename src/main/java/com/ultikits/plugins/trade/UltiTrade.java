@@ -38,8 +38,8 @@ public class UltiTrade extends UltiToolsPlugin {
             + " money trading keeps its previous provider until the next successful /ul reload UltiTrade";
 
     static final String CONFIRMATION_RESET_FAILED =
-            "Could not void the confirmations of open trades after the reload;"
-            + " a trade confirmed before the reload may complete on the reloaded terms";
+            "Could not void the confirmations of open trades or redraw their windows after the reload;"
+            + " a trade confirmed or displayed before the reload may complete on the reloaded terms";
 
     private TradePlaceholderExpansion placeholderExpansion;
 
@@ -96,9 +96,11 @@ public class UltiTrade extends UltiToolsPlugin {
                 getLogger().error(e, ECONOMY_RECONCILE_FAILED);
             }
 
-            // Confirmations given before the reload may cover terms the reload changed.
+            // Confirmations given before the reload may cover terms the reload changed, and open
+            // windows show those terms: void the first, then redraw the second.
             try {
                 tradeService.resetConfirmationsAfterReload();
+                tradeService.refreshOpenTradeWindowsAfterReload();
             } catch (RuntimeException e) {
                 getLogger().error(e, CONFIRMATION_RESET_FAILED);
             }

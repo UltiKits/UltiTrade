@@ -98,6 +98,7 @@ class UltiTradeTest {
             order.verify(logService, times(1)).reloadCleanupTask();
             order.verify(tradeService, times(1)).reloadEconomy();
             order.verify(tradeService, times(1)).resetConfirmationsAfterReload();
+            order.verify(tradeService, times(1)).refreshOpenTradeWindowsAfterReload();
             verifyNoMoreInteractions(logService, tradeService);
         }
 
