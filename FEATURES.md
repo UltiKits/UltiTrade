@@ -188,7 +188,9 @@ framework's own steps; its reload override only logged a line and was deleted ra
 INFO line) and then, as of `UltiKits/UltiTrade#26`, this module's `UltiTrade#onReload()` hook, which
 re-runs the Vault economy lookup (`TradeService#reloadEconomy`) and reschedules the old-log cleanup
 task (`TradeLogService#reloadCleanupTask`), because `enable-money-trade`, `enable-trade-log` and
-`cleanup-interval-hours` are applied through state the services set up when they start. Neither hook
+`cleanup-interval-hours` are applied through state the services set up when they start. Each
+reconciliation runs even if the other fails: a failure is logged at SEVERE and the other still runs.
+Neither hook
 is reachable through a command this repository maps itself, so all three rows below are
 `event`-Kind, not `command`-Kind.
 `ultitrade.lifecycle.reload` records what `/ul reload UltiTrade` now changes for an operator:
