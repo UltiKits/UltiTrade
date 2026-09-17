@@ -39,6 +39,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyFloat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -346,6 +347,41 @@ class TradeReloadReconciliationTest {
         }
 
         @Test
+        @DisplayName("one player confirmed, then a reload changes trade-tax: the trade does not complete on the other player's confirmation and both must confirm again")
+        void reloadResetsConfirmationsBeforeChangedTermsApply() throws Exception {
+            loadConfig("enable-money-trade: true\ntrade-tax: 0.0\n");
+            session.setConfirmed(offerer.getUniqueId(), true);
+
+            reload("enable-money-trade: true\ntrade-tax: 1.0\n");
+            tradeService.confirmTrade(counterparty);
+
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.TRADING);
+            assertThat(session.isConfirmed(offerer.getUniqueId())).isFalse();
+            verify(vaultEconomy, never()).withdrawPlayer(any(Player.class), anyDouble());
+            verify(counterpartyInventory, never()).addItem(offererItem);
+            verify(offerer).sendMessage(contains(RECONFIRM_AFTER_RELOAD));
+        }
+
+        @Test
+        @DisplayName("experience offered, then a reload turns enable-exp-trade off: the trade is cancelled instead of moving items without the experience")
+        void expOfferAfterExpTradeDisabledCancelsTrade() throws Exception {
+            session.setMoney(offerer.getUniqueId(), 0.0);
+            session.setExp(offerer.getUniqueId(), 100);
+
+            reload("enable-money-trade: true\nenable-exp-trade: false\n");
+            session.setConfirmed(offerer.getUniqueId(), true);
+            tradeService.confirmTrade(counterparty);
+
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+            verify(counterparty, never()).giveExp(anyInt());
+            verify(offerer, never()).setExp(anyFloat());
+            verify(counterpartyInventory, never()).addItem(offererItem);
+            verify(offererInventory, never()).addItem(counterpartyItem);
+            verify(sessionLog, never()).logCompletedTrade(any(), any(), any(), anyDouble(), anyInt());
+            verify(offerer).sendMessage(contains(EXP_UNAVAILABLE_REASON));
+        }
+
+        @Test
         @DisplayName("no money offered: a reload that turns money trading off does not stop an item-only trade")
         void itemOnlyTradeStillCompletes() throws Exception {
             session.setMoney(offerer.getUniqueId(), 0.0);
@@ -480,6 +516,8 @@ class TradeReloadReconciliationTest {
         }
     }
 
+    private static final String EXP_UNAVAILABLE_REASON = "\u7ECF\u9A8C\u4EA4\u6613\u5F53\u524D\u4E0D\u53EF\u7528"; // "经验交易当前不可用"
+    private static final String RECONFIRM_AFTER_RELOAD = "\u8BF7\u91CD\u65B0\u786E\u8BA4"; // "请重新确认"
     private static final String MONEY_UNAVAILABLE_REASON = "\u91D1\u5E01\u4EA4\u6613\u5F53\u524D\u4E0D\u53EF\u7528"; // "金币交易当前不可用"
 
     /** Make the services manager return a registration for {@code provider}, built before the stub starts. */
