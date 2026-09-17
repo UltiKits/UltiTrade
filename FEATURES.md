@@ -191,7 +191,10 @@ task (`TradeLogService#reloadCleanupTask`), because `enable-money-trade`, `enabl
 `cleanup-interval-hours` are applied through state the services set up when they start. A reload
 that changes neither `enable-trade-log` nor `cleanup-interval-hours` leaves the running cleanup task
 and its countdown untouched; changing either reschedules the task (or, with `enable-trade-log: false`,
-stops it), and a rescheduled task first runs one full new interval after the reload. An exception from one reconciliation is logged at SEVERE, naming
+stops it), and a rescheduled task first runs one full new interval after the reload. The hook
+also voids the confirmations of every open trade and tells both players to confirm again, because a
+reload may change the terms they confirmed (`trade-tax`, `exp-tax-rate`, `confirm-threshold`); a
+trade that carries experience is cancelled at completion when `enable-exp-trade` is off. An exception from one reconciliation is logged at SEVERE, naming
 the keys it could not apply, and the other still runs. Neither hook is reachable through a command
 this repository maps itself, so all three rows below are `event`-Kind, not `command`-Kind.
 `ultitrade.lifecycle.reload` records what `/ul reload UltiTrade` now changes for an operator:

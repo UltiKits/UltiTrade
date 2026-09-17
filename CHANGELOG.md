@@ -28,6 +28,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   unavailable, instead of the items and experience being exchanged without the offered money. While
   money trading is unavailable, the chat amount prompt also refuses a money amount instead of accepting
   it (UltiKits/UltiTrade#26).
+- `/ul reload UltiTrade` now voids the confirmations of every open trade that had one and tells both
+  players to confirm again, so a trade no longer completes on terms such as `trade-tax`, `exp-tax-rate`
+  or `confirm-threshold` that the reload changed after a player confirmed. A trade in which either
+  player offered experience is likewise cancelled if `enable-exp-trade` is off when it completes,
+  instead of the items being exchanged without the experience (UltiKits/UltiTrade#26).
 - `/upm uninstall UltiTrade` now runs this module's own cleanup (trade service shutdown,
   PlaceholderAPI expansion unregistration) first, then the framework's command unregistration, then
   its listener unregistration, so after the uninstall the module's commands are really removed and
@@ -46,6 +51,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   关闭了 `enable-money-trade`，或重载时未找到 Vault 经济提供者），该交易现在会被取消：不转移任何金币，双方各自
   取回自己放入的物品，并被告知金币交易当前不可用，而不是在不支付所出金币的情况下交换物品与经验。金币交易
   不可用时，聊天输入金额提示也会拒绝金币数额，而不是接受它（UltiKits/UltiTrade#26）。
+- `/ul reload UltiTrade` 现在会清除所有已有确认的进行中交易的确认状态，并提示双方重新确认，因此交易不会再按
+  玩家确认后被重载修改的条款（如 `trade-tax`、`exp-tax-rate`、`confirm-threshold`）完成。同样，若任一方出价了
+  经验，而交易完成时 `enable-exp-trade` 已关闭，该交易会被取消，而不是在不转移经验的情况下交换物品
+  （UltiKits/UltiTrade#26）。
 - `/upm uninstall UltiTrade` 现在会先执行本模块自身的清理（关闭交易服务、注销 PlaceholderAPI 扩展），
   再由框架注销命令，最后注销监听器，因此卸载后本模块的命令会被真正移除，其监听器也不再触发。此前本模块
   的卸载方法替换了框架的卸载方法，因此其命令和监听器都会一直保持生效，直到服务器重启
