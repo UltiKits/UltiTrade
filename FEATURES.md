@@ -20,7 +20,7 @@ for UAT execution and issue reconciliation — the public description of these f
   `placeholder`, `persistence`, `gate`. This module has no `gate` rows (0 `@ConditionalOnConfig`
   sites, confirmed below) — the Kind stays in the vocabulary for cross-repository consistency
   even though it does not appear below. Unlike UltiChat and UltiRemoteBag, this module DOES carry
-  `placeholder` rows (`TradePlaceholderExpansion`). The two rows under `## Lifecycle Hooks` are
+  `placeholder` rows (`TradePlaceholderExpansion`). The three rows under `## Lifecycle Hooks` are
   `event` rows with no `@EventHandler` site behind them: module unload and `/ul reload` are
   framework-invoked lifecycle steps, not commands this repository maps or config reads, so `event`
   is the closest-fitting Kind.
@@ -68,7 +68,8 @@ for UAT execution and issue reconciliation — the public description of these f
   its real, shipped form — Chinese, in English gloss — never in the unused English lang key's
   text, and no checklist row carries a `language: en` precondition for this module's own strings,
   because that precondition would produce a false expectation (`UAT-CHECKLIST.md`'s
-  `ultitrade.lifecycle.reload` sets it only for two framework-owned console lines).
+  `ultitrade.lifecycle.reload` and `ultitrade.lifecycle.reload-money-trade` set it only for two
+  framework-owned console lines).
 
 ### Reconciliation command family
 
@@ -181,18 +182,24 @@ persisted `PlayerTradeSettings`, so it reflects the value as of the player's las
 `UltiToolsPlugin#unregisterSelf()` invokes as of UltiTools 6.3.0, before the framework's own
 command and listener cleanup for this module. Before `UltiKits/UltiTrade#15`'s lifecycle-hook
 migration this module overrode `unregisterSelf()`/`reloadSelf()` directly, completely replacing the
-framework's own steps; its reload override only logged a line and was deleted rather than renamed,
-so this module has no `onReload()` hook and `/ul reload UltiTrade` now runs only the framework's own
-reload steps (config reload, language refresh, `@ConditionalOnConfig` drift report, and the
-framework's per-module `Module 'UltiTrade' reloaded.` INFO line). The hook is not reachable through a
-command this repository maps itself, so both rows below are `event`-Kind, not `command`-Kind.
+framework's own steps; its reload override only logged a line and was deleted rather than renamed.
+`/ul reload UltiTrade` runs the framework's own reload steps (config reload, language refresh,
+`@ConditionalOnConfig` drift report, and the framework's per-module `Module 'UltiTrade' reloaded.`
+INFO line) and then, as of `UltiKits/UltiTrade#26`, this module's `UltiTrade#onReload()` hook, which
+re-runs the Vault economy lookup (`TradeService#reloadEconomy`) and reschedules the old-log cleanup
+task (`TradeLogService#reloadCleanupTask`), because `enable-money-trade`, `enable-trade-log` and
+`cleanup-interval-hours` are applied through state the services set up when they start. Neither hook
+is reachable through a command this repository maps itself, so all three rows below are
+`event`-Kind, not `command`-Kind.
 `ultitrade.lifecycle.reload` records what `/ul reload UltiTrade` now changes for an operator:
 `ConfigManager#reloadConfigs` re-initialises, in place, the same `TradeConfig` instance the
 container injected into `TradeService`, and `TradeService` reads its getters at call time.
+`ultitrade.lifecycle.reload-money-trade` records the start-up-captured case the hook exists for.
 
 | ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
 |---|---|---|---|---|---|---|---|---|
-| ultitrade.lifecycle.reload | `/ul reload UltiTrade` re-reads `config/trade.yml` into the running module, so an edited value such as `max-distance` applies to the next trade request without a restart; this module adds no reload work of its own (it has no `onReload()` hook) and prints no reload line of its own. Before `UltiKits/UltiTrade#15` the module's reload override replaced the framework's reload and only logged, so an edit took effect only after a restart | event | `/ul reload UltiTrade` (framework calls `reloadSelf()`, which reloads configuration, refreshes language, reports `@ConditionalOnConfig` drift and logs its own per-module line) | n/a | n/a | admin | brief | TradeService#sendRequest |
+| ultitrade.lifecycle.reload | `/ul reload UltiTrade` re-reads `config/trade.yml` into the running module, so an edited value such as `max-distance` applies to the next trade request without a restart; `max-distance` needs no reload work from this module's `onReload()` hook, and the module prints no reload line of its own. Before `UltiKits/UltiTrade#15` the module's reload override replaced the framework's reload and only logged, so an edit took effect only after a restart | event | `/ul reload UltiTrade` (framework calls `reloadSelf()`, which reloads configuration, refreshes language, reports `@ConditionalOnConfig` drift and logs its own per-module line) | n/a | n/a | admin | brief | TradeService#sendRequest |
+| ultitrade.lifecycle.reload-money-trade | `/ul reload UltiTrade` applies an edited `enable-money-trade` in both directions: after a `false` to `true` edit the trade GUI offers money trading without a restart (a gold nugget in the money slot, and clicking it opens the chat amount prompt), and after a `true` to `false` edit it shows the disabled barrier instead. `UltiTrade#onReload()` re-runs the Vault economy lookup, or drops the provider when money trading is off; the same hook also reschedules the old-log cleanup task, so `enable-trade-log` and `cleanup-interval-hours` edits apply without a restart too. Before `UltiKits/UltiTrade#26` the lookup and the task were set up only when the module started, so turning money trading on took effect only after a restart | event | `/ul reload UltiTrade` (framework calls `reloadSelf()`, which reloads configuration first and then invokes this hook) | n/a | n/a | admin | brief | UltiTrade#onReload, TradeService#reloadEconomy, TradeLogService#reloadCleanupTask |
 | ultitrade.lifecycle.unload | When the module is unloaded (for example by `/upm uninstall UltiTrade`), shut down `TradeService` then `TradeLogService`, unregister the `ultitrade` PlaceholderAPI expansion if one was registered and clear the reference so a repeated unload cannot unregister it twice, then log the module's own "disabled" console line (the Chinese literal in `UltiTrade#onUnregister`, printed identically under either `language`, `UltiKits/UltiTrade#16`) | event | unload the `UltiTrade` module at runtime (framework calls `unregisterSelf()`, which invokes this hook before its own command/listener cleanup) | n/a | n/a | admin | brief | UltiTrade#onUnregister |
 
 ## Data persistence
@@ -227,16 +234,16 @@ site instead of reading the configured (also Chinese-only) message.
 | ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
 |---|---|---|---|---|---|---|---|---|
 | ultitrade.config.trade.allow-cross-world | Whether a trade request may be sent across two different worlds. Only actually checked when `max-distance` is above 0 — the whole distance/cross-world block is nested inside `if (config.getMaxDistance() > 0)`, so setting `max-distance: 0` (which disables the distance check entirely, per that key's own row) ALSO silently disables this key's own cross-world restriction, allowing cross-world trades regardless of its value | config | `config/trade.yml: allow-cross-world (default: false, only enforced while max-distance is above 0)` | n/a | n/a | admin | brief | TradeService#sendRequest |
-| ultitrade.config.trade.cleanup-interval-hours | Interval, in hours, at which `ultitrade.persistence.log-retention`'s background task runs | config | `config/trade.yml: cleanup-interval-hours (default: 24)` | n/a | n/a | admin | brief | TradeLogService#init |
+| ultitrade.config.trade.cleanup-interval-hours | Interval, in hours, at which `ultitrade.persistence.log-retention`'s background task runs | config | `config/trade.yml: cleanup-interval-hours (default: 24)` | n/a | n/a | admin | brief | TradeLogService#init, TradeLogService#reloadCleanupTask |
 | ultitrade.config.trade.confirm-threshold | Money-or-experience amount at or above which `ultitrade.session.confirm-large`'s second confirmation step is required | config | `config/trade.yml: confirm-threshold (default: 10000)` | n/a | n/a | admin | brief | TradeService#confirmTrade |
 | ultitrade.config.trade.enable-bossbar | Whether a countdown BossBar is shown to the recipient of a pending trade request | config | `config/trade.yml: enable-bossbar (default: true)` | n/a | n/a | admin | brief | TradeService#sendRequest |
 | ultitrade.config.trade.enable-clickable-buttons | Whether an incoming trade-request notification uses clickable chat buttons (Accept/Deny running the commands directly) rather than plain instructional text | config | `config/trade.yml: enable-clickable-buttons (default: true)` | n/a | n/a | admin | brief | TradeService#notifyTradeRequest |
 | ultitrade.config.trade.enable-exp-trade | Whether experience may be included in a trade at all; when false, both sides' experience slots show a disabled/barrier item instead | config | `config/trade.yml: enable-exp-trade (default: true)` | n/a | n/a | admin | brief | TradeGUI#updateExpDisplay, TradeService#completeTrade |
-| ultitrade.config.trade.enable-money-trade | Whether Vault-backed money trading is set up at all; when false, `hasEconomy()` is always false regardless of whether Vault is installed | config | `config/trade.yml: enable-money-trade (default: true)` | n/a | n/a | admin | brief | TradeService#init, TradeService#hasEconomy |
+| ultitrade.config.trade.enable-money-trade | Whether Vault-backed money trading is set up at all; when false, `hasEconomy()` is always false regardless of whether Vault is installed | config | `config/trade.yml: enable-money-trade (default: true)` | n/a | n/a | admin | brief | TradeService#init, TradeService#reloadEconomy, TradeService#hasEconomy |
 | ultitrade.config.trade.enable-particles | Whether success/failure particle effects play at the end of a trade | config | `config/trade.yml: enable-particles (default: true)` | n/a | n/a | admin | none | TradeService#playSuccessEffects, TradeService#playFailEffects |
 | ultitrade.config.trade.enable-shift-click | Whether `ultitrade.request.shift-click` is active at all | config | `config/trade.yml: enable-shift-click (default: true)` | n/a | n/a | admin | brief | TradeListener#onPlayerInteractEntity |
 | ultitrade.config.trade.enable-sounds | Master switch for every sound effect this module plays | config | `config/trade.yml: enable-sounds (default: true)` | n/a | n/a | admin | brief | TradeService#playSound |
-| ultitrade.config.trade.enable-trade-log | Whether a completed or cancelled trade is written to `trade_logs`, and whether the retention-cleanup background task runs at all | config | `config/trade.yml: enable-trade-log (default: true)` | n/a | n/a | admin | brief | TradeLogService#init, TradeLogService#logCompletedTrade |
+| ultitrade.config.trade.enable-trade-log | Whether a completed or cancelled trade is written to `trade_logs`, and whether the retention-cleanup background task runs at all | config | `config/trade.yml: enable-trade-log (default: true)` | n/a | n/a | admin | brief | TradeLogService#init, TradeLogService#reloadCleanupTask, TradeLogService#logCompletedTrade |
 | ultitrade.config.trade.exp-tax-rate | Fraction of offered experience deducted as tax on a completed trade (0 disables) | config | `config/trade.yml: exp-tax-rate (default: 0.0)` | n/a | n/a | admin | brief | TradeService#completeTrade |
 | ultitrade.config.trade.gui-title | The `TradeGUI` inventory title template, with a `{PLAYER}` placeholder for the other participant's name | config | `config/trade.yml: gui-title (default: a Chinese-language template meaning "Trading with {PLAYER}")` | n/a | n/a | admin | brief | TradeGUI#TradeGUI |
 | ultitrade.config.trade.log-retention-days | Age, in days, past which a `trade_logs` row is deleted by the retention-cleanup task | config | `config/trade.yml: log-retention-days (default: 30)` | n/a | n/a | admin | brief | TradeLogService#cleanupOldLogs |
