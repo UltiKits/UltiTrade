@@ -113,14 +113,14 @@ class UltiTradeTest {
         }
 
         @Test
-        @DisplayName("the module overrides neither final framework template method and declares no reload hook")
-        void noTemplateMethodOrReloadOverride() {
+        @DisplayName("the module overrides neither final framework template method and declares the onReload hook (UltiKits/UltiTrade#26)")
+        void noTemplateMethodOverrideAndDeclaresReloadHook() {
             assertThatThrownBy(() -> UltiTrade.class.getDeclaredMethod("unregisterSelf"))
                     .isInstanceOf(NoSuchMethodException.class);
             assertThatThrownBy(() -> UltiTrade.class.getDeclaredMethod("reloadSelf"))
                     .isInstanceOf(NoSuchMethodException.class);
-            assertThatThrownBy(() -> UltiTrade.class.getDeclaredMethod("onReload"))
-                    .isInstanceOf(NoSuchMethodException.class);
+            assertThatCode(() -> UltiTrade.class.getDeclaredMethod("onReload"))
+                    .doesNotThrowAnyException();
         }
     }
 
