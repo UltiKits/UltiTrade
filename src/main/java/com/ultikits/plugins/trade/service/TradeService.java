@@ -191,26 +191,54 @@ public class TradeService {
      * confirmation page, which also shows the taxes and {@code confirm-threshold}, is replaced by
      * a trade window built from the reloaded configuration. Offers are read from the session, so
      * nothing offered is added, removed or returned.
+     * <p>
+     * Each player's window is redrawn in isolation: a failure is logged at SEVERE with the player's
+     * name and the remaining windows are still redrawn.
      */
     public void refreshOpenTradeWindowsAfterReload() {
         for (TradeSession session : activeSessions.values()) {
             for (UUID participant : new UUID[] {session.getPlayer1(), session.getPlayer2()}) {
                 Player player = Bukkit.getPlayer(participant);
-                InventoryView view = player == null ? null : player.getOpenInventory();
-                if (view == null || view.getTopInventory() == null) {
+                if (player == null) {
                     continue;
                 }
-                InventoryHolder holder = view.getTopInventory().getHolder();
-                if (holder instanceof TradeGUI) {
-                    TradeGUI gui = (TradeGUI) holder;
-                    gui.update();
-                    view.setTitle(gui.buildTitle());
-                } else if (holder instanceof TradeConfirmPage) {
-                    TradeGUI gui = new TradeGUI(this, session, player);
-                    gui.update();
-                    player.openInventory(gui.getInventory());
+                try {
+                    refreshOpenTradeWindow(session, player);
+                } catch (RuntimeException | LinkageError e) {
+                    plugin.getLogger().error(e, "Could not redraw the open trade window of " + player.getName()
+                        + " after the reload; that window shows the previous terms until it is reopened");
                 }
             }
+        }
+    }
+
+    private void refreshOpenTradeWindow(TradeSession session, Player player) {
+        InventoryView view = player.getOpenInventory();
+        if (view == null || view.getTopInventory() == null) {
+            return;
+        }
+        InventoryHolder holder = view.getTopInventory().getHolder();
+        if (holder instanceof TradeGUI) {
+            TradeGUI gui = (TradeGUI) holder;
+            gui.update();
+            retitle(view, gui.buildTitle());
+        } else if (holder instanceof TradeConfirmPage) {
+            TradeGUI gui = new TradeGUI(this, session, player);
+            gui.update();
+            player.openInventory(gui.getInventory());
+        }
+    }
+
+    /**
+     * Apply a new window title where the server supports it. {@code InventoryView#setTitle} does
+     * not exist on older server versions; there the window's contents are still redrawn and only
+     * its title keeps the previous {@code gui-title} until it is reopened.
+     */
+    private static void retitle(InventoryView view, String title) {
+        try {
+            view.setTitle(title);
+        } catch (NoSuchMethodError | AbstractMethodError | UnsupportedOperationException e) {
+            // Title changes are unsupported on this server; the redrawn contents already apply.
         }
     }
 

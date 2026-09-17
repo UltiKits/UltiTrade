@@ -419,6 +419,8 @@ class TradeReloadReconciliationTest {
 
             verify(windowContents).setItem(TradeGUI.YOUR_SLOTS[0], diamond);
             verify(windowContents).setItem(TradeGUI.YOUR_SLOTS[0], emerald);
+            // An unsupported title change is expected on such a server, not a failure to report.
+            verify(UltiTradeTestHelper.getMockLogger(), never()).error(any(Throwable.class), anyString());
         }
 
         @Test
