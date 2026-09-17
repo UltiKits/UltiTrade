@@ -62,18 +62,28 @@ public class UltiTrade extends UltiToolsPlugin {
     /**
      * Reconcile the services with configuration values they capture at startup. The framework
      * calls this after it has re-read {@code config/trade.yml}, so both services see the new
-     * values (UltiKits/UltiTrade#26).
+     * values (UltiKits/UltiTrade#26). Each reconciliation is isolated: a failure is logged at
+     * SEVERE and the other one still runs, because the framework does not catch an exception
+     * thrown from this hook.
      */
     @Override
     protected void onReload() {
         TradeLogService logService = getContext().getBean(TradeLogService.class);
         if (logService != null) {
-            logService.reloadCleanupTask();
+            try {
+                logService.reloadCleanupTask();
+            } catch (RuntimeException e) {
+                getLogger().error(e, "Failed to reconcile TradeLogService with the reloaded configuration");
+            }
         }
 
         TradeService tradeService = getContext().getBean(TradeService.class);
         if (tradeService != null) {
-            tradeService.reloadEconomy();
+            try {
+                tradeService.reloadEconomy();
+            } catch (RuntimeException e) {
+                getLogger().error(e, "Failed to reconcile TradeService with the reloaded configuration");
+            }
         }
     }
 
