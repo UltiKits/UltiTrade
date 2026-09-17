@@ -889,6 +889,26 @@ class TradeListenerTest {
         }
 
         @Test
+        @DisplayName("experience prompt answered after a reload turned enable-exp-trade off: the amount is refused and the GUI reopens (UltiKits/UltiTrade#26)")
+        void expInputRefusedWhenExpTradeOff() throws Exception {
+            addToWaitingForInput(uuid1, 1); // EXPERIENCE
+
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            when(tradeService.getTotalExperience(player1)).thenReturn(1000);
+            when(config.isEnableExpTrade()).thenReturn(false);
+
+            AsyncPlayerChatEvent event = new AsyncPlayerChatEvent(false, player1, "500", new HashSet<>());
+
+            listener.onPlayerChat(event);
+
+            assertThat(event.isCancelled()).isTrue();
+            assertThat(session.getPlayerExp(uuid1)).isEqualTo(0);
+            verify(player1).sendMessage(contains("\u7ECF\u9A8C\u4EA4\u6613\u5F53\u524D\u4E0D\u53EF\u7528")); // "经验交易当前不可用"
+            verify(org.bukkit.Bukkit.getServer().getScheduler()).runTask(any(), any(Runnable.class));
+        }
+
+        @Test
         @DisplayName("Should reject exp input exceeding available exp")
         void rejectInsufficientExp() throws Exception {
             addToWaitingForInput(uuid1, 1); // EXPERIENCE
