@@ -20,9 +20,10 @@ for UAT execution and issue reconciliation — the public description of these f
   `placeholder`, `persistence`, `gate`. This module has no `gate` rows (0 `@ConditionalOnConfig`
   sites, confirmed below) — the Kind stays in the vocabulary for cross-repository consistency
   even though it does not appear below. Unlike UltiChat and UltiRemoteBag, this module DOES carry
-  `placeholder` rows (`TradePlaceholderExpansion`). The one row under `## Lifecycle Hooks` is an
-  `event` row with no `@EventHandler` site behind it: `onUnregister()` is a framework-invoked
-  callback, not a player-triggered command or a config read, so `event` is the closest-fitting Kind.
+  `placeholder` rows (`TradePlaceholderExpansion`). The two rows under `## Lifecycle Hooks` are
+  `event` rows with no `@EventHandler` site behind them: module unload and `/ul reload` are
+  framework-invoked lifecycle steps, not commands this repository maps or config reads, so `event`
+  is the closest-fitting Kind.
 - **Tier**, exactly three: `player`, `admin`, `internal`. Judged from what the feature is for,
   not from whether it carries a permission string.
 - **Manual**, exactly three: `detailed`, `brief`, `none`.
@@ -65,8 +66,9 @@ for UAT execution and issue reconciliation — the public description of these f
   finding both `en` and `zh` lang files and letting the module resolve to `en` without error.
   Filed as `UltiKits/UltiTrade#16`. Every Feature/Expected quotation below is therefore given in
   its real, shipped form — Chinese, in English gloss — never in the unused English lang key's
-  text, and no row below carries a `language: en` precondition, because that precondition would
-  produce a false expectation.
+  text, and no checklist row carries a `language: en` precondition for this module's own strings,
+  because that precondition would produce a false expectation (`UAT-CHECKLIST.md`'s
+  `ultitrade.lifecycle.reload` sets it only for two framework-owned console lines).
 
 ### Reconciliation command family
 
@@ -183,10 +185,14 @@ framework's own steps; its reload override only logged a line and was deleted ra
 so this module has no `onReload()` hook and `/ul reload UltiTrade` now runs only the framework's own
 reload steps (config reload, language refresh, `@ConditionalOnConfig` drift report, and the
 framework's per-module `Module 'UltiTrade' reloaded.` INFO line). The hook is not reachable through a
-command this repository maps itself, so the row below is `event`-Kind, not `command`-Kind.
+command this repository maps itself, so both rows below are `event`-Kind, not `command`-Kind.
+`ultitrade.lifecycle.reload` records what `/ul reload UltiTrade` now changes for an operator:
+`ConfigManager#reloadConfigs` re-initialises, in place, the same `TradeConfig` instance the
+container injected into `TradeService`, and `TradeService` reads its getters at call time.
 
 | ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
 |---|---|---|---|---|---|---|---|---|
+| ultitrade.lifecycle.reload | `/ul reload UltiTrade` re-reads `config/trade.yml` into the running module, so an edited value such as `max-distance` applies to the next trade request without a restart; this module adds no reload work of its own (it has no `onReload()` hook) and prints no reload line of its own. Before `UltiKits/UltiTrade#15` the module's reload override replaced the framework's reload and only logged, so an edit took effect only after a restart | event | `/ul reload UltiTrade` (framework calls `reloadSelf()`, which reloads configuration, refreshes language, reports `@ConditionalOnConfig` drift and logs its own per-module line) | n/a | n/a | admin | brief | TradeService#sendRequest |
 | ultitrade.lifecycle.unload | When the module is unloaded (for example by `/upm uninstall UltiTrade`), shut down `TradeService` then `TradeLogService`, unregister the `ultitrade` PlaceholderAPI expansion if one was registered and clear the reference so a repeated unload cannot unregister it twice, then log the module's own "disabled" console line (the Chinese literal in `UltiTrade#onUnregister`, printed identically under either `language`, `UltiKits/UltiTrade#16`) | event | unload the `UltiTrade` module at runtime (framework calls `unregisterSelf()`, which invokes this hook before its own command/listener cleanup) | n/a | n/a | admin | brief | UltiTrade#onUnregister |
 
 ## Data persistence
