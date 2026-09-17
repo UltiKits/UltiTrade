@@ -21,6 +21,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   replaces it. Previously the economy lookup and the cleanup task were set up only when the module
   started, so turning money trading on, and any change to the cleanup task, took effect only after a
   restart (UltiKits/UltiTrade#26).
+- A trade in which either player offered money is now cancelled if money trading is not available at
+  the moment the trade completes, for example after `/ul reload UltiTrade` turned `enable-money-trade`
+  off while the trade was open, or after a reload found no Vault economy provider. No money moves, each
+  player gets back the items they offered, and both players are told that money trading is currently
+  unavailable, instead of the items and experience being exchanged without the offered money. While
+  money trading is unavailable, the chat amount prompt also refuses a money amount instead of accepting
+  it (UltiKits/UltiTrade#26).
 - `/upm uninstall UltiTrade` now runs this module's own cleanup (trade service shutdown,
   PlaceholderAPI expansion unregistration) first, then the framework's command unregistration, then
   its listener unregistration, so after the uninstall the module's commands are really removed and
@@ -35,6 +42,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   清理任务，使关闭 `enable-trade-log` 后该任务停止、开启后启动一个任务、修改间隔后以新间隔替换。此前经济
   提供者查找与清理任务只在模块启动时设置，因此开启金币交易以及对清理任务的任何修改都要重启后才生效
   （UltiKits/UltiTrade#26）。
+- 若交易中任一方出价了金币，而在交易完成的那一刻金币交易不可用（例如交易进行中执行 `/ul reload UltiTrade`
+  关闭了 `enable-money-trade`，或重载时未找到 Vault 经济提供者），该交易现在会被取消：不转移任何金币，双方各自
+  取回自己放入的物品，并被告知金币交易当前不可用，而不是在不支付所出金币的情况下交换物品与经验。金币交易
+  不可用时，聊天输入金额提示也会拒绝金币数额，而不是接受它（UltiKits/UltiTrade#26）。
 - `/upm uninstall UltiTrade` 现在会先执行本模块自身的清理（关闭交易服务、注销 PlaceholderAPI 扩展），
   再由框架注销命令，最后注销监听器，因此卸载后本模块的命令会被真正移除，其监听器也不再触发。此前本模块
   的卸载方法替换了框架的卸载方法，因此其命令和监听器都会一直保持生效，直到服务器重启
