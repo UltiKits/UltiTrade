@@ -334,7 +334,8 @@ public class TradeService {
         }
         
         // Create and store request
-        TradeRequest request = new TradeRequest(sender.getUniqueId(), target.getUniqueId());
+        // The timeout is promised to the receiver now; a later reload applies only to new requests.
+        TradeRequest request = new TradeRequest(sender.getUniqueId(), target.getUniqueId(), config.getRequestTimeout());
         pendingRequests.put(target.getUniqueId(), request);
         
         // Notify sender
@@ -347,7 +348,7 @@ public class TradeService {
         
         // Show BossBar if enabled
         if (config.isEnableBossbar()) {
-            showRequestBossBar(target, sender.getName());
+            showRequestBossBar(target, sender.getName(), request.getTimeoutSeconds());
         }
         
         return true;
@@ -389,12 +390,12 @@ public class TradeService {
     /**
      * Show BossBar for trade request countdown.
      */
-    private void showRequestBossBar(Player target, String senderName) {
+    private void showRequestBossBar(Player target, String senderName, int timeoutSeconds) {
         // Remove existing BossBar if any
         removeBossBar(target.getUniqueId());
         
         BossBar bar = Bukkit.createBossBar(
-            ChatColor.YELLOW + senderName + " 请求与你交易 (剩余 " + config.getRequestTimeout() + "秒)",
+            ChatColor.YELLOW + senderName + " 请求与你交易 (剩余 " + timeoutSeconds + "秒)",
             BarColor.YELLOW,
             BarStyle.SOLID
         );
@@ -403,7 +404,7 @@ public class TradeService {
         requestBossBars.put(target.getUniqueId(), bar);
         
         // Start countdown task
-        final int[] remaining = {config.getRequestTimeout()};
+        final int[] remaining = {timeoutSeconds};
         BukkitTask task = Bukkit.getScheduler().runTaskTimer(bukkitPlugin, () -> {
             remaining[0]--;
             if (remaining[0] <= 0) {
@@ -411,7 +412,7 @@ public class TradeService {
                 return;
             }
             
-            double progress = (double) remaining[0] / config.getRequestTimeout();
+            double progress = (double) remaining[0] / timeoutSeconds;
             bar.setProgress(Math.max(0, progress));
             bar.setTitle(ChatColor.YELLOW + senderName + " 请求与你交易 (剩余 " + remaining[0] + "秒)");
             
@@ -451,7 +452,7 @@ public class TradeService {
         removeBossBar(player.getUniqueId());
         
         TradeRequest request = pendingRequests.remove(player.getUniqueId());
-        if (request == null || request.isExpired(config.getRequestTimeout())) {
+        if (request == null || request.isExpired()) {
             player.sendMessage(ChatColor.RED + "没有待处理的交易请求！");
             return false;
         }
@@ -834,11 +835,10 @@ public class TradeService {
      */
     @Scheduled(period = 200, async = false)
     public void cleanupExpiredRequests() {
-        int timeout = config.getRequestTimeout();
         Iterator<Map.Entry<UUID, TradeRequest>> it = pendingRequests.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<UUID, TradeRequest> entry = it.next();
-            if (entry.getValue().isExpired(timeout)) {
+            if (entry.getValue().isExpired()) {
                 it.remove();
                 removeBossBar(entry.getKey());
                 

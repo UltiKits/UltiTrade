@@ -20,7 +20,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   turning `enable-trade-log` off stops that task, turning it on starts one, and a changed interval
   replaces it. Previously the economy lookup and the cleanup task were set up only when the module
   started, so turning money trading on, and any change to the cleanup task, took effect only after a
-  restart (UltiKits/UltiTrade#26).
+  restart. A trade request that is already pending keeps the timeout it was sent with; a changed
+  `request-timeout` applies to requests sent after the reload (UltiKits/UltiTrade#26).
 - A trade in which either player offered money is now cancelled if money trading is not available at
   the moment the trade completes, for example after `/ul reload UltiTrade` turned `enable-money-trade`
   off while the trade was open, or after a reload found no Vault economy provider. No money moves, each
@@ -55,8 +56,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `/ul reload UltiTrade` 现在还会应用 `enable-money-trade`、`enable-trade-log` 和 `cleanup-interval-hours`。
   本模块新增的重载钩子会重新查找 Vault 经济提供者，使开启或关闭金币交易无需重启即可生效；并重新调度旧日志
   清理任务，使关闭 `enable-trade-log` 后该任务停止、开启后启动一个任务、修改间隔后以新间隔替换。此前经济
-  提供者查找与清理任务只在模块启动时设置，因此开启金币交易以及对清理任务的任何修改都要重启后才生效
-  （UltiKits/UltiTrade#26）。
+  提供者查找与清理任务只在模块启动时设置，因此开启金币交易以及对清理任务的任何修改都要重启后才生效。已发出的
+  待处理交易请求保持其发出时的超时时间；修改后的 `request-timeout` 只对重载之后发出的请求生效（UltiKits/UltiTrade#26）。
 - 若交易中任一方出价了金币，而在交易完成的那一刻金币交易不可用（例如交易进行中执行 `/ul reload UltiTrade`
   关闭了 `enable-money-trade`，或重载时未找到 Vault 经济提供者），该交易现在会被取消：不转移任何金币，双方各自
   取回自己放入的物品，并被告知金币交易当前不可用，而不是在不支付所出金币的情况下交换物品与经验。金币交易
