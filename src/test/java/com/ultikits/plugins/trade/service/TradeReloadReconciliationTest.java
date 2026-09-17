@@ -17,6 +17,7 @@ import org.bukkit.Server;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
+import org.bukkit.inventory.ItemFactory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.PlayerInventory;
@@ -52,6 +53,7 @@ import static org.mockito.ArgumentMatchers.anyFloat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -304,6 +306,10 @@ class TradeReloadReconciliationTest {
             when(counterpartyView.getTopInventory()).thenReturn(counterpartyTop);
             when(offerer.getOpenInventory()).thenReturn(offererView);
             when(counterparty.getOpenInventory()).thenReturn(counterpartyView);
+            // Keep item meta (and so the rendered lore) when the window builds its items.
+            ItemFactory itemFactory = server.getItemFactory();
+            when(itemFactory.asMetaFor(any(ItemMeta.class), any(Material.class))).thenAnswer(inv -> inv.getArgument(0));
+            when(itemFactory.asMetaFor(any(ItemMeta.class), any(ItemStack.class))).thenAnswer(inv -> inv.getArgument(0));
         }
 
         private java.util.List<String> plainLore(ItemStack item) {
@@ -355,12 +361,15 @@ class TradeReloadReconciliationTest {
             when(offererTop.getHolder()).thenReturn(page);
             openWindow(counterparty, counterpartyTop);
 
+            clearInvocations(server);
+
             reload("enable-money-trade: true\ntrade-tax: 0.5\n");
 
-            ArgumentCaptor<Inventory> opened = ArgumentCaptor.forClass(Inventory.class);
-            verify(offerer).openInventory(opened.capture());
-            assertThat(opened.getValue().getHolder()).isInstanceOf(TradeGUI.class);
-            assertThat(((TradeGUI) opened.getValue().getHolder()).getViewer()).isSameAs(offerer);
+            verify(server, atLeastOnce()).createInventory(
+                    argThat(holder -> holder instanceof TradeGUI && ((TradeGUI) holder).getViewer() == offerer),
+                    eq(54), anyString());
+            verify(offerer).openInventory(any(Inventory.class));
+            verify(counterparty, never()).openInventory(any(Inventory.class));
             assertThat(tradeService.isTrading(offerer.getUniqueId())).isTrue();
         }
 
