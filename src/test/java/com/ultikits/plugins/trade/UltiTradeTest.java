@@ -110,7 +110,8 @@ class UltiTradeTest {
             assertThatCode(() -> plugin.onReload()).doesNotThrowAnyException();
 
             verify(tradeService, times(1)).reloadEconomy();
-            verify(logger).error(failure, "Failed to reconcile TradeLogService with the reloaded configuration");
+            verify(logger).error(failure, "Could not apply enable-trade-log or cleanup-interval-hours from the reloaded configuration;"
+                    + " the old-log cleanup task keeps its previous schedule until the next successful /ul reload UltiTrade");
         }
 
         @Test
@@ -123,7 +124,8 @@ class UltiTradeTest {
             assertThatCode(() -> plugin.onReload()).doesNotThrowAnyException();
 
             verify(logService, times(1)).reloadCleanupTask();
-            verify(logger).error(failure, "Failed to reconcile TradeService with the reloaded configuration");
+            verify(logger).error(failure, "Could not apply enable-money-trade from the reloaded configuration;"
+                    + " money trading keeps its previous provider until the next successful /ul reload UltiTrade");
         }
 
         @Test
