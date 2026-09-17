@@ -4,14 +4,21 @@ import com.ultikits.plugins.trade.UltiTrade;
 import com.ultikits.plugins.trade.UltiTradeTestHelper;
 import com.ultikits.plugins.trade.config.TradeConfig;
 import com.ultikits.plugins.trade.entity.TradeSession;
+import com.ultikits.plugins.trade.gui.TradeConfirmPage;
+import com.ultikits.plugins.trade.gui.TradeGUI;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.context.SimpleContainer;
 
 import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.Material;
 import org.bukkit.Server;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.RegisteredServiceProvider;
@@ -24,6 +31,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 
 import java.io.File;
 import java.lang.reflect.Field;
@@ -37,6 +45,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyFloat;
@@ -231,6 +240,144 @@ class TradeReloadReconciliationTest {
 
             verify(server.getServicesManager(), never()).getRegistration(any());
             verify(UltiTradeTestHelper.getMockLogger(), never()).warn(anyString());
+        }
+    }
+
+    @Nested
+    @DisplayName("open trade windows and confirmation pages across a reload (UltiKits/UltiTrade#27)")
+    class OpenTradeWindows {
+
+        private Economy vaultEconomy;
+        private Server server;
+        private Player offerer;
+        private Player counterparty;
+        private PlayerInventory offererInventory;
+        private PlayerInventory counterpartyInventory;
+        private InventoryView offererView;
+        private InventoryView counterpartyView;
+        private Inventory offererTop;
+        private Inventory counterpartyTop;
+        private ItemStack diamond;
+        private ItemStack emerald;
+        private TradeSession session;
+
+        @BeforeEach
+        void openTradeWindowsAtZeroTax() throws Exception {
+            server = Bukkit.getServer();
+            vaultEconomy = UltiTradeTestHelper.createMockEconomy();
+            when(server.getPluginManager().getPlugin("Vault")).thenReturn(mock(Plugin.class));
+            stubProvider(server, vaultEconomy);
+            TradeLogService sessionLog = mock(TradeLogService.class);
+            UltiTradeTestHelper.setField(tradeService, "logService", sessionLog);
+
+            offerer = UltiTradeTestHelper.createMockPlayer("Offerer", UUID.randomUUID());
+            counterparty = UltiTradeTestHelper.createMockPlayer("Counterparty", UUID.randomUUID());
+            UUID offererId = offerer.getUniqueId();
+            UUID counterpartyId = counterparty.getUniqueId();
+            doReturn(offerer).when(server).getPlayer(offererId);
+            doReturn(counterparty).when(server).getPlayer(counterpartyId);
+            offererInventory = offerer.getInventory();
+            counterpartyInventory = counterparty.getInventory();
+            when(offererInventory.addItem(any(ItemStack.class))).thenReturn(new HashMap<>());
+            when(counterpartyInventory.addItem(any(ItemStack.class))).thenReturn(new HashMap<>());
+
+            loadConfig("enable-money-trade: true\ntrade-tax: 0.0\n");
+            tradeService.init();
+
+            session = new TradeSession(offerer, counterparty);
+            diamond = new ItemStack(Material.DIAMOND, 3);
+            emerald = new ItemStack(Material.EMERALD, 5);
+            session.setItem(offererId, 0, diamond);
+            session.setItem(counterpartyId, 0, emerald);
+            session.setMoney(offererId, 1000.0);
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(tradeService, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(tradeService, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(offererId, session.getSessionId());
+            playerSessionMap.put(counterpartyId, session.getSessionId());
+
+            offererView = mock(InventoryView.class);
+            counterpartyView = mock(InventoryView.class);
+            offererTop = mock(Inventory.class);
+            counterpartyTop = mock(Inventory.class);
+            when(offererView.getTopInventory()).thenReturn(offererTop);
+            when(counterpartyView.getTopInventory()).thenReturn(counterpartyTop);
+            when(offerer.getOpenInventory()).thenReturn(offererView);
+            when(counterparty.getOpenInventory()).thenReturn(counterpartyView);
+        }
+
+        private java.util.List<String> plainLore(ItemStack item) {
+            java.util.List<String> plain = new java.util.ArrayList<>();
+            ItemMeta meta = item == null ? null : item.getItemMeta();
+            if (meta != null && meta.getLore() != null) {
+                for (String line : meta.getLore()) {
+                    plain.add(ChatColor.stripColor(line));
+                }
+            }
+            return plain;
+        }
+
+        private TradeGUI openWindow(Player viewer, Inventory top) {
+            TradeGUI gui = new TradeGUI(tradeService, session, viewer);
+            gui.update();
+            when(top.getHolder()).thenReturn(gui);
+            return gui;
+        }
+
+        @Test
+        @DisplayName("a reload changes trade-tax while both windows are open: both are redrawn with the new tax, and the tax charged equals the tax shown")
+        void reloadRedrawsOpenWindowsWithNewTax() throws Exception {
+            TradeGUI offererWindow = openWindow(offerer, offererTop);
+            openWindow(counterparty, counterpartyTop);
+            Inventory windowContents = offererWindow.getInventory();
+            clearInvocations(windowContents, offererView, counterpartyView);
+
+            reload("enable-money-trade: true\ntrade-tax: 1.0\ngui-title: '&6Reloaded {PLAYER}'\n");
+
+            ArgumentCaptor<ItemStack> moneySlot = ArgumentCaptor.forClass(ItemStack.class);
+            verify(windowContents, atLeastOnce()).setItem(eq(TradeGUI.YOUR_MONEY_SLOT), moneySlot.capture());
+            assertThat(moneySlot.getAllValues()).anySatisfy(item -> assertThat(plainLore(item))
+                    .contains("\u7A0E\u7387: 100.0%", "\u7A0E\u91D1: 1000.00")); // "税率: 100.0%", "税金: 1000.00"
+            verify(offererView).setTitle(contains("Reloaded Counterparty"));
+            verify(counterpartyView).setTitle(contains("Reloaded Offerer"));
+
+            // Both confirm against the redrawn windows: the charged tax is the displayed 1000.00.
+            session.setConfirmed(offerer.getUniqueId(), true);
+            tradeService.confirmTrade(counterparty);
+            verify(vaultEconomy).withdrawPlayer(offerer, 1000.0);
+            verify(vaultEconomy).depositPlayer(counterparty, 0.0);
+        }
+
+        @Test
+        @DisplayName("a reload replaces an open large-trade confirmation page with a trade window built from the reloaded configuration")
+        void reloadReplacesOpenConfirmationPage() throws Exception {
+            TradeConfirmPage page = mock(TradeConfirmPage.class);
+            when(offererTop.getHolder()).thenReturn(page);
+            openWindow(counterparty, counterpartyTop);
+
+            reload("enable-money-trade: true\ntrade-tax: 0.5\n");
+
+            ArgumentCaptor<Inventory> opened = ArgumentCaptor.forClass(Inventory.class);
+            verify(offerer).openInventory(opened.capture());
+            assertThat(opened.getValue().getHolder()).isInstanceOf(TradeGUI.class);
+            assertThat(((TradeGUI) opened.getValue().getHolder()).getViewer()).isSameAs(offerer);
+            assertThat(tradeService.isTrading(offerer.getUniqueId())).isTrue();
+        }
+
+        @Test
+        @DisplayName("redrawing the windows neither loses nor duplicates anything offered")
+        void redrawKeepsOffersIntact() throws Exception {
+            openWindow(offerer, offererTop);
+            openWindow(counterparty, counterpartyTop);
+
+            reload("enable-money-trade: true\ntrade-tax: 0.25\n");
+
+            assertThat(session.getPlayerItems(offerer.getUniqueId())).containsExactly(entry(0, diamond));
+            assertThat(session.getPlayerItems(counterparty.getUniqueId())).containsExactly(entry(0, emerald));
+            assertThat(session.getPlayerMoney(offerer.getUniqueId())).isEqualTo(1000.0);
+            verify(offererInventory, never()).addItem(any(ItemStack.class));
+            verify(counterpartyInventory, never()).addItem(any(ItemStack.class));
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.TRADING);
         }
     }
 

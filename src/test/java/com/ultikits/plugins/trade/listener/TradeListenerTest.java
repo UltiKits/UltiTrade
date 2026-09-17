@@ -7,8 +7,10 @@ import com.ultikits.plugins.trade.gui.TradeConfirmPage;
 import com.ultikits.plugins.trade.gui.TradeGUI;
 import com.ultikits.plugins.trade.service.TradeService;
 
+import org.bukkit.Material;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
@@ -18,7 +20,10 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
+import org.bukkit.inventory.ItemStack;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.util.HashSet;
 import java.util.Map;
@@ -221,6 +226,108 @@ class TradeListenerTest {
             listener.onPlayerQuit(event);
 
             assertThat(waitingForInput).doesNotContainKey(uuid1);
+        }
+    }
+
+    @Nested
+    @DisplayName("display items in the trade window can never be taken (UltiKits/UltiTrade#25)")
+    class DisplayItemsCannotBeTaken {
+
+        private TradeGUI gui;
+        private TradeSession session;
+
+        @BeforeEach
+        void openWindow() {
+            gui = mock(TradeGUI.class);
+            session = new TradeSession(player1, player2);
+            when(gui.getSession()).thenReturn(session);
+            when(gui.isMoneySlot(TradeGUI.YOUR_MONEY_SLOT)).thenReturn(true);
+            when(gui.isExpSlot(TradeGUI.YOUR_EXP_SLOT)).thenReturn(true);
+            when(gui.isYourSlot(TradeGUI.YOUR_SLOTS[0])).thenReturn(true);
+            when(gui.getItemIndex(TradeGUI.YOUR_SLOTS[0])).thenReturn(0);
+        }
+
+        private InventoryClickEvent click(int rawSlot, ClickType type, ItemStack current) {
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(gui);
+            InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getInventory()).thenReturn(top);
+            when(event.getWhoClicked()).thenReturn(player1);
+            when(event.getRawSlot()).thenReturn(rawSlot);
+            when(event.getClick()).thenReturn(type);
+            when(event.getCurrentItem()).thenReturn(current);
+            return event;
+        }
+
+        private void assertCancelledAndNothingMoved(InventoryClickEvent event) {
+            verify(event).setCancelled(true);
+            verify(event, never()).setCancelled(false);
+            verify(player1.getInventory(), never()).addItem(any(ItemStack.class));
+            assertThat(session.getPlayerItems(uuid1)).isEmpty();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = ClickType.class, names = {"LEFT", "RIGHT", "SHIFT_LEFT", "SHIFT_RIGHT", "NUMBER_KEY", "DROP", "CONTROL_DROP", "DOUBLE_CLICK", "SWAP_OFFHAND", "MIDDLE"})
+        @DisplayName("money slot with money trading off: the barrier cannot be taken")
+        void moneySlotFeatureOff(ClickType type) {
+            when(tradeService.hasEconomy()).thenReturn(false);
+            InventoryClickEvent event = click(TradeGUI.YOUR_MONEY_SLOT, type, new ItemStack(Material.BARRIER));
+
+            listener.onInventoryClick(event);
+
+            assertCancelledAndNothingMoved(event);
+            verify(player1, never()).closeInventory();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = ClickType.class, names = {"LEFT", "RIGHT", "SHIFT_LEFT", "SHIFT_RIGHT", "NUMBER_KEY", "DROP", "CONTROL_DROP", "DOUBLE_CLICK", "SWAP_OFFHAND", "MIDDLE"})
+        @DisplayName("money slot with money trading on: the gold nugget cannot be taken and the prompt opens")
+        void moneySlotFeatureOn(ClickType type) {
+            when(tradeService.hasEconomy()).thenReturn(true);
+            InventoryClickEvent event = click(TradeGUI.YOUR_MONEY_SLOT, type, new ItemStack(Material.GOLD_NUGGET));
+
+            listener.onInventoryClick(event);
+
+            assertCancelledAndNothingMoved(event);
+            verify(player1).closeInventory();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = ClickType.class, names = {"LEFT", "RIGHT", "SHIFT_LEFT", "SHIFT_RIGHT", "NUMBER_KEY", "DROP", "CONTROL_DROP", "DOUBLE_CLICK", "SWAP_OFFHAND", "MIDDLE"})
+        @DisplayName("experience slot with experience trading off: the barrier cannot be taken")
+        void expSlotFeatureOff(ClickType type) {
+            when(config.isEnableExpTrade()).thenReturn(false);
+            InventoryClickEvent event = click(TradeGUI.YOUR_EXP_SLOT, type, new ItemStack(Material.BARRIER));
+
+            listener.onInventoryClick(event);
+
+            assertCancelledAndNothingMoved(event);
+            verify(player1, never()).closeInventory();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = ClickType.class, names = {"LEFT", "RIGHT", "SHIFT_LEFT", "SHIFT_RIGHT", "NUMBER_KEY", "DROP", "CONTROL_DROP", "DOUBLE_CLICK", "SWAP_OFFHAND", "MIDDLE"})
+        @DisplayName("experience slot with experience trading on: the bottle cannot be taken and the prompt opens")
+        void expSlotFeatureOn(ClickType type) {
+            when(config.isEnableExpTrade()).thenReturn(true);
+            InventoryClickEvent event = click(TradeGUI.YOUR_EXP_SLOT, type, new ItemStack(Material.EXPERIENCE_BOTTLE));
+
+            listener.onInventoryClick(event);
+
+            assertCancelledAndNothingMoved(event);
+            verify(player1).closeInventory();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = ClickType.class, names = {"LEFT", "RIGHT", "SHIFT_LEFT", "SHIFT_RIGHT", "NUMBER_KEY", "DROP", "CONTROL_DROP", "DOUBLE_CLICK", "SWAP_OFFHAND", "MIDDLE"})
+        @DisplayName("an empty own item slot clicked with an empty cursor: its placeholder glass pane cannot be taken")
+        void emptyOwnSlotPlaceholder(ClickType type) {
+            InventoryClickEvent event = click(TradeGUI.YOUR_SLOTS[0], type, new ItemStack(Material.LIME_STAINED_GLASS_PANE));
+            when(event.getCursor()).thenReturn(null);
+
+            listener.onInventoryClick(event);
+
+            assertCancelledAndNothingMoved(event);
         }
     }
 
