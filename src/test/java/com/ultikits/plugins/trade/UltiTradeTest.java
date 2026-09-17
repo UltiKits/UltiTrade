@@ -101,6 +101,32 @@ class UltiTradeTest {
         }
 
         @Test
+        @DisplayName("a failing cleanup-task reconciliation is logged at SEVERE and the economy reconciliation still runs")
+        void onReloadIsolatesCleanupTaskFailure() {
+            RuntimeException failure = new IllegalStateException("scheduler unavailable");
+            doThrow(failure).when(logService).reloadCleanupTask();
+            doCallRealMethod().when(plugin).onReload();
+
+            assertThatCode(() -> plugin.onReload()).doesNotThrowAnyException();
+
+            verify(tradeService, times(1)).reloadEconomy();
+            verify(logger).error(failure, "Failed to reconcile TradeLogService with the reloaded configuration");
+        }
+
+        @Test
+        @DisplayName("a failing economy reconciliation is logged at SEVERE and does not undo the cleanup-task reconciliation")
+        void onReloadIsolatesEconomyFailure() {
+            RuntimeException failure = new IllegalStateException("services manager unavailable");
+            doThrow(failure).when(tradeService).reloadEconomy();
+            doCallRealMethod().when(plugin).onReload();
+
+            assertThatCode(() -> plugin.onReload()).doesNotThrowAnyException();
+
+            verify(logService, times(1)).reloadCleanupTask();
+            verify(logger).error(failure, "Failed to reconcile TradeService with the reloaded configuration");
+        }
+
+        @Test
         @DisplayName("onReload with neither service bean present does nothing and does not throw")
         void onReloadWithoutBeans() {
             when(plugin.getContext().getBean(TradeService.class)).thenReturn(null);
