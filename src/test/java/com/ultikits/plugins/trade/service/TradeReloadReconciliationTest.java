@@ -288,11 +288,11 @@ class TradeReloadReconciliationTest {
         }
 
         @Test
-        @DisplayName("A offers money, a reload turns money trading off, B confirms: the trade is cancelled, nothing moves, no completed trade is logged")
+        @DisplayName("A offers money, a reload turns money trading off, both confirm again: the trade is cancelled, nothing moves, no completed trade is logged")
         void confirmAfterDisableCancelsTrade() throws Exception {
-            session.setConfirmed(offerer.getUniqueId(), true);
-
             reload("enable-money-trade: false\n");
+            // A reload voids earlier confirmations, so both players confirm again after it.
+            session.setConfirmed(offerer.getUniqueId(), true);
             tradeService.confirmTrade(counterparty);
 
             assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
@@ -317,9 +317,9 @@ class TradeReloadReconciliationTest {
         void counterpartyMoneyAfterDisableCancelsTrade() throws Exception {
             session.setMoney(offerer.getUniqueId(), 0.0);
             session.setMoney(counterparty.getUniqueId(), 1000.0);
-            session.setConfirmed(offerer.getUniqueId(), true);
 
             reload("enable-money-trade: false\n");
+            session.setConfirmed(offerer.getUniqueId(), true);
             tradeService.confirmTrade(counterparty);
 
             assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
@@ -385,9 +385,9 @@ class TradeReloadReconciliationTest {
         @DisplayName("no money offered: a reload that turns money trading off does not stop an item-only trade")
         void itemOnlyTradeStillCompletes() throws Exception {
             session.setMoney(offerer.getUniqueId(), 0.0);
-            session.setConfirmed(offerer.getUniqueId(), true);
 
             reload("enable-money-trade: false\n");
+            session.setConfirmed(offerer.getUniqueId(), true);
             tradeService.confirmTrade(counterparty);
 
             assertThat(session.getState()).isEqualTo(TradeSession.TradeState.COMPLETED);

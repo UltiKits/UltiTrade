@@ -37,6 +37,10 @@ public class UltiTrade extends UltiToolsPlugin {
             "Could not apply enable-money-trade from the reloaded configuration;"
             + " money trading keeps its previous provider until the next successful /ul reload UltiTrade";
 
+    static final String CONFIRMATION_RESET_FAILED =
+            "Could not void the confirmations of open trades after the reload;"
+            + " a trade confirmed before the reload may complete on the reloaded terms";
+
     private TradePlaceholderExpansion placeholderExpansion;
 
     @Override
@@ -90,6 +94,13 @@ public class UltiTrade extends UltiToolsPlugin {
                 tradeService.reloadEconomy();
             } catch (RuntimeException e) {
                 getLogger().error(e, ECONOMY_RECONCILE_FAILED);
+            }
+
+            // Confirmations given before the reload may cover terms the reload changed.
+            try {
+                tradeService.resetConfirmationsAfterReload();
+            } catch (RuntimeException e) {
+                getLogger().error(e, CONFIRMATION_RESET_FAILED);
             }
         }
     }

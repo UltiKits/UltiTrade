@@ -70,6 +70,12 @@ public class TradeService {
      */
     static final String MONEY_UNAVAILABLE_REASON = "金币交易当前不可用";
 
+    /** Cancellation reason when a trade that carries experience completes while experience trading is off. */
+    static final String EXP_UNAVAILABLE_REASON = "经验交易当前不可用";
+
+    /** Sent to both players of a trade whose confirmations a configuration reload voided. */
+    static final String RECONFIRM_AFTER_RELOAD_MESSAGE = "交易配置已重载，请重新确认交易。";
+
     // Economy integration. Volatile: a reload replaces it on the main thread while the async chat
     // handler may read it; callers read it once per operation.
     private volatile Economy economy;
@@ -145,6 +151,31 @@ public class TradeService {
             setupEconomy();
         } else {
             economy = null;
+        }
+    }
+
+    /**
+     * Void every confirmation in open trades after a configuration reload (UltiKits/UltiTrade#26).
+     * A reload can change the terms a confirmation was given for ({@code trade-tax},
+     * {@code exp-tax-rate}, {@code confirm-threshold}, which offers are allowed), so a trade must never
+     * complete on a confirmation given before it. Both players of an affected trade are told to
+     * confirm again.
+     */
+    public void resetConfirmationsAfterReload() {
+        for (TradeSession session : activeSessions.values()) {
+            UUID first = session.getPlayer1();
+            UUID second = session.getPlayer2();
+            if (!session.isConfirmed(first) && !session.isConfirmed(second)) {
+                continue;
+            }
+            session.setConfirmed(first, false);
+            session.setConfirmed(second, false);
+            for (UUID participant : new UUID[] {first, second}) {
+                Player player = Bukkit.getPlayer(participant);
+                if (player != null) {
+                    player.sendMessage(ChatColor.YELLOW + RECONFIRM_AFTER_RELOAD_MESSAGE);
+                }
+            }
         }
     }
 
@@ -550,6 +581,15 @@ public class TradeService {
             return;
         }
 
+        // The same rule for experience: an offer is never dropped while the items still move.
+        int exp1 = session.getPlayerExp(session.getPlayer1());
+        int exp2 = session.getPlayerExp(session.getPlayer2());
+        boolean expAvailable = config.isEnableExpTrade();
+        if ((exp1 > 0 || exp2 > 0) && !expAvailable) {
+            cancelTrade(session, EXP_UNAVAILABLE_REASON);
+            return;
+        }
+
         // Handle money transfer
         if (moneyAvailable) {
 
@@ -581,9 +621,7 @@ public class TradeService {
         }
         
         // Handle experience transfer
-        if (config.isEnableExpTrade()) {
-            int exp1 = session.getPlayerExp(session.getPlayer1());
-            int exp2 = session.getPlayerExp(session.getPlayer2());
+        if (expAvailable) {
             
             // Apply tax
             double expTaxRate = config.getExpTaxRate();

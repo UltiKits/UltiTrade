@@ -97,7 +97,32 @@ class UltiTradeTest {
             InOrder order = inOrder(logService, tradeService);
             order.verify(logService, times(1)).reloadCleanupTask();
             order.verify(tradeService, times(1)).reloadEconomy();
+            order.verify(tradeService, times(1)).resetConfirmationsAfterReload();
             verifyNoMoreInteractions(logService, tradeService);
+        }
+
+        @Test
+        @DisplayName("a failing economy reconciliation does not skip voiding the confirmations of open trades")
+        void onReloadResetsConfirmationsEvenIfEconomyFails() {
+            RuntimeException failure = new IllegalStateException("services manager unavailable");
+            doThrow(failure).when(tradeService).reloadEconomy();
+            doCallRealMethod().when(plugin).onReload();
+
+            plugin.onReload();
+
+            verify(tradeService, times(1)).resetConfirmationsAfterReload();
+        }
+
+        @Test
+        @DisplayName("a failing confirmation reset is logged at SEVERE and does not propagate")
+        void onReloadIsolatesConfirmationResetFailure() {
+            RuntimeException failure = new IllegalStateException("session map unavailable");
+            doThrow(failure).when(tradeService).resetConfirmationsAfterReload();
+            doCallRealMethod().when(plugin).onReload();
+
+            assertThatCode(() -> plugin.onReload()).doesNotThrowAnyException();
+
+            verify(logger).error(failure, UltiTrade.CONFIRMATION_RESET_FAILED);
         }
 
         @Test
