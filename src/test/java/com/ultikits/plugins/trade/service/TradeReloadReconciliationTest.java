@@ -3,6 +3,7 @@ package com.ultikits.plugins.trade.service;
 import com.ultikits.plugins.trade.UltiTrade;
 import com.ultikits.plugins.trade.UltiTradeTestHelper;
 import com.ultikits.plugins.trade.config.TradeConfig;
+import com.ultikits.plugins.trade.entity.TradeRequest;
 import com.ultikits.plugins.trade.entity.TradeSession;
 import com.ultikits.plugins.trade.gui.TradeConfirmPage;
 import com.ultikits.plugins.trade.gui.TradeGUI;
@@ -14,6 +15,9 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.Server;
+import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarStyle;
+import org.bukkit.boss.BossBar;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
@@ -243,6 +247,129 @@ class TradeReloadReconciliationTest {
 
             verify(server.getServicesManager(), never()).getRegistration(any());
             verify(UltiTradeTestHelper.getMockLogger(), never()).warn(anyString());
+        }
+    }
+
+    @Nested
+    @DisplayName("a pending trade request keeps the timeout it was sent with across a reload (UltiKits/UltiTrade#26)")
+    class PendingRequestTimeout {
+
+        private Server server;
+        private Player sender;
+        private Player receiver;
+        private BossBar bar;
+        private BukkitScheduler scheduler;
+
+        @BeforeEach
+        void players() throws Exception {
+            server = Bukkit.getServer();
+            TradeLogService requestLog = mock(TradeLogService.class);
+            when(requestLog.isTradeEnabled(any())).thenReturn(true);
+            when(requestLog.isBlocked(any(), any())).thenReturn(false);
+            UltiTradeTestHelper.setField(tradeService, "logService", requestLog);
+            sender = UltiTradeTestHelper.createMockPlayer("Sender", UUID.randomUUID());
+            receiver = UltiTradeTestHelper.createMockPlayer("Receiver", UUID.randomUUID());
+            UUID senderId = sender.getUniqueId();
+            UUID receiverId = receiver.getUniqueId();
+            doReturn(sender).when(server).getPlayer(senderId);
+            doReturn(receiver).when(server).getPlayer(receiverId);
+            bar = mock(BossBar.class);
+            doReturn(bar).when(server).createBossBar(anyString(), any(BarColor.class), any(BarStyle.class));
+            scheduler = server.getScheduler();
+        }
+
+        private Runnable sendRequestWithTimeout(int seconds) throws Exception {
+            loadConfig("max-distance: 0\nrequest-timeout: " + seconds + "\n");
+            assertThat(tradeService.sendRequest(sender, receiver)).isTrue();
+            ArgumentCaptor<Runnable> countdown = ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTaskTimer(any(), countdown.capture(), anyLong(), anyLong());
+            return countdown.getValue();
+        }
+
+        @SuppressWarnings("PMD.AvoidAccessibilityAlteration") // ages the request without waiting in real time
+        private void ageRequest(long millis) throws Exception {
+            Map<UUID, TradeRequest> pending = UltiTradeTestHelper.getField(tradeService, "pendingRequests");
+            TradeRequest request = pending.get(receiver.getUniqueId());
+            Field timestamp = TradeRequest.class.getDeclaredField("timestamp");
+            timestamp.setAccessible(true);
+            timestamp.set(request, System.currentTimeMillis() - millis);
+        }
+
+        @Test
+        @DisplayName("request-timeout 30 reloaded to 5: the bar keeps counting down from 30 and never gets a progress above 1.0")
+        void barKeepsOriginalTimeoutWhenLowered() throws Exception {
+            Runnable countdown = sendRequestWithTimeout(30);
+
+            reload("max-distance: 0\nrequest-timeout: 5\n");
+            countdown.run();
+
+            ArgumentCaptor<Double> progress = ArgumentCaptor.forClass(Double.class);
+            verify(bar, atLeastOnce()).setProgress(progress.capture());
+            assertThat(progress.getAllValues()).allSatisfy(value -> assertThat(value).isBetween(0.0, 1.0));
+            assertThat(progress.getValue()).isEqualTo(29.0 / 30.0);
+        }
+
+        @Test
+        @DisplayName("request-timeout 5 reloaded to 30: the bar counts down from 5 and is removed at the original deadline")
+        void barKeepsOriginalTimeoutWhenRaised() throws Exception {
+            Runnable countdown = sendRequestWithTimeout(5);
+
+            reload("max-distance: 0\nrequest-timeout: 30\n");
+            countdown.run();
+
+            verify(bar).setProgress(4.0 / 5.0);
+            for (int tick = 0; tick < 4; tick++) {
+                countdown.run();
+            }
+            verify(bar).removeAll();
+        }
+
+        @Test
+        @DisplayName("request-timeout 30 reloaded to 5: a request 10 seconds old can still be accepted, as promised when it was sent")
+        void acceptUsesOriginalTimeoutWhenLowered() throws Exception {
+            sendRequestWithTimeout(30);
+            reload("max-distance: 0\nrequest-timeout: 5\n");
+            ageRequest(10_000L);
+
+            assertThat(tradeService.acceptRequest(receiver)).isTrue();
+            assertThat(tradeService.isTrading(receiver.getUniqueId())).isTrue();
+        }
+
+        @Test
+        @DisplayName("request-timeout 5 reloaded to 30: a request 10 seconds old has expired at its original deadline and cannot be accepted")
+        void acceptUsesOriginalTimeoutWhenRaised() throws Exception {
+            sendRequestWithTimeout(5);
+            reload("max-distance: 0\nrequest-timeout: 30\n");
+            ageRequest(10_000L);
+
+            assertThat(tradeService.acceptRequest(receiver)).isFalse();
+            assertThat(tradeService.isTrading(receiver.getUniqueId())).isFalse();
+        }
+
+        @Test
+        @DisplayName("the cleanup task expires a request at the timeout it was sent with, not the reloaded one")
+        void cleanupUsesOriginalTimeout() throws Exception {
+            sendRequestWithTimeout(5);
+            reload("max-distance: 0\nrequest-timeout: 30\n");
+            ageRequest(10_000L);
+
+            tradeService.cleanupExpiredRequests();
+
+            Map<UUID, TradeRequest> pending = UltiTradeTestHelper.getField(tradeService, "pendingRequests");
+            assertThat(pending).doesNotContainKey(receiver.getUniqueId());
+        }
+
+        @Test
+        @DisplayName("the cleanup task keeps a request that is still within the timeout it was sent with after the timeout is lowered")
+        void cleanupKeepsRequestWithinOriginalTimeout() throws Exception {
+            sendRequestWithTimeout(30);
+            reload("max-distance: 0\nrequest-timeout: 5\n");
+            ageRequest(10_000L);
+
+            tradeService.cleanupExpiredRequests();
+
+            Map<UUID, TradeRequest> pending = UltiTradeTestHelper.getField(tradeService, "pendingRequests");
+            assertThat(pending).containsKey(receiver.getUniqueId());
         }
     }
 
