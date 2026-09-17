@@ -33,6 +33,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   or `confirm-threshold` that the reload changed after a player confirmed. A trade in which either
   player offered experience is likewise cancelled if `enable-exp-trade` is off when it completes,
   instead of the items being exchanged without the experience (UltiKits/UltiTrade#26).
+- `/ul reload UltiTrade` now redraws every open trade window from the reloaded configuration, so its
+  title, money and experience availability and taxes match what the trade will charge, and replaces an
+  open large-trade confirmation page with a trade window. Every offer is kept as it was
+  (UltiKits/UltiTrade#27).
+- Players can no longer take the display item out of the money or experience slot of the trade window
+  (or the glass pane from an empty item slot) by clicking it, whether money or experience trading is on
+  or off. Every click in the trade window is now cancelled before its action runs.
 - `/upm uninstall UltiTrade` now runs this module's own cleanup (trade service shutdown,
   PlaceholderAPI expansion unregistration) first, then the framework's command unregistration, then
   its listener unregistration, so after the uninstall the module's commands are really removed and
@@ -55,6 +62,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   玩家确认后被重载修改的条款（如 `trade-tax`、`exp-tax-rate`、`confirm-threshold`）完成。同样，若任一方出价了
   经验，而交易完成时 `enable-exp-trade` 已关闭，该交易会被取消，而不是在不转移经验的情况下交换物品
   （UltiKits/UltiTrade#26）。
+- `/ul reload UltiTrade` 现在会按重载后的配置重绘所有已打开的交易界面，使其标题、金币与经验交易的可用状态和税率
+  与交易实际收取的一致，并把已打开的大额交易确认页替换为交易界面；所有出价保持不变（UltiKits/UltiTrade#27）。
+- 玩家不再能通过点击从交易界面的金币栏或经验栏（或空物品栏的玻璃板）取走展示物品，无论金币或经验交易是否开启。
+  交易界面中的每次点击现在都会先被取消，再执行对应操作。
 - `/upm uninstall UltiTrade` 现在会先执行本模块自身的清理（关闭交易服务、注销 PlaceholderAPI 扩展），
   再由框架注销命令，最后注销监听器，因此卸载后本模块的命令会被真正移除，其监听器也不再触发。此前本模块
   的卸载方法替换了框架的卸载方法，因此其命令和监听器都会一直保持生效，直到服务器重启
