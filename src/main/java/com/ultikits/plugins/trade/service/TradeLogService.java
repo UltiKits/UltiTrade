@@ -43,8 +43,9 @@ public class TradeLogService {
     // Bukkit plugin instance for scheduler tasks
     private Plugin bukkitPlugin;
 
-    // Cleanup task
+    // Cleanup task, and the interval it was scheduled with
     private BukkitTask cleanupTask;
+    private int scheduledIntervalHours;
     
     /**
      * Initialize the log service.
@@ -58,33 +59,44 @@ public class TradeLogService {
         settingsOperator = plugin.getDataOperator(PlayerTradeSettings.class);
 
         // Start cleanup task
-        startCleanupTaskIfEnabled();
+        if (config.isEnableTradeLog()) {
+            cleanupTask = scheduleCleanupTask(config.getCleanupIntervalHours());
+        }
     }
 
     /**
      * Reconcile the periodic log cleanup task with the current {@code enable-trade-log} and
      * {@code cleanup-interval-hours} values after a configuration reload (UltiKits/UltiTrade#26).
-     * The running task, if any, is cancelled first, so repeated reloads never leave more than one
-     * task scheduled.
+     * <p>
+     * A reload that changes neither key leaves the running task and its countdown untouched.
+     * Otherwise the replacement task is scheduled first and only then is the previous one
+     * cancelled, so at most one task stays scheduled and a failure to schedule keeps the previous
+     * task running. A replacement task first runs one full new interval after the reload.
      */
     public void reloadCleanupTask() {
-        if (cleanupTask != null) {
-            cleanupTask.cancel();
-            cleanupTask = null;
+        boolean enabled = config.isEnableTradeLog();
+        int intervalHours = config.getCleanupIntervalHours();
+        BukkitTask previous = cleanupTask;
+        if (enabled == (previous != null) && (!enabled || intervalHours == scheduledIntervalHours)) {
+            return;
         }
-        startCleanupTaskIfEnabled();
+        BukkitTask next = enabled ? scheduleCleanupTask(intervalHours) : null;
+        if (previous != null) {
+            previous.cancel();
+        }
+        cleanupTask = next;
     }
 
-    private void startCleanupTaskIfEnabled() {
-        if (config.isEnableTradeLog()) {
-            long cleanupInterval = config.getCleanupIntervalHours() * 60L * 60L * 20L; // Convert hours to ticks
-            cleanupTask = Bukkit.getScheduler().runTaskTimerAsynchronously(
-                bukkitPlugin,
-                this::cleanupOldLogs,
-                cleanupInterval, // Initial delay
-                cleanupInterval  // Repeat interval
-            );
-        }
+    private BukkitTask scheduleCleanupTask(int intervalHours) {
+        long cleanupInterval = intervalHours * 60L * 60L * 20L; // Convert hours to ticks
+        BukkitTask task = Bukkit.getScheduler().runTaskTimerAsynchronously(
+            bukkitPlugin,
+            this::cleanupOldLogs,
+            cleanupInterval, // Initial delay
+            cleanupInterval  // Repeat interval
+        );
+        scheduledIntervalHours = intervalHours;
+        return task;
     }
     
     /**

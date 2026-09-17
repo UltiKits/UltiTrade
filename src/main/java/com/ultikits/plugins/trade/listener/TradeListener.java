@@ -8,6 +8,7 @@ import com.ultikits.plugins.trade.service.TradeService;
 import com.ultikits.ultitools.annotations.Autowired;
 import com.ultikits.ultitools.annotations.EventListener;
 
+import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
@@ -298,9 +299,16 @@ public class TradeListener implements Listener {
             }
             
             if (inputType == InputType.MONEY) {
+                // Read the provider once: a reload on the main thread may drop it while this async
+                // handler runs (UltiKits/UltiTrade#26). Without a provider the amount stays unchanged.
+                Economy currentEconomy = tradeService.getEconomy();
+                if (currentEconomy == null || !config.isEnableMoneyTrade()) {
+                    player.sendMessage(ChatColor.RED + "金币交易当前不可用！");
+                    reopenGUI(player);
+                    return;
+                }
                 // Check balance
-                if (tradeService.hasEconomy() && 
-                    tradeService.getEconomy().getBalance(player) < value) {
+                if (currentEconomy.getBalance(player) < value) {
                     player.sendMessage(ChatColor.RED + "余额不足！");
                     reopenGUI(player);
                     return;

@@ -30,6 +30,13 @@ import org.bukkit.Bukkit;
 @UltiToolsModule(scanBasePackages = {"com.ultikits.plugins.trade"})
 public class UltiTrade extends UltiToolsPlugin {
 
+    static final String CLEANUP_RECONCILE_FAILED =
+            "Could not apply enable-trade-log or cleanup-interval-hours from the reloaded configuration;"
+            + " the old-log cleanup task keeps its previous schedule until the next successful /ul reload UltiTrade";
+    static final String ECONOMY_RECONCILE_FAILED =
+            "Could not apply enable-money-trade from the reloaded configuration;"
+            + " money trading keeps its previous provider until the next successful /ul reload UltiTrade";
+
     private TradePlaceholderExpansion placeholderExpansion;
 
     @Override
@@ -73,7 +80,7 @@ public class UltiTrade extends UltiToolsPlugin {
             try {
                 logService.reloadCleanupTask();
             } catch (RuntimeException e) {
-                getLogger().error(e, "Failed to reconcile TradeLogService with the reloaded configuration");
+                getLogger().error(e, CLEANUP_RECONCILE_FAILED);
             }
         }
 
@@ -82,7 +89,7 @@ public class UltiTrade extends UltiToolsPlugin {
             try {
                 tradeService.reloadEconomy();
             } catch (RuntimeException e) {
-                getLogger().error(e, "Failed to reconcile TradeService with the reloaded configuration");
+                getLogger().error(e, ECONOMY_RECONCILE_FAILED);
             }
         }
     }

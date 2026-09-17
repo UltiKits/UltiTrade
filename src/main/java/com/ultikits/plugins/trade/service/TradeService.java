@@ -64,8 +64,15 @@ public class TradeService {
     // Bukkit plugin instance for scheduler tasks
     private Plugin bukkitPlugin;
 
-    // Economy integration
-    private Economy economy;
+    /**
+     * Cancellation reason shown to both players when a trade that carries money reaches
+     * completion while money trading is unavailable (UltiKits/UltiTrade#26).
+     */
+    static final String MONEY_UNAVAILABLE_REASON = "金币交易当前不可用";
+
+    // Economy integration. Volatile: a reload replaces it on the main thread while the async chat
+    // handler may read it; callers read it once per operation.
+    private volatile Economy economy;
     
     /**
      * Initialize the trade service.
@@ -108,23 +115,30 @@ public class TradeService {
      * Setup Vault economy.
      */
     private void setupEconomy() {
+        // The held provider is replaced by exactly what this lookup finds, including nothing, so a
+        // provider that has gone is never kept. If the lookup itself throws, the previous provider
+        // stays in place.
+        Economy found = null;
         if (Bukkit.getPluginManager().getPlugin("Vault") == null) {
             plugin.getLogger().warn("Vault not found! Money trading disabled.");
-            return;
+        } else {
+            RegisteredServiceProvider<Economy> rsp = Bukkit.getServicesManager().getRegistration(Economy.class);
+            if (rsp != null) {
+                found = rsp.getProvider();
+            } else {
+                plugin.getLogger().warn("No Vault economy provider is registered! Money trading disabled.");
+            }
         }
-        
-        RegisteredServiceProvider<Economy> rsp = Bukkit.getServicesManager().getRegistration(Economy.class);
-        if (rsp != null) {
-            economy = rsp.getProvider();
-        }
+        economy = found;
     }
     
     /**
      * Reconcile the Vault economy provider with the current {@code enable-money-trade} value after
      * a configuration reload (UltiKits/UltiTrade#26). When money trading is enabled the provider
-     * lookup is re-run, so a {@code false} to {@code true} change takes effect without a restart;
-     * when it is disabled the provider is dropped. The lookup registers nothing, so repeated
-     * reloads are safe.
+     * lookup is re-run and its result replaces the held provider (a provider that has gone is
+     * dropped, a replaced one is adopted), so a {@code false} to {@code true} change takes effect
+     * without a restart; when it is disabled the provider is dropped without a lookup or a log line.
+     * The lookup registers nothing, so repeated reloads are safe.
      */
     public void reloadEconomy() {
         if (config.isEnableMoneyTrade()) {
@@ -138,7 +152,8 @@ public class TradeService {
      * Check if economy is available.
      */
     public boolean hasEconomy() {
-        return economy != null && config.isEnableMoneyTrade();
+        Economy current = economy;
+        return current != null && config.isEnableMoneyTrade();
     }
     
     /**
@@ -521,12 +536,23 @@ public class TradeService {
         
         double moneyTax = 0;
         int expTax = 0;
-        
+
+        double money1 = session.getPlayerMoney(session.getPlayer1());
+        double money2 = session.getPlayerMoney(session.getPlayer2());
+        // Read the provider once: a reload may replace it at any time.
+        Economy currentEconomy = economy;
+        boolean moneyAvailable = currentEconomy != null && config.isEnableMoneyTrade();
+
+        // Never move items or experience while silently dropping offered money (UltiKits/UltiTrade#26):
+        // money is only withdrawn here, so cancelling leaves every balance untouched and returns items.
+        if ((money1 > 0 || money2 > 0) && !moneyAvailable) {
+            cancelTrade(session, MONEY_UNAVAILABLE_REASON);
+            return;
+        }
+
         // Handle money transfer
-        if (hasEconomy()) {
-            double money1 = session.getPlayerMoney(session.getPlayer1());
-            double money2 = session.getPlayerMoney(session.getPlayer2());
-            
+        if (moneyAvailable) {
+
             // Apply tax
             double taxRate = config.getTradeTax();
             double tax1 = money1 * taxRate;
@@ -534,23 +560,23 @@ public class TradeService {
             moneyTax = tax1 + tax2;
             
             // Check balances
-            if (money1 > 0 && economy.getBalance(player1) < money1) {
+            if (money1 > 0 && currentEconomy.getBalance(player1) < money1) {
                 cancelTrade(session, player1.getName() + " 余额不足");
                 return;
             }
-            if (money2 > 0 && economy.getBalance(player2) < money2) {
+            if (money2 > 0 && currentEconomy.getBalance(player2) < money2) {
                 cancelTrade(session, player2.getName() + " 余额不足");
                 return;
             }
             
             // Transfer money
             if (money1 > 0) {
-                economy.withdrawPlayer(player1, money1);
-                economy.depositPlayer(player2, money1 - tax1);
+                currentEconomy.withdrawPlayer(player1, money1);
+                currentEconomy.depositPlayer(player2, money1 - tax1);
             }
             if (money2 > 0) {
-                economy.withdrawPlayer(player2, money2);
-                economy.depositPlayer(player1, money2 - tax2);
+                currentEconomy.withdrawPlayer(player2, money2);
+                currentEconomy.depositPlayer(player1, money2 - tax2);
             }
         }
         
