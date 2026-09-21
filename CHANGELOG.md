@@ -63,6 +63,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   their feet if it does not fit. Previously that click destroyed a stored pane outright, and for any
   other stored item it took the item back while leaving the held item on the cursor
   (UltiKits/UltiTrade#31).
+- Stopping the server, or uninstalling this module, no longer destroys the items staked in trades that
+  are still open. Every stake is now returned — to the player's inventory, or at their feet if it does
+  not fit — before anything else happens, and each open trade is closed independently of the others.
+  Previously the first thing a cancellation did was schedule the trade-log write, which a stopping
+  server refuses; that refusal ended the cancellation before a single item had been returned and
+  skipped every remaining trade, and it was reported on the console as this module failing to
+  unregister rather than as items being lost. The cancellation is still recorded: when no background
+  task can be scheduled, the log entry is written directly instead of being dropped
+  (UltiKits/UltiTrade#34).
+- The trade log now records the amounts that were actually staked. A stack delivered into an inventory
+  that already held a partial stack of the same material was rewritten by that merge, so a trade of 64
+  diamonds into an inventory holding 60 was logged as 60 (UltiKits/UltiTrade#37).
+- A click in a trade window from anyone other than the two traders is refused. It was handled as though
+  it came from the second trader, so a third player who had been shown the window by another plugin
+  received that trader's staked item (UltiKits/UltiTrade#38).
 - 重载本模块（`/ul reload UltiTrade`）现在会重新读取 `config/trade.yml` 并刷新语言文件，修改后的
   `max-distance` 等配置无需重启即可生效。此前本模块的重载方法替换了框架的重载方法且只输出一行日志，
   这两步都不会执行。UltiTools 6.3.0 还会在此时报告 `@ConditionalOnConfig` 漂移并输出框架自身的
@@ -97,6 +112,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   为空格占位符。手持物品点击自己已有出价的格子现在会交换：手持物品放入该格，原有出价返还给玩家，装不下则掉落在
   其脚下。此前这一点击会直接销毁存放的玻璃板；对其他物品则是取回该物品、而手持物品仍留在光标上
   （UltiKits/UltiTrade#31）。
+- 关闭服务器或卸载本模块，不再销毁仍在进行中的交易里已放入的物品。现在每份出价都会先返还给玩家（放不下则掉落
+  在其脚下），之后才执行其他步骤，并且每笔进行中的交易互相独立地关闭。此前取消交易的第一步是调度交易日志写入，
+  而正在关闭的服务器会拒绝该调度：这一异常使取消在任何物品返还之前就结束，并跳过其余所有交易，而控制台只报告
+  本模块注销失败，而非物品丢失。取消记录仍会保留：在无法调度后台任务时，日志条目会直接写入而不是被丢弃
+  （UltiKits/UltiTrade#34）。
+- 交易日志现在记录实际放入的数量。此前将一组物品交付到已有同材质零散堆叠的背包时，该合并会改写这组物品本身，
+  因此向已有 60 个钻石的背包交易 64 个钻石会被记录为 60（UltiKits/UltiTrade#37）。
+- 交易界面中来自两名交易者以外任何人的点击都会被拒绝。此前这类点击会被当作第二名交易者的点击处理，因此被其他
+  插件展示了该界面的第三名玩家会拿到该交易者已放入的物品（UltiKits/UltiTrade#38）。
 
 ### Removed
 
