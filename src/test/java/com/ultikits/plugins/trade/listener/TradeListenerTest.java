@@ -467,6 +467,139 @@ class TradeListenerTest {
         }
     }
 
+    /**
+     * Which branch a click on one of the acting player's own item slots takes must be decided by the
+     * session — the only authority on what that player has offered — and never by a property the
+     * player controls. Reading the rendered item's material made a stored stained glass pane
+     * indistinguishable from the empty-slot placeholder, so placing another item over it destroyed
+     * it. These cases run against a REAL {@link TradeService} so the hand-back is observed rather
+     * than stubbed (UltiKits/UltiTrade#31).
+     */
+    @Nested
+    @DisplayName("a stored offer is never overwritten, whatever it looks like (UltiKits/UltiTrade#31)")
+    class StoredOfferIsNeverOverwritten {
+
+        private TradeGUI gui;
+        private TradeSession session;
+
+        @BeforeEach
+        void openWindow() throws Exception {
+            TradeService realService = new TradeService();
+            UltiTradeTestHelper.setField(realService, "config", config);
+            UltiTradeTestHelper.setField(realService, "logService", mock(TradeLogService.class));
+            UltiTradeTestHelper.setField(listener, "tradeService", realService);
+
+            session = new TradeSession(player1, player2);
+
+            gui = mock(TradeGUI.class);
+            when(gui.getSession()).thenReturn(session);
+            when(gui.isYourSlot(TradeGUI.YOUR_SLOTS[0])).thenReturn(true);
+            when(gui.getItemIndex(TradeGUI.YOUR_SLOTS[0])).thenReturn(0);
+        }
+
+        /**
+         * @param rendered what the slot currently shows — the placeholder pane for an empty slot, or
+         *                 the offered item itself for an occupied one, exactly as {@code TradeGUI#update}
+         *                 writes it
+         * @param cursor   what the acting player is holding, or {@code null} for an empty cursor
+         */
+        private InventoryView clickOwnSlot(ItemStack rendered, ItemStack cursor) {
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(gui);
+            InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getInventory()).thenReturn(top);
+            when(event.getWhoClicked()).thenReturn(player1);
+            when(event.getRawSlot()).thenReturn(TradeGUI.YOUR_SLOTS[0]);
+            when(event.getCurrentItem()).thenReturn(rendered);
+            when(event.getCursor()).thenReturn(cursor);
+            InventoryView view = mock(InventoryView.class);
+            when(event.getView()).thenReturn(view);
+            listener.onInventoryClick(event);
+            return view;
+        }
+
+        @Test
+        @DisplayName("placing an item over a stored stained glass pane hands the pane back instead of destroying it")
+        void storedGlassPaneIsHandedBack() {
+            ItemStack storedPane = new ItemStack(Material.LIME_STAINED_GLASS_PANE, 7);
+            session.setItem(uuid1, 0, storedPane);
+            when(player1.getInventory().addItem(storedPane)).thenReturn(new HashMap<>());
+
+            InventoryView view = clickOwnSlot(storedPane, new ItemStack(Material.DIAMOND, 1));
+
+            assertThat(session.getPlayerItems(uuid1).get(0).getType()).isEqualTo(Material.DIAMOND);
+            verify(player1.getInventory()).addItem(storedPane);
+            verify(view).setCursor(null);
+            verify(player1.getWorld(), never()).dropItemNaturally(any(Location.class), any(ItemStack.class));
+        }
+
+        @Test
+        @DisplayName("the same click with a full inventory drops the stored pane at the acting player's feet")
+        void storedGlassPaneDropsWhenInventoryFull() {
+            ItemStack storedPane = new ItemStack(Material.LIME_STAINED_GLASS_PANE, 7);
+            session.setItem(uuid1, 0, storedPane);
+            HashMap<Integer, ItemStack> overflow = new HashMap<>();
+            overflow.put(0, storedPane);
+            when(player1.getInventory().addItem(storedPane)).thenReturn(overflow);
+
+            clickOwnSlot(storedPane, new ItemStack(Material.DIAMOND, 1));
+
+            assertThat(session.getPlayerItems(uuid1).get(0).getType()).isEqualTo(Material.DIAMOND);
+            verify(player1.getWorld()).dropItemNaturally(player1.getLocation(), storedPane);
+        }
+
+        @Test
+        @DisplayName("a stored stained glass pane can be taken back out with an empty cursor, like any other offer")
+        void storedGlassPaneCanBeTakenBack() {
+            ItemStack storedPane = new ItemStack(Material.CYAN_STAINED_GLASS_PANE, 3);
+            session.setItem(uuid1, 0, storedPane);
+            when(player1.getInventory().addItem(storedPane)).thenReturn(new HashMap<>());
+
+            InventoryView view = clickOwnSlot(storedPane, null);
+
+            assertThat(session.getPlayerItems(uuid1)).doesNotContainKey(0);
+            verify(player1.getInventory()).addItem(storedPane);
+            verify(view, never()).setCursor(any());
+        }
+
+        @Test
+        @DisplayName("placing an item over an ordinary stored offer swaps: the new item takes the slot, the old one comes back")
+        void ordinaryStoredOfferIsSwappedNotLost() {
+            ItemStack storedDiamond = new ItemStack(Material.DIAMOND, 2);
+            session.setItem(uuid1, 0, storedDiamond);
+            when(player1.getInventory().addItem(storedDiamond)).thenReturn(new HashMap<>());
+
+            InventoryView view = clickOwnSlot(storedDiamond, new ItemStack(Material.GOLD_INGOT, 5));
+
+            assertThat(session.getPlayerItems(uuid1))
+                    .as("the item on the cursor must take the slot")
+                    .containsKey(0);
+            ItemStack nowOffered = session.getPlayerItems(uuid1).get(0);
+            assertThat(nowOffered.getType()).isEqualTo(Material.GOLD_INGOT);
+            assertThat(nowOffered.getAmount()).isEqualTo(5);
+            verify(player1.getInventory()).addItem(storedDiamond);
+            verify(view).setCursor(null);
+        }
+
+        @Test
+        @DisplayName("control: placing into a genuinely empty slot still stores the item and hands nothing back")
+        void genuinelyEmptySlotStillAcceptsAnItem() {
+            InventoryView view = clickOwnSlot(
+                    new ItemStack(Material.LIME_STAINED_GLASS_PANE),
+                    new ItemStack(Material.DIAMOND, 4));
+
+            assertThat(session.getPlayerItems(uuid1))
+                    .as("the item on the cursor must take the slot")
+                    .containsKey(0);
+            ItemStack nowOffered = session.getPlayerItems(uuid1).get(0);
+            assertThat(nowOffered.getType()).isEqualTo(Material.DIAMOND);
+            assertThat(nowOffered.getAmount()).isEqualTo(4);
+            verify(view).setCursor(null);
+            verify(player1.getInventory(), never()).addItem(any(ItemStack.class));
+            verify(player1.getWorld(), never()).dropItemNaturally(any(Location.class), any(ItemStack.class));
+        }
+    }
+
     @Nested
     @DisplayName("Inventory Click Handling")
     class InventoryClickHandling {
