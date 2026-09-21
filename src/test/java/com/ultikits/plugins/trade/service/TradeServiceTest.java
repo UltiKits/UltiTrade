@@ -694,8 +694,8 @@ class TradeServiceTest {
 
             service.completeTrade(session);
 
-            verify(inv2).addItem(diamond);
-            verify(inv1).addItem(gold);
+            verify(inv2).addItem(UltiTradeTestHelper.deliveredCopyOf(diamond));
+            verify(inv1).addItem(UltiTradeTestHelper.deliveredCopyOf(gold));
             assertThat(session.getState()).isEqualTo(TradeSession.TradeState.COMPLETED);
         }
 
@@ -956,7 +956,7 @@ class TradeServiceTest {
             service.cancelTrade(session, "test reason");
 
             // player1 should get their diamond back
-            verify(player1.getInventory()).addItem(diamond);
+            verify(player1.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(diamond));
         }
 
         @Test
@@ -1159,8 +1159,8 @@ class TradeServiceTest {
 
             service.shutdown();
 
-            verify(player1.getInventory()).addItem(stake1);
-            verify(player2.getInventory()).addItem(stake2);
+            verify(player1.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(stake1));
+            verify(player2.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(stake2));
         }
 
         @Test
@@ -1175,10 +1175,10 @@ class TradeServiceTest {
 
             service.shutdown();
 
-            verify(player1.getInventory()).addItem(stake1);
-            verify(player2.getInventory()).addItem(stake2);
-            verify(player3.getInventory()).addItem(stake3);
-            verify(player4.getInventory()).addItem(stake4);
+            verify(player1.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(stake1));
+            verify(player2.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(stake2));
+            verify(player3.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(stake3));
+            verify(player4.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(stake4));
             Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
             assertThat(activeSessions).isEmpty();
         }
@@ -1626,8 +1626,8 @@ class TradeServiceTest {
 
             service.cancelTrade(session, "test reason");
 
-            verify(player1.getInventory()).addItem(diamond);
-            verify(player2.getInventory()).addItem(gold);
+            verify(player1.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(diamond));
+            verify(player2.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(gold));
         }
 
         @Test

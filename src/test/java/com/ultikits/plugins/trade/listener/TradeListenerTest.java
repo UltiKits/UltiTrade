@@ -423,7 +423,7 @@ class TradeListenerTest {
          */
         private void assertRemovalBranchRan() {
             assertThat(session.getPlayerItems(uuid1)).doesNotContainKey(0);
-            verify(player1.getInventory()).addItem(offered);
+            verify(player1.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(offered));
         }
 
         @Test
@@ -431,7 +431,9 @@ class TradeListenerTest {
         void fullInventoryDropsTheRemovedItem() {
             HashMap<Integer, ItemStack> overflow = new HashMap<>();
             overflow.put(0, offered);
-            when(player1.getInventory().addItem(offered)).thenReturn(overflow);
+            // The delivery hands over a copy (UltiKits/UltiTrade#37), so the stub matches any stack; what was
+            // delivered is asserted separately.
+            when(player1.getInventory().addItem(any(ItemStack.class))).thenReturn(overflow);
 
             listener.onInventoryClick(clickPlacedItem());
 
@@ -442,7 +444,7 @@ class TradeListenerTest {
         @Test
         @DisplayName("inventory has room: the item goes back into the inventory and nothing is dropped")
         void roomInInventoryDropsNothing() {
-            when(player1.getInventory().addItem(offered)).thenReturn(new HashMap<>());
+            when(player1.getInventory().addItem(any(ItemStack.class))).thenReturn(new HashMap<>());
 
             listener.onInventoryClick(clickPlacedItem());
 
@@ -457,7 +459,9 @@ class TradeListenerTest {
             HashMap<Integer, ItemStack> overflow = new HashMap<>();
             overflow.put(0, offered);
             overflow.put(1, secondStack);
-            when(player1.getInventory().addItem(offered)).thenReturn(overflow);
+            // The delivery hands over a copy (UltiKits/UltiTrade#37), so the stub matches any stack; what was
+            // delivered is asserted separately.
+            when(player1.getInventory().addItem(any(ItemStack.class))).thenReturn(overflow);
 
             listener.onInventoryClick(clickPlacedItem());
 
@@ -523,7 +527,7 @@ class TradeListenerTest {
         void storedGlassPaneIsHandedBack() {
             ItemStack storedPane = new ItemStack(Material.LIME_STAINED_GLASS_PANE, 7);
             session.setItem(uuid1, 0, storedPane);
-            when(player1.getInventory().addItem(storedPane)).thenReturn(new HashMap<>());
+            when(player1.getInventory().addItem(any(ItemStack.class))).thenReturn(new HashMap<>());
 
             InventoryView view = clickOwnSlot(storedPane, new ItemStack(Material.DIAMOND, 1));
 
@@ -531,7 +535,7 @@ class TradeListenerTest {
                     .as("the item on the cursor must take the slot")
                     .containsKey(0);
             assertThat(session.getPlayerItems(uuid1).get(0).getType()).isEqualTo(Material.DIAMOND);
-            verify(player1.getInventory()).addItem(storedPane);
+            verify(player1.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(storedPane));
             verify(view).setCursor(null);
             verify(player1.getWorld(), never()).dropItemNaturally(any(Location.class), any(ItemStack.class));
         }
@@ -543,7 +547,7 @@ class TradeListenerTest {
             session.setItem(uuid1, 0, storedPane);
             HashMap<Integer, ItemStack> overflow = new HashMap<>();
             overflow.put(0, storedPane);
-            when(player1.getInventory().addItem(storedPane)).thenReturn(overflow);
+            when(player1.getInventory().addItem(any(ItemStack.class))).thenReturn(overflow);
 
             clickOwnSlot(storedPane, new ItemStack(Material.DIAMOND, 1));
 
@@ -559,12 +563,12 @@ class TradeListenerTest {
         void storedGlassPaneCanBeTakenBack() {
             ItemStack storedPane = new ItemStack(Material.CYAN_STAINED_GLASS_PANE, 3);
             session.setItem(uuid1, 0, storedPane);
-            when(player1.getInventory().addItem(storedPane)).thenReturn(new HashMap<>());
+            when(player1.getInventory().addItem(any(ItemStack.class))).thenReturn(new HashMap<>());
 
             InventoryView view = clickOwnSlot(storedPane, null);
 
             assertThat(session.getPlayerItems(uuid1)).doesNotContainKey(0);
-            verify(player1.getInventory()).addItem(storedPane);
+            verify(player1.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(storedPane));
             verify(view, never()).setCursor(any());
         }
 
@@ -573,7 +577,7 @@ class TradeListenerTest {
         void ordinaryStoredOfferIsSwappedNotLost() {
             ItemStack storedDiamond = new ItemStack(Material.DIAMOND, 2);
             session.setItem(uuid1, 0, storedDiamond);
-            when(player1.getInventory().addItem(storedDiamond)).thenReturn(new HashMap<>());
+            when(player1.getInventory().addItem(any(ItemStack.class))).thenReturn(new HashMap<>());
 
             InventoryView view = clickOwnSlot(storedDiamond, new ItemStack(Material.GOLD_INGOT, 5));
 
@@ -583,7 +587,7 @@ class TradeListenerTest {
             ItemStack nowOffered = session.getPlayerItems(uuid1).get(0);
             assertThat(nowOffered.getType()).isEqualTo(Material.GOLD_INGOT);
             assertThat(nowOffered.getAmount()).isEqualTo(5);
-            verify(player1.getInventory()).addItem(storedDiamond);
+            verify(player1.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(storedDiamond));
             verify(view).setCursor(null);
         }
 

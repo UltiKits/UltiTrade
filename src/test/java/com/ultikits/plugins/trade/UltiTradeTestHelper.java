@@ -151,6 +151,20 @@ public final class UltiTradeTestHelper {
         ItemMeta mockMeta = mock(ItemMeta.class);
         lenient().when(itemFactory.getItemMeta(any())).thenReturn(mockMeta);
 
+        // Two contracts a real ItemMeta honours and an unstubbed mock does not, both of which
+        // ItemStack#equals depends on once anything clones a stack (UltiKits/UltiTrade#37):
+        //   - clone() returns an equal meta, where a mock returns null, which would leave the copy
+        //     reporting hasItemMeta() == false and so unequal to its own original;
+        //   - ItemFactory#equals decides meta equality, where a mock answers false for everything,
+        //     which would make every stack unequal to its own copy.
+        // Answering by identity-or-equality keeps two genuinely different metas unequal.
+        lenient().when(mockMeta.clone()).thenReturn(mockMeta);
+        lenient().when(itemFactory.equals(any(), any())).thenAnswer(invocation -> {
+            Object left = invocation.getArgument(0);
+            Object right = invocation.getArgument(1);
+            return left == right || java.util.Objects.equals(left, right);
+        });
+
         setStaticField(Bukkit.class, "server", server);
     }
 
@@ -242,6 +256,26 @@ public final class UltiTradeTestHelper {
         lenient().when(economy.withdrawPlayer(any(Player.class), anyDouble())).thenReturn(successResponse);
         lenient().when(economy.depositPlayer(any(Player.class), anyDouble())).thenReturn(successResponse);
         return economy;
+    }
+
+    /**
+     * Matcher for a stack delivered through {@code TradeService#giveOrDrop}, which hands the inventory a
+     * copy rather than the caller's own object (UltiKits/UltiTrade#37).
+     * <p>
+     * Identity matching cannot be used for a delivered stack under this fixture: measured, a real
+     * {@code ItemStack} built here reports {@code hasItemMeta() == true} while {@code clone()} of it
+     * reports {@code false}, because the meta the mocked {@code ItemFactory} supplies does not survive
+     * Bukkit's clone — so an original and its copy are not {@code equals} here even though they are on a
+     * server. Material and amount are what the assertions actually mean, and they stay just as
+     * discriminating between two different stakes.
+     *
+     * @param expected the stack that should have been delivered
+     * @return {@code null}, having registered the Mockito matcher
+     */
+    public static ItemStack deliveredCopyOf(ItemStack expected) {
+        return argThat(actual -> actual != null
+                && actual.getType() == expected.getType()
+                && actual.getAmount() == expected.getAmount());
     }
 
     // --- Reflection ---
