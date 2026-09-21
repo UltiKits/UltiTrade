@@ -99,9 +99,15 @@ public class TradeService {
      * Shutdown the service.
      */
     public void shutdown() {
-        // Cancel all active sessions
+        // Cancel all active sessions. Each is isolated: a failure while closing one trade must not
+        // skip the trades after it, which is how one unschedulable log write used to destroy every
+        // staked item on the server (UltiKits/UltiTrade#34).
         for (TradeSession session : activeSessions.values()) {
-            cancelTrade(session, "插件关闭");
+            try {
+                cancelTrade(session, "插件关闭");
+            } catch (RuntimeException e) {
+                plugin.getLogger().warn(e, "Failed to cancel a trade during shutdown; continuing with the remaining trades.");
+            }
         }
         
         // Cleanup BossBars
@@ -737,11 +743,11 @@ public class TradeService {
         player2.closeInventory();
         
         session.setState(TradeSession.TradeState.COMPLETED);
-        
-        // Log the trade
-        logService.logCompletedTrade(session, player1, player2, moneyTax, expTax);
-        
         cleanupSession(session);
+
+        // After the state change and the cleanup, so that a failure here cannot leave a paid trade
+        // that the pending close event can still cancel and refund a second time (UltiKits/UltiTrade#34).
+        logService.logCompletedTrade(session, player1, player2, moneyTax, expTax);
         
         // Notify players
         String completeMsg = ChatColor.translateAlternateColorCodes('&', config.getTradeCompleteMessage());
@@ -760,10 +766,12 @@ public class TradeService {
         Player player1 = Bukkit.getPlayer(session.getPlayer1());
         Player player2 = Bukkit.getPlayer(session.getPlayer2());
         
-        // Log cancelled trade
-        logService.logCancelledTrade(session, reason);
-        
-        // Return items to original owners
+        // Return items to original owners. Nothing that can fail runs before this: the staked items
+        // are the players' property, and the trade log is a courtesy. This used to start with the log
+        // call, which schedules an asynchronous write — and during server shutdown the scheduler
+        // rejects a task for the already-disabled plugin, so the throw left this method before a
+        // single item was returned and aborted shutdown's loop over the remaining trades
+        // (UltiKits/UltiTrade#34). The log now runs at the end, where its failure costs nothing.
         if (player1 != null) {
             for (ItemStack item : session.getPlayerItems(session.getPlayer1()).values()) {
                 if (item != null) {
@@ -796,6 +804,9 @@ public class TradeService {
         
         session.setState(TradeSession.TradeState.CANCELLED);
         cleanupSession(session);
+
+        // Last, once every item is back with its owner and the session is closed.
+        logService.logCancelledTrade(session, reason);
     }
     
     /**

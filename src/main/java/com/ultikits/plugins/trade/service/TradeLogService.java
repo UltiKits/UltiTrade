@@ -88,6 +88,13 @@ public class TradeLogService {
     }
 
     private BukkitTask scheduleCleanupTask(int intervalHours) {
+        if (bukkitPlugin == null || !bukkitPlugin.isEnabled()) {
+            // Nothing can be scheduled through a disabled plugin, and a repeating cleanup has no
+            // meaning while the server is stopping (UltiKits/UltiTrade#34).
+            plugin.getLogger().warn("Not scheduling the trade-log cleanup task: the UltiTools plugin is not enabled.");
+            scheduledIntervalHours = intervalHours;
+            return null;
+        }
         long cleanupInterval = intervalHours * 60L * 60L * 20L; // Convert hours to ticks
         BukkitTask task = Bukkit.getScheduler().runTaskTimerAsynchronously(
             bukkitPlugin,
@@ -135,8 +142,8 @@ public class TradeLogService {
             return;
         }
         
-        Bukkit.getScheduler().runTaskAsynchronously(bukkitPlugin, () -> {
-            try {
+        submitLogWrite("log trade", () -> {
+            {
                 TradeLogData log = new TradeLogData(
                     session.getSessionId(),
                     session.getPlayer1(),
@@ -172,10 +179,6 @@ public class TradeLogService {
                 updatePlayerStats(session.getPlayer2(), player2.getName(),
                     session.getPlayerMoney(session.getPlayer2()),
                     session.getPlayerExp(session.getPlayer2()));
-                
-            } catch (Exception e) {
-                plugin.getLogger().warn(e,
-                    "Failed to log trade");
             }
         });
     }
@@ -191,8 +194,8 @@ public class TradeLogService {
             return;
         }
         
-        Bukkit.getScheduler().runTaskAsynchronously(bukkitPlugin, () -> {
-            try {
+        submitLogWrite("log cancelled trade", () -> {
+            {
                 Player player1 = Bukkit.getPlayer(session.getPlayer1());
                 Player player2 = Bukkit.getPlayer(session.getPlayer2());
                 
@@ -219,14 +222,59 @@ public class TradeLogService {
                 
                 // Save to database
                 logOperator.insert(log);
-                
-            } catch (Exception e) {
-                plugin.getLogger().warn(e,
-                    "Failed to log cancelled trade");
             }
         });
     }
     
+    /**
+     * One log write. Declared to allow a checked exception because the framework's
+     * {@link com.ultikits.ultitools.interfaces.DataOperator} does, and {@link #runGuarded} is the one
+     * place that turns such a failure into a warning.
+     *
+     * @since 1.0.0
+     */
+    @FunctionalInterface
+    private interface LogWrite {
+        void run() throws Exception;
+    }
+
+    /**
+     * Submit one log write, off the main thread when that is possible and inline when it is not.
+     * <p>
+     * A log entry is never worth an exception in the caller. {@code CraftScheduler} refuses a task for
+     * a plugin that is no longer enabled and throws {@link org.bukkit.plugin.IllegalPluginAccessException},
+     * which is the state every caller is in while the server is stopping — and one caller,
+     * {@link TradeService#cancelTrade}, has players' staked items to hand back. Writing the record on
+     * the calling thread in that case keeps the audit trail complete instead of dropping it, and the
+     * write's own failure is contained here rather than reaching the caller (UltiKits/UltiTrade#34).
+     *
+     * @param description what is being written, for the warning if it fails
+     * @param write       the write itself
+     * @since 1.0.0
+     */
+    private void submitLogWrite(String description, LogWrite write) {
+        if (bukkitPlugin != null && bukkitPlugin.isEnabled()) {
+            Bukkit.getScheduler().runTaskAsynchronously(bukkitPlugin, () -> runGuarded(description, write));
+            return;
+        }
+        runGuarded(description, write);
+    }
+
+    /**
+     * Run one log write, turning any failure into a warning.
+     *
+     * @param description what is being written, for the warning if it fails
+     * @param write       the write itself
+     * @since 1.0.0
+     */
+    private void runGuarded(String description, LogWrite write) {
+        try {
+            write.run();
+        } catch (Exception e) {
+            plugin.getLogger().warn(e, "Failed to " + description);
+        }
+    }
+
     /**
      * Update player trade statistics.
      */
@@ -342,14 +390,7 @@ public class TradeLogService {
      * @param settings Settings to save
      */
     public void saveSettings(PlayerTradeSettings settings) {
-        Bukkit.getScheduler().runTaskAsynchronously(bukkitPlugin, () -> {
-            try {
-                settingsOperator.update(settings);
-            } catch (Exception e) {
-                plugin.getLogger().warn(e,
-                    "Failed to save player settings");
-            }
-        });
+        submitLogWrite("save player settings", () -> settingsOperator.update(settings));
     }
     
     /**
