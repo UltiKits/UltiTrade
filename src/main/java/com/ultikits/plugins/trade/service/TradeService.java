@@ -106,7 +106,14 @@ public class TradeService {
             try {
                 cancelTrade(session, "插件关闭");
             } catch (RuntimeException e) {
-                plugin.getLogger().warn(e, "Failed to cancel a trade during shutdown; continuing with the remaining trades.");
+                // A handler whose only job is to stop one failure costing the other trades their items
+                // must not be able to throw itself. The injected plugin is the only thing it needs, and
+                // a service that never received one would otherwise turn this rescue into the very
+                // abort it exists to prevent (measured: this line raised a NullPointerException from
+                // inside the catch).
+                if (plugin != null) {
+                    plugin.getLogger().warn(e, "Failed to cancel a trade during shutdown; continuing with the remaining trades.");
+                }
             }
         }
         

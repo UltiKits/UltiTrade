@@ -271,7 +271,11 @@ public class TradeLogService {
         try {
             write.run();
         } catch (Exception e) {
-            plugin.getLogger().warn(e, "Failed to " + description);
+            // Same rule as TradeService#shutdown's rescue: the point of this method is that a log
+            // failure reaches nobody, so the reporting itself must not be able to throw.
+            if (plugin != null) {
+                plugin.getLogger().warn(e, "Failed to " + description);
+            }
         }
     }
 
