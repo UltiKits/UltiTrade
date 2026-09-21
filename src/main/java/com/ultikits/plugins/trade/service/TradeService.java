@@ -829,11 +829,26 @@ public class TradeService {
      * item back to a player goes through this one method, so no call site can discard the leftover
      * again.
      *
-     * @param player the player to give the item to, and at whose location any overflow is dropped
-     * @param item   the item to give
+     * The item is copied before delivery. {@code CraftInventory#addItem} reports its leftover by
+     * calling {@code setAmount} on the stack it is given, so passing a caller's own object rewrites it:
+     * for a merge into an existing partial stack that left the trade session recording a smaller amount
+     * than the player actually staked, and the trade log serialises the session
+     * (UltiKits/UltiTrade#37).
+     *
+     * @param player the player to give the item to, and at whose location any overflow is dropped;
+     *               must not be {@code null}
+     * @param item   the item to give; {@code null} or an empty stack is nothing to give and is ignored
+     * @throws IllegalArgumentException if {@code player} is {@code null}
+     * @since 1.0.0
      */
     public void giveOrDrop(Player player, ItemStack item) {
-        HashMap<Integer, ItemStack> overflow = player.getInventory().addItem(item);
+        if (player == null) {
+            throw new IllegalArgumentException("player must not be null");
+        }
+        if (item == null || item.getType().isAir()) {
+            return;
+        }
+        HashMap<Integer, ItemStack> overflow = player.getInventory().addItem(item.clone());
         for (ItemStack drop : overflow.values()) {
             player.getWorld().dropItemNaturally(player.getLocation(), drop);
         }
