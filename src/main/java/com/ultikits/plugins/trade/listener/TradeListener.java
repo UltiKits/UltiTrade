@@ -225,30 +225,41 @@ public class TradeListener implements Listener {
             session.setConfirmed(session.getOtherPlayer(player.getUniqueId()), false);
             
             ItemStack cursor = event.getCursor();
-            ItemStack current = event.getCurrentItem();
-            
             int index = gui.getItemIndex(slot);
-            
-            // If clicking on glass pane, it's empty - allow placing
-            if (current != null && current.getType().name().contains("STAINED_GLASS_PANE")) {
-                if (cursor != null && !cursor.getType().isAir()) {
-                    // Place item
+
+            // Whether this slot holds an offer is read from the session, which is the only authority
+            // on what this player has put up. It used to be inferred from the rendered item's
+            // material name ("...STAINED_GLASS_PANE" meant empty), and a player's own stained glass
+            // pane is indistinguishable from the empty-slot placeholder that way: placing another
+            // item over it silently replaced, and so destroyed, the stored pane, and it could not be
+            // taken back out at all (UltiKits/UltiTrade#31).
+            ItemStack offered = session.getPlayerItems(player.getUniqueId()).get(index);
+            boolean holdingItem = cursor != null && !cursor.getType().isAir();
+
+            if (offered == null) {
+                // Empty slot: accept the item on the cursor, if there is one.
+                if (holdingItem) {
                     session.setItem(player.getUniqueId(), index, cursor.clone());
                     event.getView().setCursor(null);
                     gui.playItemSound();
                     updateBothGUIs(session);
                 }
-            } else if (current != null && !current.getType().isAir()) {
-                // Remove item
-                session.setItem(player.getUniqueId(), index, null);
-                
-                // Give the item back to the player. A completely full inventory must not destroy
-                // it: whatever does not fit is dropped at the player's feet, the same contract the
-                // cancel and complete paths use (UltiKits/UltiTrade#20).
-                tradeService.giveOrDrop(player, current);
-                tradeService.playSound(player, Sound.ENTITY_ITEM_PICKUP);
-                updateBothGUIs(session);
+                return;
             }
+
+            // Occupied slot: the stored offer always leaves the slot and always comes back to the
+            // player, whether this click is a plain take-back or a swap for the item on the cursor.
+            // Whatever the inventory cannot hold is dropped at the player's feet rather than
+            // discarded, the same contract the cancel and complete paths use (UltiKits/UltiTrade#20).
+            session.setItem(player.getUniqueId(), index, null);
+            if (holdingItem) {
+                session.setItem(player.getUniqueId(), index, cursor.clone());
+                event.getView().setCursor(null);
+                gui.playItemSound();
+            }
+            tradeService.giveOrDrop(player, offered);
+            tradeService.playSound(player, Sound.ENTITY_ITEM_PICKUP);
+            updateBothGUIs(session);
             return;
         }
     }

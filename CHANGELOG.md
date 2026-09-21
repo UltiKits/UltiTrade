@@ -54,6 +54,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   overflow handling a cancelled or completed trade already uses when it returns items. Previously the
   item was silently destroyed while the slot reverted to its glass-pane placeholder in both trade
   windows as if the removal had succeeded (UltiKits/UltiTrade#20).
+- A stained glass pane that a player placed into one of their own trade slots is no longer destroyed
+  when another item is placed over it, and can now be taken back out at all. Which action a click on
+  an own item slot performs is now read from the offer the trade session holds, not from the material
+  of the item drawn in that slot, so a pane the player offered is no longer mistaken for the
+  empty-slot placeholder. Clicking an own slot that already holds an offer while holding an item now
+  swaps them: the held item takes the slot and the stored offer returns to the player, dropping at
+  their feet if it does not fit. Previously that click destroyed a stored pane outright, and for any
+  other stored item it took the item back while leaving the held item on the cursor
+  (UltiKits/UltiTrade#31).
 - 重载本模块（`/ul reload UltiTrade`）现在会重新读取 `config/trade.yml` 并刷新语言文件，修改后的
   `max-distance` 等配置无需重启即可生效。此前本模块的重载方法替换了框架的重载方法且只输出一行日志，
   这两步都不会执行。UltiTools 6.3.0 还会在此时报告 `@ConditionalOnConfig` 漂移并输出框架自身的
@@ -83,6 +92,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - 从交易界面取回已放入的物品时，若操作玩家的背包已完全装满，该物品不再被销毁：装不下的部分现在会掉落在该玩家
   脚下，与取消或完成交易时返还物品所用的溢出处理一致。此前该物品会被静默销毁，而双方交易界面中的该格子仍会恢复
   为玻璃板占位符，仿佛取回成功（UltiKits/UltiTrade#20）。
+- 玩家放入自己交易格的染色玻璃板，在其上放置其他物品时不再被销毁，并且现在可以被取回。点击自己的物品格时执行
+  哪种操作，现在依据交易会话中记录的出价判断，而不再依据该格所绘制物品的材质，因此玩家出价的玻璃板不会再被误认
+  为空格占位符。手持物品点击自己已有出价的格子现在会交换：手持物品放入该格，原有出价返还给玩家，装不下则掉落在
+  其脚下。此前这一点击会直接销毁存放的玻璃板；对其他物品则是取回该物品、而手持物品仍留在光标上
+  （UltiKits/UltiTrade#31）。
 
 ### Removed
 
