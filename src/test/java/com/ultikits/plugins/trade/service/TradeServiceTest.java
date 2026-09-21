@@ -1195,6 +1195,78 @@ class TradeServiceTest {
         }
     }
 
+    /**
+     * What a player staked must still read correctly after delivery, because that is what the trade log
+     * serialises. {@code CraftInventory#addItem} reports its leftover by calling {@code setAmount} on
+     * the stack it was given (measured in the Paper 1.21.11 bytecode), so a shared hand-back helper must
+     * not pass the session's own object (UltiKits/UltiTrade#37).
+     */
+    @Nested
+    @DisplayName("delivery does not rewrite what the session says was staked (UltiKits/UltiTrade#37)")
+    class DeliveryDoesNotMutateTheStake {
+
+        /**
+         * Models {@code CraftInventory#addItem} merging into an existing partial stack: everything is
+         * accepted, and the argument is left reporting what the merge consumed.
+         */
+        private void stubMergingInventory(Player receiver, int remainderWrittenBack) {
+            when(receiver.getInventory().addItem(any(ItemStack.class))).thenAnswer(invocation -> {
+                ItemStack passed = invocation.getArgument(0);
+                passed.setAmount(remainderWrittenBack);
+                return new HashMap<Integer, ItemStack>();
+            });
+        }
+
+        @Test
+        @DisplayName("a completed trade leaves the staked stack reading its original amount")
+        void completedTradeKeepsTheStakedAmount() throws Exception {
+            when(config.isEnableExpTrade()).thenReturn(false);
+            ItemStack stake = new ItemStack(Material.DIAMOND, 64);
+            TradeSession session = new TradeSession(player1, player2);
+            session.setItem(uuid1, 0, stake);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+            stubMergingInventory(player2, 60);
+
+            service.completeTrade(session);
+
+            // The delivery happened, so this is not a vacuous pass ...
+            verify(player2.getInventory()).addItem(any(ItemStack.class));
+            // ... and the session still reports what was actually staked, which is what the log reads.
+            assertThat(session.getPlayerItems(uuid1).get(0).getAmount()).isEqualTo(64);
+        }
+
+        @Test
+        @DisplayName("a cancelled trade leaves the staked stack reading its original amount")
+        void cancelledTradeKeepsTheStakedAmount() throws Exception {
+            ItemStack stake = new ItemStack(Material.DIAMOND, 64);
+            TradeSession session = new TradeSession(player1, player2);
+            session.setItem(uuid1, 0, stake);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+            stubMergingInventory(player1, 60);
+
+            service.cancelTrade(session, "test reason");
+
+            verify(player1.getInventory()).addItem(any(ItemStack.class));
+            assertThat(session.getPlayerItems(uuid1).get(0).getAmount()).isEqualTo(64);
+        }
+    }
+
     @Nested
     @DisplayName("Sound Effects")
     class SoundEffects {
