@@ -721,20 +721,14 @@ public class TradeService {
         // Give player1's items to player2
         for (ItemStack item : items1.values()) {
             if (item != null) {
-                HashMap<Integer, ItemStack> overflow = player2.getInventory().addItem(item);
-                for (ItemStack drop : overflow.values()) {
-                    player2.getWorld().dropItemNaturally(player2.getLocation(), drop);
-                }
+                giveOrDrop(player2, item);
             }
         }
         
         // Give player2's items to player1
         for (ItemStack item : items2.values()) {
             if (item != null) {
-                HashMap<Integer, ItemStack> overflow = player1.getInventory().addItem(item);
-                for (ItemStack drop : overflow.values()) {
-                    player1.getWorld().dropItemNaturally(player1.getLocation(), drop);
-                }
+                giveOrDrop(player1, item);
             }
         }
         
@@ -773,10 +767,7 @@ public class TradeService {
         if (player1 != null) {
             for (ItemStack item : session.getPlayerItems(session.getPlayer1()).values()) {
                 if (item != null) {
-                    HashMap<Integer, ItemStack> overflow = player1.getInventory().addItem(item);
-                    for (ItemStack drop : overflow.values()) {
-                        player1.getWorld().dropItemNaturally(player1.getLocation(), drop);
-                    }
+                    giveOrDrop(player1, item);
                 }
             }
             player1.closeInventory();
@@ -791,10 +782,7 @@ public class TradeService {
         if (player2 != null) {
             for (ItemStack item : session.getPlayerItems(session.getPlayer2()).values()) {
                 if (item != null) {
-                    HashMap<Integer, ItemStack> overflow = player2.getInventory().addItem(item);
-                    for (ItemStack drop : overflow.values()) {
-                        player2.getWorld().dropItemNaturally(player2.getLocation(), drop);
-                    }
+                    giveOrDrop(player2, item);
                 }
             }
             player2.closeInventory();
@@ -820,6 +808,26 @@ public class TradeService {
         }
     }
     
+    /**
+     * Give an item to a player, dropping at the player's own feet whatever the inventory cannot
+     * hold.
+     * <p>
+     * {@link org.bukkit.inventory.Inventory#addItem(ItemStack...)} returns the stacks it could not
+     * store. Discarding that return value destroys them, which is what UltiKits/UltiTrade#20
+     * reported for the trade window's remove-item click. Every path in this module that hands an
+     * item back to a player goes through this one method, so no call site can discard the leftover
+     * again.
+     *
+     * @param player the player to give the item to, and at whose location any overflow is dropped
+     * @param item   the item to give
+     */
+    public void giveOrDrop(Player player, ItemStack item) {
+        HashMap<Integer, ItemStack> overflow = player.getInventory().addItem(item);
+        for (ItemStack drop : overflow.values()) {
+            player.getWorld().dropItemNaturally(player.getLocation(), drop);
+        }
+    }
+
     /**
      * Cleanup session.
      */

@@ -49,6 +49,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   its listener unregistration, so after the uninstall the module's commands are really removed and
   its listeners stop firing. Previously this module's unload method replaced the framework's, so both
   its commands and its listeners stayed active until the server restarted (UltiKits/UltiTrade#15).
+- Taking a placed item back out of the trade window no longer destroys it when the acting player's
+  inventory is completely full: whatever does not fit is now dropped at that player's feet, the same
+  overflow handling a cancelled or completed trade already uses when it returns items. Previously the
+  item was silently destroyed while the slot reverted to its glass-pane placeholder in both trade
+  windows as if the removal had succeeded (UltiKits/UltiTrade#20).
 - 重载本模块（`/ul reload UltiTrade`）现在会重新读取 `config/trade.yml` 并刷新语言文件，修改后的
   `max-distance` 等配置无需重启即可生效。此前本模块的重载方法替换了框架的重载方法且只输出一行日志，
   这两步都不会执行。UltiTools 6.3.0 还会在此时报告 `@ConditionalOnConfig` 漂移并输出框架自身的
@@ -75,6 +80,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   再由框架注销命令，最后注销监听器，因此卸载后本模块的命令会被真正移除，其监听器也不再触发。此前本模块
   的卸载方法替换了框架的卸载方法，因此其命令和监听器都会一直保持生效，直到服务器重启
   （UltiKits/UltiTrade#15）。
+- 从交易界面取回已放入的物品时，若操作玩家的背包已完全装满，该物品不再被销毁：装不下的部分现在会掉落在该玩家
+  脚下，与取消或完成交易时返还物品所用的溢出处理一致。此前该物品会被静默销毁，而双方交易界面中的该格子仍会恢复
+  为玻璃板占位符，仿佛取回成功（UltiKits/UltiTrade#20）。
 
 ### Removed
 

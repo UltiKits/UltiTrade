@@ -242,8 +242,10 @@ public class TradeListener implements Listener {
                 // Remove item
                 session.setItem(player.getUniqueId(), index, null);
                 
-                // Give item back to player
-                player.getInventory().addItem(current);
+                // Give the item back to the player. A completely full inventory must not destroy
+                // it: whatever does not fit is dropped at the player's feet, the same contract the
+                // cancel and complete paths use (UltiKits/UltiTrade#20).
+                tradeService.giveOrDrop(player, current);
                 tradeService.playSound(player, Sound.ENTITY_ITEM_PICKUP);
                 updateBothGUIs(session);
             }
