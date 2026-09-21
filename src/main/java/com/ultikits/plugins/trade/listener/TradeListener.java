@@ -244,6 +244,8 @@ public class TradeListener implements Listener {
             // item over it silently replaced, and so destroyed, the stored pane, and it could not be
             // taken back out at all (UltiKits/UltiTrade#31).
             ItemStack offered = session.getPlayerItems(player.getUniqueId()).get(index);
+            // getCursor() is @NotNull in this Paper API; the null half only guards a caller that
+            // presents a bare event, and isAir() is the live test for "holding nothing".
             boolean holdingItem = cursor != null && !cursor.getType().isAir();
 
             if (offered == null) {
@@ -261,13 +263,14 @@ public class TradeListener implements Listener {
             // player, whether this click is a plain take-back or a swap for the item on the cursor.
             // Whatever the inventory cannot hold is dropped at the player's feet rather than
             // discarded, the same contract the cancel and complete paths use (UltiKits/UltiTrade#20).
-            session.setItem(player.getUniqueId(), index, null);
+            // One slot write, and the hand-back immediately after it, so nothing sits between the
+            // removal and the delivery.
+            session.setItem(player.getUniqueId(), index, holdingItem ? cursor.clone() : null);
+            tradeService.giveOrDrop(player, offered);
             if (holdingItem) {
-                session.setItem(player.getUniqueId(), index, cursor.clone());
                 event.getView().setCursor(null);
                 gui.playItemSound();
             }
-            tradeService.giveOrDrop(player, offered);
             tradeService.playSound(player, Sound.ENTITY_ITEM_PICKUP);
             updateBothGUIs(session);
             return;
