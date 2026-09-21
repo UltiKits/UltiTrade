@@ -102,6 +102,11 @@ class TradeReloadReconciliationTest {
         logService = new TradeLogService();
         UltiTradeTestHelper.setField(logService, "plugin", UltiTradeTestHelper.getMockPlugin());
         UltiTradeTestHelper.setField(logService, "config", config);
+        // TradeLogService#init always resolves this before any reload can reach the service; without it
+        // the service looks like one belonging to a disabled plugin, which production code now treats as
+        // the shutdown path (UltiKits/UltiTrade#34).
+        UltiTradeTestHelper.setField(logService, "bukkitPlugin",
+                org.bukkit.Bukkit.getPluginManager().getPlugin("UltiTools"));
 
         SimpleContainer context = mock(SimpleContainer.class);
         when(context.getBean(TradeService.class)).thenReturn(tradeService);

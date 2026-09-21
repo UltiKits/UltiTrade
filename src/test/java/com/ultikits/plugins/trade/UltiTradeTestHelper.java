@@ -18,6 +18,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.ItemFactory;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.ServicesManager;
 import org.bukkit.scheduler.BukkitScheduler;
@@ -108,6 +109,16 @@ public final class UltiTradeTestHelper {
         // ServerMock (PluginManagerMock/ServicesManagerMock/InventoryMock respectively) — same
         // reasoning as the scheduler above.
         PluginManager pluginManager = mock(PluginManagerMock.class);
+
+        // On a live server Bukkit.getPluginManager().getPlugin("UltiTools") returns the enabled
+        // framework plugin, and that is what every scheduler call in this module passes. Without this
+        // stub it returns null, which production code now reads as "not enabled" and routes down its
+        // shutdown path (UltiKits/UltiTrade#34) — so the default fixture must present the running-server
+        // state, and a test that wants the disabled state injects its own plugin.
+        Plugin ultiToolsPlugin = mock(Plugin.class);
+        lenient().when(ultiToolsPlugin.getName()).thenReturn("UltiTools");
+        lenient().when(ultiToolsPlugin.isEnabled()).thenReturn(true);
+        lenient().when(pluginManager.getPlugin("UltiTools")).thenReturn(ultiToolsPlugin);
 
         ServicesManager servicesManager = mock(ServicesManagerMock.class);
         BossBar mockBossBar = mock(BossBar.class);
