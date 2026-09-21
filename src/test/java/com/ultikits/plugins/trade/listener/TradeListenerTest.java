@@ -453,8 +453,11 @@ class TradeListenerTest {
         }
 
         @Test
-        @DisplayName("every stack the inventory could not take is dropped, not only the first")
-        void everyOverflowStackIsDropped() {
+        @DisplayName("the drop loop covers the whole leftover map, not just its first entry")
+        void theWholeLeftoverMapIsDropped() {
+            // A single-stack addItem can only ever key its leftover map at 0, so this two-entry map is a
+            // state the platform does not produce; what it pins is that the loop iterates every value
+            // rather than reading one index.
             ItemStack secondStack = new ItemStack(Material.GOLD_INGOT, 16);
             HashMap<Integer, ItemStack> overflow = new HashMap<>();
             overflow.put(0, offered);
@@ -514,6 +517,8 @@ class TradeListenerTest {
             when(event.getInventory()).thenReturn(top);
             when(event.getWhoClicked()).thenReturn(player1);
             when(event.getRawSlot()).thenReturn(TradeGUI.YOUR_SLOTS[0]);
+            // Stubbed to present a realistic event: the handler must not consult it, which
+            // theRenderDoesNotDecide below proves by rendering a placeholder over an occupied slot.
             when(event.getCurrentItem()).thenReturn(rendered);
             when(event.getCursor()).thenReturn(cursor);
             InventoryView view = mock(InventoryView.class);
@@ -589,6 +594,22 @@ class TradeListenerTest {
             assertThat(nowOffered.getAmount()).isEqualTo(5);
             verify(player1.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(storedDiamond));
             verify(view).setCursor(null);
+        }
+
+        @Test
+        @DisplayName("the rendered item does not decide: a placeholder drawn over an occupied slot still hands the offer back")
+        void theRenderDoesNotDecide() {
+            ItemStack storedDiamond = new ItemStack(Material.DIAMOND, 2);
+            session.setItem(uuid1, 0, storedDiamond);
+            when(player1.getInventory().addItem(any(ItemStack.class))).thenReturn(new HashMap<>());
+
+            // The real state behind UltiKits/UltiTrade#35: a window opened without rendering the session
+            // draws the empty-slot placeholder while the session holds a real offer.
+            InventoryView view = clickOwnSlot(new ItemStack(Material.LIME_STAINED_GLASS_PANE), null);
+
+            assertThat(session.getPlayerItems(uuid1)).doesNotContainKey(0);
+            verify(player1.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(storedDiamond));
+            verify(view, never()).setCursor(any());
         }
 
         @Test
