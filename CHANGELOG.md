@@ -78,6 +78,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A click in a trade window from anyone other than the two traders is refused. It was handled as though
   it came from the second trader, so a third player who had been shown the window by another plugin
   received that trader's staked item (UltiKits/UltiTrade#38).
+- An item can be staked in a trade at all. Every click whose slot belonged to the acting player's own
+  inventory was refused, and a click there is the only way a player can lift an item onto the cursor
+  while the trade window is open — which is what the slot the item goes into reads. No item could ever
+  be offered, by any player, since this module's first release. A drag confined to the player's own
+  inventory was refused for the same reason one layer over, taking their own inventory away from them
+  while a trade was open. The trade window and the confirmation preview now govern their own slots only.
+  Three actions stay refused from an own inventory slot, because they are not confined to the slot
+  clicked and would reach into the window: a shift-click, a double-click collect, and an action the
+  server reports as unknown (UltiKits/UltiTrade#39).
 - 重载本模块（`/ul reload UltiTrade`）现在会重新读取 `config/trade.yml` 并刷新语言文件，修改后的
   `max-distance` 等配置无需重启即可生效。此前本模块的重载方法替换了框架的重载方法且只输出一行日志，
   这两步都不会执行。UltiTools 6.3.0 还会在此时报告 `@ConditionalOnConfig` 漂移并输出框架自身的
@@ -121,6 +130,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   因此向已有 60 个钻石的背包交易 64 个钻石会被记录为 60（UltiKits/UltiTrade#37）。
 - 交易界面中来自两名交易者以外任何人的点击都会被拒绝。此前这类点击会被当作第二名交易者的点击处理，因此被其他
   插件展示了该界面的第三名玩家会拿到该交易者已放入的物品（UltiKits/UltiTrade#38）。
+- 现在终于可以把物品放入交易。此前所有落在操作玩家自身背包内的点击都会被拒绝，而在交易界面打开时，点击自身背包是
+  玩家把物品提到光标上的唯一途径，物品格恰恰只读取光标。因此自本模块首个版本起，任何玩家都无法放入任何物品。仅在
+  玩家自身背包内进行的拖拽也因同样的原因（只是层级不同）被拒绝，使玩家在交易期间无法整理自己的背包。交易界面与确认
+  预览界面现在只管辖各自窗口内的格位。以下三种操作从自身背包格发起时仍会被拒绝，因为它们并不局限于所点击的那一格，
+  会伸进窗口内：Shift 点击、双击收集，以及服务器报告为未知的操作（UltiKits/UltiTrade#39）。
 
 ### Removed
 
