@@ -8,6 +8,7 @@ import com.ultikits.plugins.trade.service.TradeService;
 import com.ultikits.ultitools.annotations.Autowired;
 import com.ultikits.ultitools.annotations.EventListener;
 
+import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
@@ -117,16 +118,20 @@ public class TradeListener implements Listener {
         Player player = (Player) event.getWhoClicked();
         TradeSession session = gui.getSession();
         int slot = event.getRawSlot();
+
+        // Every slot of the trade window holds a display or control item, and the player's own
+        // offered items are managed through the session, so no click may ever move an item by
+        // itself. Cancel first; whether a feature is enabled decides only which action runs below
+        // (UltiKits/UltiTrade#25).
+        event.setCancelled(true);
         
         // Click outside the trade GUI
         if (slot >= 54) {
-            event.setCancelled(true);
             return;
         }
         
         // Handle confirm button
         if (slot == TradeGUI.CONFIRM_SLOT) {
-            event.setCancelled(true);
             if (session.isConfirmed(player.getUniqueId())) {
                 tradeService.cancelConfirmation(player);
             } else {
@@ -138,14 +143,12 @@ public class TradeListener implements Listener {
         
         // Handle cancel button
         if (slot == TradeGUI.CANCEL_SLOT) {
-            event.setCancelled(true);
             tradeService.cancelTrade(player);
             return;
         }
         
         // Handle money slot click
         if (gui.isMoneySlot(slot) && tradeService.hasEconomy()) {
-            event.setCancelled(true);
             // Reset confirmation when changing money
             session.setConfirmed(player.getUniqueId(), false);
             session.setConfirmed(session.getOtherPlayer(player.getUniqueId()), false);
@@ -170,7 +173,6 @@ public class TradeListener implements Listener {
         
         // Handle experience slot click
         if (gui.isExpSlot(slot) && config.isEnableExpTrade()) {
-            event.setCancelled(true);
             // Reset confirmation when changing exp
             session.setConfirmed(player.getUniqueId(), false);
             session.setConfirmed(session.getOtherPlayer(player.getUniqueId()), false);
@@ -197,7 +199,6 @@ public class TradeListener implements Listener {
         // Block other player's side
         for (int s : TradeGUI.THEIR_SLOTS) {
             if (s == slot) {
-                event.setCancelled(true);
                 return;
             }
         }
@@ -205,7 +206,6 @@ public class TradeListener implements Listener {
         // Block separator slots
         for (int s : TradeGUI.SEPARATOR_SLOTS) {
             if (s == slot) {
-                event.setCancelled(true);
                 return;
             }
         }
@@ -215,7 +215,6 @@ public class TradeListener implements Listener {
             slot == TradeGUI.THEIR_MONEY_SLOT || slot == TradeGUI.THEIR_EXP_SLOT ||
             (slot >= 45 && slot < 54 && slot != TradeGUI.CONFIRM_SLOT && slot != TradeGUI.CANCEL_SLOT &&
              slot != TradeGUI.YOUR_MONEY_SLOT && slot != TradeGUI.YOUR_EXP_SLOT)) {
-            event.setCancelled(true);
             return;
         }
         
@@ -235,7 +234,6 @@ public class TradeListener implements Listener {
                 if (cursor != null && !cursor.getType().isAir()) {
                     // Place item
                     session.setItem(player.getUniqueId(), index, cursor.clone());
-                    event.setCancelled(true);
                     event.getView().setCursor(null);
                     gui.playItemSound();
                     updateBothGUIs(session);
@@ -243,7 +241,6 @@ public class TradeListener implements Listener {
             } else if (current != null && !current.getType().isAir()) {
                 // Remove item
                 session.setItem(player.getUniqueId(), index, null);
-                event.setCancelled(true);
                 
                 // Give item back to player
                 player.getInventory().addItem(current);
@@ -298,9 +295,16 @@ public class TradeListener implements Listener {
             }
             
             if (inputType == InputType.MONEY) {
+                // Read the provider once: a reload on the main thread may drop it while this async
+                // handler runs (UltiKits/UltiTrade#26). Without a provider the amount stays unchanged.
+                Economy currentEconomy = tradeService.getEconomy();
+                if (currentEconomy == null || !config.isEnableMoneyTrade()) {
+                    player.sendMessage(ChatColor.RED + "金币交易当前不可用！");
+                    reopenGUI(player);
+                    return;
+                }
                 // Check balance
-                if (tradeService.hasEconomy() && 
-                    tradeService.getEconomy().getBalance(player) < value) {
+                if (currentEconomy.getBalance(player) < value) {
                     player.sendMessage(ChatColor.RED + "余额不足！");
                     reopenGUI(player);
                     return;
@@ -308,6 +312,13 @@ public class TradeListener implements Listener {
                 session.setMoney(player.getUniqueId(), value);
                 player.sendMessage(ChatColor.GREEN + "已设置交易金币: " + value);
             } else {
+                // A reload may have turned experience trading off since the prompt opened
+                // (UltiKits/UltiTrade#26). Without it the amount stays unchanged.
+                if (!config.isEnableExpTrade()) {
+                    player.sendMessage(ChatColor.RED + "经验交易当前不可用！");
+                    reopenGUI(player);
+                    return;
+                }
                 // Check experience
                 int expValue = (int) value;
                 if (tradeService.getTotalExperience(player) < expValue) {

@@ -1,7 +1,6 @@
 # UltiTrade Language File (English)
 trade_enabled: "UltiTrade enabled!"
 trade_disabled: "UltiTrade disabled!"
-trade_reloaded: "UltiTrade config reloaded!"
 
 # Trade Request
 request_sent: "&aTrading request sent to &e{PLAYER}&a!"

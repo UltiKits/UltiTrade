@@ -7,8 +7,10 @@ import com.ultikits.plugins.trade.gui.TradeConfirmPage;
 import com.ultikits.plugins.trade.gui.TradeGUI;
 import com.ultikits.plugins.trade.service.TradeService;
 
+import org.bukkit.Material;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
@@ -18,7 +20,10 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
+import org.bukkit.inventory.ItemStack;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.util.HashSet;
 import java.util.Map;
@@ -221,6 +226,144 @@ class TradeListenerTest {
             listener.onPlayerQuit(event);
 
             assertThat(waitingForInput).doesNotContainKey(uuid1);
+        }
+    }
+
+    /**
+     * The click event here is a Mockito mock, so these cases prove only that every click is
+     * cancelled; that a cancelled click moves no item, and that the place and remove actions move
+     * exactly the one offered item, is proven by {@code placeItemClearsCursorAndStoresOneCopy} and the
+     * session item tests.
+     */
+    @Nested
+    @DisplayName("display items in the trade window can never be taken (UltiKits/UltiTrade#25)")
+    class DisplayItemsCannotBeTaken {
+
+        private TradeGUI gui;
+        private TradeSession session;
+
+        @BeforeEach
+        void openWindow() {
+            gui = mock(TradeGUI.class);
+            session = new TradeSession(player1, player2);
+            when(gui.getSession()).thenReturn(session);
+            when(gui.isMoneySlot(TradeGUI.YOUR_MONEY_SLOT)).thenReturn(true);
+            when(gui.isExpSlot(TradeGUI.YOUR_EXP_SLOT)).thenReturn(true);
+            when(gui.isYourSlot(TradeGUI.YOUR_SLOTS[0])).thenReturn(true);
+            when(gui.getItemIndex(TradeGUI.YOUR_SLOTS[0])).thenReturn(0);
+        }
+
+        private InventoryClickEvent click(int rawSlot, ClickType type, ItemStack current) {
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(gui);
+            InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getInventory()).thenReturn(top);
+            when(event.getWhoClicked()).thenReturn(player1);
+            when(event.getRawSlot()).thenReturn(rawSlot);
+            when(event.getClick()).thenReturn(type);
+            when(event.getCurrentItem()).thenReturn(current);
+            return event;
+        }
+
+        private void assertCancelledAndNothingMoved(InventoryClickEvent event) {
+            verify(event).setCancelled(true);
+            verify(event, never()).setCancelled(false);
+            verify(player1.getInventory(), never()).addItem(any(ItemStack.class));
+            assertThat(session.getPlayerItems(uuid1)).isEmpty();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = ClickType.class, names = {"LEFT", "RIGHT", "SHIFT_LEFT", "SHIFT_RIGHT", "NUMBER_KEY", "DROP", "CONTROL_DROP", "DOUBLE_CLICK", "SWAP_OFFHAND", "MIDDLE"})
+        @DisplayName("money slot with money trading off: the barrier cannot be taken")
+        void moneySlotFeatureOff(ClickType type) {
+            when(tradeService.hasEconomy()).thenReturn(false);
+            InventoryClickEvent event = click(TradeGUI.YOUR_MONEY_SLOT, type, new ItemStack(Material.BARRIER));
+
+            listener.onInventoryClick(event);
+
+            assertCancelledAndNothingMoved(event);
+            verify(player1, never()).closeInventory();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = ClickType.class, names = {"LEFT", "RIGHT", "SHIFT_LEFT", "SHIFT_RIGHT", "NUMBER_KEY", "DROP", "CONTROL_DROP", "DOUBLE_CLICK", "SWAP_OFFHAND", "MIDDLE"})
+        @DisplayName("money slot with money trading on: the gold nugget cannot be taken and the prompt opens")
+        void moneySlotFeatureOn(ClickType type) {
+            when(tradeService.hasEconomy()).thenReturn(true);
+            InventoryClickEvent event = click(TradeGUI.YOUR_MONEY_SLOT, type, new ItemStack(Material.GOLD_NUGGET));
+
+            listener.onInventoryClick(event);
+
+            assertCancelledAndNothingMoved(event);
+            verify(player1).closeInventory();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = ClickType.class, names = {"LEFT", "RIGHT", "SHIFT_LEFT", "SHIFT_RIGHT", "NUMBER_KEY", "DROP", "CONTROL_DROP", "DOUBLE_CLICK", "SWAP_OFFHAND", "MIDDLE"})
+        @DisplayName("experience slot with experience trading off: the barrier cannot be taken")
+        void expSlotFeatureOff(ClickType type) {
+            when(config.isEnableExpTrade()).thenReturn(false);
+            InventoryClickEvent event = click(TradeGUI.YOUR_EXP_SLOT, type, new ItemStack(Material.BARRIER));
+
+            listener.onInventoryClick(event);
+
+            assertCancelledAndNothingMoved(event);
+            verify(player1, never()).closeInventory();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = ClickType.class, names = {"LEFT", "RIGHT", "SHIFT_LEFT", "SHIFT_RIGHT", "NUMBER_KEY", "DROP", "CONTROL_DROP", "DOUBLE_CLICK", "SWAP_OFFHAND", "MIDDLE"})
+        @DisplayName("experience slot with experience trading on: the bottle cannot be taken and the prompt opens")
+        void expSlotFeatureOn(ClickType type) {
+            when(config.isEnableExpTrade()).thenReturn(true);
+            InventoryClickEvent event = click(TradeGUI.YOUR_EXP_SLOT, type, new ItemStack(Material.EXPERIENCE_BOTTLE));
+
+            listener.onInventoryClick(event);
+
+            assertCancelledAndNothingMoved(event);
+            verify(player1).closeInventory();
+        }
+
+        @Test
+        @DisplayName("a click outside the window (raw slot -999) while the trade window is open is cancelled too")
+        void clickOutsideWindowIsCancelled() {
+            InventoryClickEvent event = click(-999, ClickType.LEFT, null);
+
+            listener.onInventoryClick(event);
+
+            verify(event).setCancelled(true);
+        }
+
+        @Test
+        @DisplayName("placing an item from the cursor stores one copy in the session and clears the cursor, so the item is not in both places")
+        void placeItemClearsCursorAndStoresOneCopy() {
+            ItemStack offered = new ItemStack(Material.DIAMOND, 4);
+            InventoryClickEvent event = click(TradeGUI.YOUR_SLOTS[0], ClickType.LEFT, new ItemStack(Material.LIME_STAINED_GLASS_PANE));
+            when(event.getCursor()).thenReturn(offered);
+            InventoryView view = mock(InventoryView.class);
+            when(event.getView()).thenReturn(view);
+
+            listener.onInventoryClick(event);
+
+            verify(event).setCancelled(true);
+            verify(view).setCursor(null);
+            assertThat(session.getPlayerItems(uuid1)).hasSize(1);
+            ItemStack stored = session.getPlayerItems(uuid1).get(0);
+            assertThat(stored.getType()).isEqualTo(Material.DIAMOND);
+            assertThat(stored.getAmount()).isEqualTo(4);
+            verify(player1.getInventory(), never()).addItem(any(ItemStack.class));
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = ClickType.class, names = {"LEFT", "RIGHT", "SHIFT_LEFT", "SHIFT_RIGHT", "NUMBER_KEY", "DROP", "CONTROL_DROP", "DOUBLE_CLICK", "SWAP_OFFHAND", "MIDDLE"})
+        @DisplayName("an empty own item slot clicked with an empty cursor: its placeholder glass pane cannot be taken")
+        void emptyOwnSlotPlaceholder(ClickType type) {
+            InventoryClickEvent event = click(TradeGUI.YOUR_SLOTS[0], type, new ItemStack(Material.LIME_STAINED_GLASS_PANE));
+            when(event.getCursor()).thenReturn(null);
+
+            listener.onInventoryClick(event);
+
+            assertCancelledAndNothingMoved(event);
         }
     }
 
@@ -702,6 +845,67 @@ class TradeListenerTest {
 
             assertThat(event.isCancelled()).isTrue();
             verify(player1).sendMessage(contains("\u4F59\u989D\u4E0D\u8DB3")); // "余额不足"
+        }
+
+        @Test
+        @DisplayName("a reload that drops the provider while the money prompt is answered does not throw, keeps the amount and reopens the GUI (UltiKits/UltiTrade#26)")
+        void moneyInputAfterProviderDroppedMidRead() throws Exception {
+            addToWaitingForInput(uuid1, 0); // MONEY
+
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            when(tradeService.isTrading(uuid1)).thenReturn(true);
+            // The race: the availability check still sees the provider, the second read does not.
+            when(tradeService.hasEconomy()).thenReturn(true);
+            when(tradeService.getEconomy()).thenReturn(null);
+
+            AsyncPlayerChatEvent event = new AsyncPlayerChatEvent(false, player1, "500", new HashSet<>());
+
+            assertThatCode(() -> listener.onPlayerChat(event)).doesNotThrowAnyException();
+
+            assertThat(event.isCancelled()).isTrue();
+            assertThat(session.getPlayerMoney(uuid1)).isEqualTo(0.0);
+            verify(player1).sendMessage(contains("\u91D1\u5E01\u4EA4\u6613\u5F53\u524D\u4E0D\u53EF\u7528")); // "金币交易当前不可用"
+            verify(org.bukkit.Bukkit.getServer().getScheduler()).runTask(any(), any(Runnable.class));
+        }
+
+        @Test
+        @DisplayName("provider still held but enable-money-trade already false in memory: the money amount is refused (UltiKits/UltiTrade#26)")
+        void moneyInputRefusedWhenMoneyTradeOffButProviderHeld() throws Exception {
+            addToWaitingForInput(uuid1, 0); // MONEY
+
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            net.milkbowl.vault.economy.Economy heldEconomy = UltiTradeTestHelper.createMockEconomy();
+            when(tradeService.getEconomy()).thenReturn(heldEconomy);
+            when(config.isEnableMoneyTrade()).thenReturn(false);
+
+            AsyncPlayerChatEvent event = new AsyncPlayerChatEvent(false, player1, "500", new HashSet<>());
+
+            listener.onPlayerChat(event);
+
+            assertThat(session.getPlayerMoney(uuid1)).isEqualTo(0.0);
+            verify(player1).sendMessage(contains("\u91D1\u5E01\u4EA4\u6613\u5F53\u524D\u4E0D\u53EF\u7528")); // "金币交易当前不可用"
+        }
+
+        @Test
+        @DisplayName("experience prompt answered after a reload turned enable-exp-trade off: the amount is refused and the GUI reopens (UltiKits/UltiTrade#26)")
+        void expInputRefusedWhenExpTradeOff() throws Exception {
+            addToWaitingForInput(uuid1, 1); // EXPERIENCE
+
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            when(tradeService.getTotalExperience(player1)).thenReturn(1000);
+            when(config.isEnableExpTrade()).thenReturn(false);
+
+            AsyncPlayerChatEvent event = new AsyncPlayerChatEvent(false, player1, "500", new HashSet<>());
+
+            listener.onPlayerChat(event);
+
+            assertThat(event.isCancelled()).isTrue();
+            assertThat(session.getPlayerExp(uuid1)).isEqualTo(0);
+            verify(player1).sendMessage(contains("\u7ECF\u9A8C\u4EA4\u6613\u5F53\u524D\u4E0D\u53EF\u7528")); // "经验交易当前不可用"
+            verify(org.bukkit.Bukkit.getServer().getScheduler()).runTask(any(), any(Runnable.class));
         }
 
         @Test

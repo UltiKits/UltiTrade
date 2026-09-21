@@ -21,6 +21,8 @@ import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.InventoryHolder;
+import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.RegisteredServiceProvider;
@@ -64,8 +66,21 @@ public class TradeService {
     // Bukkit plugin instance for scheduler tasks
     private Plugin bukkitPlugin;
 
-    // Economy integration
-    private Economy economy;
+    /**
+     * Cancellation reason shown to both players when a trade that carries money reaches
+     * completion while money trading is unavailable (UltiKits/UltiTrade#26).
+     */
+    static final String MONEY_UNAVAILABLE_REASON = "金币交易当前不可用";
+
+    /** Cancellation reason when a trade that carries experience completes while experience trading is off. */
+    static final String EXP_UNAVAILABLE_REASON = "经验交易当前不可用";
+
+    /** Sent to both players of a trade whose confirmations a configuration reload voided. */
+    static final String RECONFIRM_AFTER_RELOAD_MESSAGE = "交易配置已重载，请重新确认交易。";
+
+    // Economy integration. Volatile: a reload replaces it on the main thread while the async chat
+    // handler may read it; callers read it once per operation.
+    private volatile Economy economy;
     
     /**
      * Initialize the trade service.
@@ -108,22 +123,131 @@ public class TradeService {
      * Setup Vault economy.
      */
     private void setupEconomy() {
+        // The held provider is replaced by exactly what this lookup finds, including nothing, so a
+        // provider that has gone is never kept. If the lookup itself throws, the previous provider
+        // stays in place.
+        Economy found = null;
         if (Bukkit.getPluginManager().getPlugin("Vault") == null) {
             plugin.getLogger().warn("Vault not found! Money trading disabled.");
-            return;
+        } else {
+            RegisteredServiceProvider<Economy> rsp = Bukkit.getServicesManager().getRegistration(Economy.class);
+            if (rsp != null) {
+                found = rsp.getProvider();
+            } else {
+                plugin.getLogger().warn("No Vault economy provider is registered! Money trading disabled.");
+            }
         }
-        
-        RegisteredServiceProvider<Economy> rsp = Bukkit.getServicesManager().getRegistration(Economy.class);
-        if (rsp != null) {
-            economy = rsp.getProvider();
-        }
+        economy = found;
     }
     
+    /**
+     * Reconcile the Vault economy provider with the current {@code enable-money-trade} value after
+     * a configuration reload (UltiKits/UltiTrade#26). When money trading is enabled the provider
+     * lookup is re-run and its result replaces the held provider (a provider that has gone is
+     * dropped, a replaced one is adopted), so a {@code false} to {@code true} change takes effect
+     * without a restart; when it is disabled the provider is dropped without a lookup or a log line.
+     * The lookup registers nothing, so repeated reloads are safe.
+     */
+    public void reloadEconomy() {
+        if (config.isEnableMoneyTrade()) {
+            setupEconomy();
+        } else {
+            economy = null;
+        }
+    }
+
+    /**
+     * Void every confirmation in open trades after a configuration reload (UltiKits/UltiTrade#26).
+     * A reload can change the terms a confirmation was given for ({@code trade-tax},
+     * {@code exp-tax-rate}, {@code confirm-threshold}, which offers are allowed), so a trade must never
+     * complete on a confirmation given before it. Both players of an affected trade are told to
+     * confirm again.
+     */
+    public void resetConfirmationsAfterReload() {
+        for (TradeSession session : activeSessions.values()) {
+            UUID first = session.getPlayer1();
+            UUID second = session.getPlayer2();
+            if (!session.isConfirmed(first) && !session.isConfirmed(second)) {
+                continue;
+            }
+            session.setConfirmed(first, false);
+            session.setConfirmed(second, false);
+            for (UUID participant : new UUID[] {first, second}) {
+                Player player = Bukkit.getPlayer(participant);
+                if (player != null) {
+                    player.sendMessage(ChatColor.YELLOW + RECONFIRM_AFTER_RELOAD_MESSAGE);
+                }
+            }
+        }
+    }
+
+    /**
+     * Redraw every open trade window from the reloaded configuration (UltiKits/UltiTrade#27).
+     * <p>
+     * An open trade window shows values a reload can change: the title ({@code gui-title}),
+     * money and experience availability, and the money and experience tax
+     * ({@code trade-tax}, {@code exp-tax-rate}). A window is redrawn in place, which keeps it open
+     * and so does not trigger the close-cancels-the-trade handling. An open large-trade
+     * confirmation page, which also shows the taxes and {@code confirm-threshold}, is replaced by
+     * a trade window built from the reloaded configuration. Offers are read from the session, so
+     * nothing offered is added, removed or returned.
+     * <p>
+     * Each player's window is redrawn in isolation: a failure is logged at SEVERE with the player's
+     * name and the remaining windows are still redrawn.
+     */
+    public void refreshOpenTradeWindowsAfterReload() {
+        for (TradeSession session : activeSessions.values()) {
+            for (UUID participant : new UUID[] {session.getPlayer1(), session.getPlayer2()}) {
+                Player player = Bukkit.getPlayer(participant);
+                if (player == null) {
+                    continue;
+                }
+                try {
+                    refreshOpenTradeWindow(session, player);
+                } catch (RuntimeException | LinkageError e) {
+                    plugin.getLogger().error(e, "Could not redraw the open trade window of " + player.getName()
+                        + " after the reload; that window shows the previous terms until it is reopened");
+                }
+            }
+        }
+    }
+
+    private void refreshOpenTradeWindow(TradeSession session, Player player) {
+        InventoryView view = player.getOpenInventory();
+        if (view == null || view.getTopInventory() == null) {
+            return;
+        }
+        InventoryHolder holder = view.getTopInventory().getHolder();
+        if (holder instanceof TradeGUI) {
+            TradeGUI gui = (TradeGUI) holder;
+            gui.update();
+            retitle(view, gui.buildTitle());
+        } else if (holder instanceof TradeConfirmPage) {
+            TradeGUI gui = new TradeGUI(this, session, player);
+            gui.update();
+            player.openInventory(gui.getInventory());
+        }
+    }
+
+    /**
+     * Apply a new window title where the server supports it. {@code InventoryView#setTitle} does
+     * not exist on older server versions; there the window's contents are still redrawn and only
+     * its title keeps the previous {@code gui-title} until it is reopened.
+     */
+    private static void retitle(InventoryView view, String title) {
+        try {
+            view.setTitle(title);
+        } catch (NoSuchMethodError | AbstractMethodError | UnsupportedOperationException e) {
+            // Title changes are unsupported on this server; the redrawn contents already apply.
+        }
+    }
+
     /**
      * Check if economy is available.
      */
     public boolean hasEconomy() {
-        return economy != null && config.isEnableMoneyTrade();
+        Economy current = economy;
+        return current != null && config.isEnableMoneyTrade();
     }
     
     /**
@@ -210,7 +334,8 @@ public class TradeService {
         }
         
         // Create and store request
-        TradeRequest request = new TradeRequest(sender.getUniqueId(), target.getUniqueId());
+        // The timeout is promised to the receiver now; a later reload applies only to new requests.
+        TradeRequest request = new TradeRequest(sender.getUniqueId(), target.getUniqueId(), config.getRequestTimeout());
         pendingRequests.put(target.getUniqueId(), request);
         
         // Notify sender
@@ -223,7 +348,7 @@ public class TradeService {
         
         // Show BossBar if enabled
         if (config.isEnableBossbar()) {
-            showRequestBossBar(target, sender.getName());
+            showRequestBossBar(target, sender.getName(), request.getTimeoutSeconds());
         }
         
         return true;
@@ -265,12 +390,12 @@ public class TradeService {
     /**
      * Show BossBar for trade request countdown.
      */
-    private void showRequestBossBar(Player target, String senderName) {
+    private void showRequestBossBar(Player target, String senderName, int timeoutSeconds) {
         // Remove existing BossBar if any
         removeBossBar(target.getUniqueId());
         
         BossBar bar = Bukkit.createBossBar(
-            ChatColor.YELLOW + senderName + " 请求与你交易 (剩余 " + config.getRequestTimeout() + "秒)",
+            ChatColor.YELLOW + senderName + " 请求与你交易 (剩余 " + timeoutSeconds + "秒)",
             BarColor.YELLOW,
             BarStyle.SOLID
         );
@@ -279,7 +404,7 @@ public class TradeService {
         requestBossBars.put(target.getUniqueId(), bar);
         
         // Start countdown task
-        final int[] remaining = {config.getRequestTimeout()};
+        final int[] remaining = {timeoutSeconds};
         BukkitTask task = Bukkit.getScheduler().runTaskTimer(bukkitPlugin, () -> {
             remaining[0]--;
             if (remaining[0] <= 0) {
@@ -287,7 +412,7 @@ public class TradeService {
                 return;
             }
             
-            double progress = (double) remaining[0] / config.getRequestTimeout();
+            double progress = (double) remaining[0] / timeoutSeconds;
             bar.setProgress(Math.max(0, progress));
             bar.setTitle(ChatColor.YELLOW + senderName + " 请求与你交易 (剩余 " + remaining[0] + "秒)");
             
@@ -327,7 +452,7 @@ public class TradeService {
         removeBossBar(player.getUniqueId());
         
         TradeRequest request = pendingRequests.remove(player.getUniqueId());
-        if (request == null || request.isExpired(config.getRequestTimeout())) {
+        if (request == null || request.isExpired()) {
             player.sendMessage(ChatColor.RED + "没有待处理的交易请求！");
             return false;
         }
@@ -506,12 +631,32 @@ public class TradeService {
         
         double moneyTax = 0;
         int expTax = 0;
-        
+
+        double money1 = session.getPlayerMoney(session.getPlayer1());
+        double money2 = session.getPlayerMoney(session.getPlayer2());
+        // Read the provider once: a reload may replace it at any time.
+        Economy currentEconomy = economy;
+        boolean moneyAvailable = currentEconomy != null && config.isEnableMoneyTrade();
+
+        // Never move items or experience while silently dropping offered money (UltiKits/UltiTrade#26):
+        // money is only withdrawn here, so cancelling leaves every balance untouched and returns items.
+        if ((money1 > 0 || money2 > 0) && !moneyAvailable) {
+            cancelTrade(session, MONEY_UNAVAILABLE_REASON);
+            return;
+        }
+
+        // The same rule for experience: an offer is never dropped while the items still move.
+        int exp1 = session.getPlayerExp(session.getPlayer1());
+        int exp2 = session.getPlayerExp(session.getPlayer2());
+        boolean expAvailable = config.isEnableExpTrade();
+        if ((exp1 > 0 || exp2 > 0) && !expAvailable) {
+            cancelTrade(session, EXP_UNAVAILABLE_REASON);
+            return;
+        }
+
         // Handle money transfer
-        if (hasEconomy()) {
-            double money1 = session.getPlayerMoney(session.getPlayer1());
-            double money2 = session.getPlayerMoney(session.getPlayer2());
-            
+        if (moneyAvailable) {
+
             // Apply tax
             double taxRate = config.getTradeTax();
             double tax1 = money1 * taxRate;
@@ -519,30 +664,28 @@ public class TradeService {
             moneyTax = tax1 + tax2;
             
             // Check balances
-            if (money1 > 0 && economy.getBalance(player1) < money1) {
+            if (money1 > 0 && currentEconomy.getBalance(player1) < money1) {
                 cancelTrade(session, player1.getName() + " 余额不足");
                 return;
             }
-            if (money2 > 0 && economy.getBalance(player2) < money2) {
+            if (money2 > 0 && currentEconomy.getBalance(player2) < money2) {
                 cancelTrade(session, player2.getName() + " 余额不足");
                 return;
             }
             
             // Transfer money
             if (money1 > 0) {
-                economy.withdrawPlayer(player1, money1);
-                economy.depositPlayer(player2, money1 - tax1);
+                currentEconomy.withdrawPlayer(player1, money1);
+                currentEconomy.depositPlayer(player2, money1 - tax1);
             }
             if (money2 > 0) {
-                economy.withdrawPlayer(player2, money2);
-                economy.depositPlayer(player1, money2 - tax2);
+                currentEconomy.withdrawPlayer(player2, money2);
+                currentEconomy.depositPlayer(player1, money2 - tax2);
             }
         }
         
         // Handle experience transfer
-        if (config.isEnableExpTrade()) {
-            int exp1 = session.getPlayerExp(session.getPlayer1());
-            int exp2 = session.getPlayerExp(session.getPlayer2());
+        if (expAvailable) {
             
             // Apply tax
             double expTaxRate = config.getExpTaxRate();
@@ -692,11 +835,10 @@ public class TradeService {
      */
     @Scheduled(period = 200, async = false)
     public void cleanupExpiredRequests() {
-        int timeout = config.getRequestTimeout();
         Iterator<Map.Entry<UUID, TradeRequest>> it = pendingRequests.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<UUID, TradeRequest> entry = it.next();
-            if (entry.getValue().isExpired(timeout)) {
+            if (entry.getValue().isExpired()) {
                 it.remove();
                 removeBossBar(entry.getKey());
                 

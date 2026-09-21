@@ -1,7 +1,6 @@
 # UltiTrade 语言文件 (简体中文)
 trade_enabled: "UltiTrade 已启用！"
 trade_disabled: "UltiTrade 已禁用！"
-trade_reloaded: "UltiTrade 配置已重载！"
 
 # 交易请求
 request_sent: "&a已向 &e{PLAYER} &a发送交易请求！"
