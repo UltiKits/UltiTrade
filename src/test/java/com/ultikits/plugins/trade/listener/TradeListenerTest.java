@@ -527,6 +527,9 @@ class TradeListenerTest {
 
             InventoryView view = clickOwnSlot(storedPane, new ItemStack(Material.DIAMOND, 1));
 
+            assertThat(session.getPlayerItems(uuid1))
+                    .as("the item on the cursor must take the slot")
+                    .containsKey(0);
             assertThat(session.getPlayerItems(uuid1).get(0).getType()).isEqualTo(Material.DIAMOND);
             verify(player1.getInventory()).addItem(storedPane);
             verify(view).setCursor(null);
@@ -544,6 +547,9 @@ class TradeListenerTest {
 
             clickOwnSlot(storedPane, new ItemStack(Material.DIAMOND, 1));
 
+            assertThat(session.getPlayerItems(uuid1))
+                    .as("the item on the cursor must take the slot")
+                    .containsKey(0);
             assertThat(session.getPlayerItems(uuid1).get(0).getType()).isEqualTo(Material.DIAMOND);
             verify(player1.getWorld()).dropItemNaturally(player1.getLocation(), storedPane);
         }
