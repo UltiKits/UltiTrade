@@ -750,10 +750,15 @@ class TradeListenerTest {
         @DisplayName("Should handle click outside inventory")
         void clickOutside() {
             TradeGUI gui = mock(TradeGUI.class);
+            // A real InventoryClickEvent always carries its clicker, and the handler is about to read
+            // who it is in order to refuse a non-participant (UltiKits/UltiTrade#38).
+            TradeSession session = new TradeSession(player1, player2);
+            when(gui.getSession()).thenReturn(session);
 
             InventoryClickEvent event = mock(InventoryClickEvent.class);
             when(event.getInventory()).thenReturn(mock(Inventory.class));
             when(event.getInventory().getHolder()).thenReturn(gui);
+            when(event.getWhoClicked()).thenReturn(player1);
             when(event.getRawSlot()).thenReturn(100); // Outside inventory
 
             listener.onInventoryClick(event);
