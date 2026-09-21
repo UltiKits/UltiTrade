@@ -610,6 +610,79 @@ class TradeListenerTest {
         }
     }
 
+    /**
+     * Only a participant's click may move a participant's offer. {@code TradeGUI}'s slot test carries no
+     * perspective, and {@code TradeSession#getPlayerItems} treats everyone who is not player 1 as
+     * player 2, so without a participant check a third viewer of a live trade window is handed player
+     * 2's stake. The second case below is the mirror of the first, acting as player 2, which is the arm
+     * of that dispatch the rest of the suite never exercises (UltiKits/UltiTrade#38).
+     */
+    @Nested
+    @DisplayName("only a participant's click moves a participant's offer (UltiKits/UltiTrade#38)")
+    class OnlyParticipantsMayClick {
+
+        private TradeGUI gui;
+        private TradeSession session;
+
+        @BeforeEach
+        void openWindow() throws Exception {
+            TradeService realService = new TradeService();
+            UltiTradeTestHelper.setField(realService, "config", config);
+            UltiTradeTestHelper.setField(realService, "logService", mock(TradeLogService.class));
+            UltiTradeTestHelper.setField(listener, "tradeService", realService);
+
+            session = new TradeSession(player1, player2);
+            gui = mock(TradeGUI.class);
+            when(gui.getSession()).thenReturn(session);
+            when(gui.isYourSlot(TradeGUI.YOUR_SLOTS[0])).thenReturn(true);
+            when(gui.getItemIndex(TradeGUI.YOUR_SLOTS[0])).thenReturn(0);
+        }
+
+        private void click(Player clicker, ItemStack rendered, ItemStack cursor) {
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(gui);
+            InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getInventory()).thenReturn(top);
+            when(event.getWhoClicked()).thenReturn(clicker);
+            when(event.getRawSlot()).thenReturn(TradeGUI.YOUR_SLOTS[0]);
+            when(event.getCurrentItem()).thenReturn(rendered);
+            when(event.getCursor()).thenReturn(cursor);
+            when(event.getView()).thenReturn(mock(InventoryView.class));
+            listener.onInventoryClick(event);
+        }
+
+        @Test
+        @DisplayName("a third player viewing the window receives nothing and changes neither side's offer")
+        void aThirdViewerCannotTakeAnything() {
+            ItemStack player2Stake = new ItemStack(Material.DIAMOND, 8);
+            session.setItem(uuid2, 0, player2Stake);
+            UUID uuid3 = UUID.randomUUID();
+            Player player3 = UltiTradeTestHelper.createMockPlayer("Onlooker", uuid3);
+            when(player3.getInventory().addItem(any(ItemStack.class))).thenReturn(new HashMap<>());
+
+            click(player3, player2Stake, null);
+
+            assertThat(session.getPlayerItems(uuid2)).containsKey(0);
+            assertThat(session.getPlayerItems(uuid2).get(0).getAmount()).isEqualTo(8);
+            assertThat(session.getPlayerItems(uuid1)).isEmpty();
+            verify(player3.getInventory(), never()).addItem(any(ItemStack.class));
+            verify(player3.getWorld(), never()).dropItemNaturally(any(Location.class), any(ItemStack.class));
+        }
+
+        @Test
+        @DisplayName("player 2 clicking their own occupied slot gets their own offer back")
+        void playerTwoCanTakeTheirOwnOfferBack() {
+            ItemStack player2Stake = new ItemStack(Material.DIAMOND, 8);
+            session.setItem(uuid2, 0, player2Stake);
+            when(player2.getInventory().addItem(any(ItemStack.class))).thenReturn(new HashMap<>());
+
+            click(player2, player2Stake, null);
+
+            assertThat(session.getPlayerItems(uuid2)).doesNotContainKey(0);
+            verify(player2.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(player2Stake));
+        }
+    }
+
     @Nested
     @DisplayName("Inventory Click Handling")
     class InventoryClickHandling {
