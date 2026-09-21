@@ -10,9 +10,11 @@ import com.ultikits.plugins.trade.service.TradeService;
 
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.ClickType;
+import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
@@ -21,14 +23,17 @@ import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.UUID;
 
@@ -922,6 +927,12 @@ class TradeListenerTest {
     @DisplayName("Inventory Drag Handling")
     class InventoryDragHandling {
 
+        /**
+         * A real {@link InventoryDragEvent} always names at least two raw slots: vanilla re-dispatches
+         * a one-slot quick-craft as an ordinary {@code PICKUP} click and constructs no drag event at
+         * all. These two cases used to present a drag with no slots, which is a state the platform
+         * does not produce.
+         */
         @Test
         @DisplayName("Should cancel drag on TradeGUI")
         void cancelDragOnTradeGUI() {
@@ -930,6 +941,8 @@ class TradeListenerTest {
             InventoryDragEvent event = mock(InventoryDragEvent.class);
             when(event.getInventory()).thenReturn(mock(Inventory.class));
             when(event.getInventory().getHolder()).thenReturn(gui);
+            when(event.getRawSlots()).thenReturn(new LinkedHashSet<>(Arrays.asList(
+                    TradeGUI.YOUR_SLOTS[0], TradeGUI.YOUR_SLOTS[1])));
 
             listener.onInventoryDrag(event);
 
@@ -944,6 +957,8 @@ class TradeListenerTest {
             InventoryDragEvent event = mock(InventoryDragEvent.class);
             when(event.getInventory()).thenReturn(mock(Inventory.class));
             when(event.getInventory().getHolder()).thenReturn(confirmPage);
+            when(event.getRawSlots()).thenReturn(new LinkedHashSet<>(Arrays.asList(
+                    TradeConfirmPage.YOUR_ITEMS_START, TradeConfirmPage.YOUR_ITEMS_START + 1)));
 
             listener.onInventoryDrag(event);
 
@@ -1294,4 +1309,310 @@ class TradeListenerTest {
             typedMap.put(uuid, inputType);
         }
     }
+
+    /**
+     * The trade window governs its own 54 slots. The acting player's own inventory is not part of
+     * anybody's offer, and a click there was refused along with the rest — which left no production
+     * gesture able to put an item on the cursor at all, while the place branch reads
+     * {@code event.getCursor()}. Nothing could ever be staked: not the pane of
+     * UltiKits/UltiTrade#31, not any item (UltiKits/UltiTrade#39).
+     * <p>
+     * Three actions stay refused even when the clicked slot is the player's own, because they are
+     * not confined to the slot they were clicked on: a shift-click scans the trade window for
+     * somewhere to put the stack, a double-click sweeps every slot of both inventories, and an
+     * unknown action has unknown reach.
+     * <p>
+     * The harness performs exactly one half of the server's behaviour and no more: when the module
+     * does not cancel a click on an own inventory slot, vanilla moves that slot's stack onto the
+     * cursor. Everything else — what the session holds, what the inventory is handed, what reaches
+     * the ground — is the module's own doing, observed rather than modelled.
+     */
+    @Nested
+    @DisplayName("the trade window governs its own slots, not the player's own inventory (UltiKits/UltiTrade#39)")
+    class OwnInventoryIsNotGoverned {
+
+        /** The first raw slot a 54-slot window maps to the acting player's own inventory. */
+        private static final int FIRST_OWN_SLOT = TradeGUI.SIZE;
+        /** The last one: 36 mapped slots, the 27 storage slots plus the 9 hotbar slots. */
+        private static final int LAST_OWN_SLOT = TradeGUI.SIZE + 35;
+        /**
+         * A trade-window slot that {@code TradeGUI#initializeGUI} leaves genuinely empty — it is in
+         * neither slot array and no update method writes it. Used as a drag target because vanilla
+         * only admits a slot to a drag it can actually place into, so dragging across two slots that
+         * hold placeholder panes produces no drag event at all and would prove nothing.
+         */
+        private static final int EMPTY_WINDOW_SLOT = 39;
+
+        private TradeGUI gui;
+        private TradeSession session;
+
+        @BeforeEach
+        void openWindow() throws Exception {
+            TradeService realService = new TradeService();
+            UltiTradeTestHelper.setField(realService, "config", config);
+            UltiTradeTestHelper.setField(realService, "logService", mock(TradeLogService.class));
+            UltiTradeTestHelper.setField(listener, "tradeService", realService);
+
+            session = new TradeSession(player1, player2);
+            gui = mock(TradeGUI.class);
+            when(gui.getSession()).thenReturn(session);
+            when(gui.isYourSlot(TradeGUI.YOUR_SLOTS[0])).thenReturn(true);
+            when(gui.getItemIndex(TradeGUI.YOUR_SLOTS[0])).thenReturn(0);
+        }
+
+        /**
+         * @param cancelled a one-element sink recording whether the module refused this click, read
+         *                  instead of {@code verify} so a test can branch on it
+         */
+        private InventoryClickEvent click(InventoryHolder holder, int rawSlot, InventoryAction action,
+                                         boolean[] cancelled) {
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(holder);
+            InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getInventory()).thenReturn(top);
+            lenient().when(event.getWhoClicked()).thenReturn(player1);
+            when(event.getRawSlot()).thenReturn(rawSlot);
+            lenient().when(event.getAction()).thenReturn(action);
+            doAnswer(invocation -> {
+                cancelled[0] = invocation.getArgument(0);
+                return null;
+            }).when(event).setCancelled(anyBoolean());
+            return event;
+        }
+
+        private InventoryDragEvent drag(InventoryHolder holder, Integer... rawSlots) {
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(holder);
+            InventoryDragEvent event = mock(InventoryDragEvent.class);
+            when(event.getInventory()).thenReturn(top);
+            when(event.getRawSlots()).thenReturn(new LinkedHashSet<>(Arrays.asList(rawSlots)));
+            return event;
+        }
+
+        /** How many panes the trade session is holding as this player's own offer. */
+        private int stakedPanes() {
+            int total = 0;
+            for (ItemStack staked : session.getPlayerItems(uuid1).values()) {
+                if (staked != null && staked.getType() == Material.LIME_STAINED_GLASS_PANE) {
+                    total += staked.getAmount();
+                }
+            }
+            return total;
+        }
+
+        /**
+         * A click on the acting player's own first offer slot, carrying whatever the ledger says is
+         * currently on the cursor.
+         */
+        private InventoryClickEvent offerSlotClick(InventoryView view, int[] onCursor) {
+            boolean[] cancelled = {false};
+            InventoryClickEvent event =
+                    click(gui, TradeGUI.YOUR_SLOTS[0], InventoryAction.PLACE_ALL, cancelled);
+            when(event.getCursor()).thenAnswer(invocation -> onCursor[0] > 0
+                    ? new ItemStack(Material.LIME_STAINED_GLASS_PANE, onCursor[0])
+                    : null);
+            when(event.getView()).thenReturn(view);
+            return event;
+        }
+
+        @Test
+        @DisplayName("seven panes reach a trade slot through the player's own inventory and come back, none created or lost")
+        void stakingThroughTheOwnInventoryConservesTheItem() {
+            // One ledger over every place a pane can be. Every assertion below reads the ledger and
+            // the session; none reads a return value.
+            int[] inInventory = {7};
+            int[] onCursor = {0};
+            int[] onGround = {0};
+
+            // Resolved before any stubbing begins: reaching through player1 inside a doAnswer(...)
+            // chain is itself a mock call made while Mockito is mid-stub, which it rejects as
+            // UnfinishedStubbing rather than as the assertion this test is about.
+            Inventory ownInventory = player1.getInventory();
+            World world = player1.getWorld();
+
+            InventoryView view = mock(InventoryView.class);
+            doAnswer(invocation -> {
+                onCursor[0] = 0;
+                return null;
+            }).when(view).setCursor(isNull());
+
+            when(ownInventory.addItem(any(ItemStack.class))).thenAnswer(invocation -> {
+                inInventory[0] += invocation.getArgument(0, ItemStack.class).getAmount();
+                return new HashMap<Integer, ItemStack>();
+            });
+            doAnswer(invocation -> {
+                onGround[0] += invocation.getArgument(1, ItemStack.class).getAmount();
+                return null;
+            }).when(world).dropItemNaturally(any(Location.class), any(ItemStack.class));
+
+            assertThat(inInventory[0] + onCursor[0] + onGround[0] + stakedPanes())
+                    .as("before: seven panes, all of them in the player's own inventory")
+                    .isEqualTo(7);
+
+            // Gesture 1 — a plain left-click on the own inventory slot holding the panes.
+            boolean[] refused = {false};
+            listener.onInventoryClick(click(gui, FIRST_OWN_SLOT, InventoryAction.PICKUP_ALL, refused));
+            if (!refused[0]) {
+                // The one half a server performs, and therefore the one half this harness performs.
+                onCursor[0] = inInventory[0];
+                inInventory[0] = 0;
+            }
+
+            // Gesture 2 — click the acting player's own first offer slot while holding them.
+            listener.onInventoryClick(offerSlotClick(view, onCursor));
+
+            assertThat(stakedPanes())
+                    .as("the panes must reach the trade window; before UltiKits/UltiTrade#39 no gesture could put them there")
+                    .isEqualTo(7);
+            assertThat(inInventory[0] + onCursor[0] + onGround[0] + stakedPanes())
+                    .as("staking creates nothing and loses nothing")
+                    .isEqualTo(7);
+
+            // Gesture 3 — the same slot again with an empty cursor: the take-back.
+            listener.onInventoryClick(offerSlotClick(view, onCursor));
+
+            assertThat(stakedPanes()).as("the offer left the trade window").isZero();
+            assertThat(inInventory[0])
+                    .as("all seven panes are back in the player's own inventory")
+                    .isEqualTo(7);
+            assertThat(onGround[0]).as("the inventory had room, so nothing was dropped").isZero();
+            assertThat(inInventory[0] + onCursor[0] + onGround[0] + stakedPanes())
+                    .as("after the whole round trip: still exactly seven panes, none created, none lost")
+                    .isEqualTo(7);
+        }
+
+        @Test
+        @DisplayName("a plain pickup in the player's own inventory is not refused, so an item can reach the cursor")
+        void plainPickupInTheOwnInventoryIsNotRefused() {
+            boolean[] cancelled = {false};
+
+            listener.onInventoryClick(click(gui, FIRST_OWN_SLOT, InventoryAction.PICKUP_ALL, cancelled));
+
+            assertThat(cancelled[0])
+                    .as("a pickup in the player's own inventory is the only way to load the cursor")
+                    .isFalse();
+        }
+
+        @Test
+        @DisplayName("positive control: in the same fixture a click on a trade-window slot IS refused, so the handler ran")
+        void aTradeWindowClickIsStillRefused() {
+            boolean[] cancelled = {false};
+
+            listener.onInventoryClick(
+                    click(gui, TradeGUI.SEPARATOR_SLOTS[0], InventoryAction.PICKUP_ALL, cancelled));
+
+            assertThat(cancelled[0])
+                    .as("a separator pane is part of the window and can never be taken")
+                    .isTrue();
+        }
+
+        @Test
+        @DisplayName("the player's region ends where the view's mapping ends")
+        void theOwnInventoryRegionEndsWhereTheViewDoes() {
+            boolean[] lastOwn = {false};
+            listener.onInventoryClick(click(gui, LAST_OWN_SLOT, InventoryAction.PICKUP_ALL, lastOwn));
+            assertThat(lastOwn[0]).as("the hotbar's last slot belongs to the player").isFalse();
+
+            boolean[] pastTheEnd = {false};
+            listener.onInventoryClick(click(gui, LAST_OWN_SLOT + 1, InventoryAction.PICKUP_ALL, pastTheEnd));
+            assertThat(pastTheEnd[0])
+                    .as("a raw slot this view maps to neither inventory is refused")
+                    .isTrue();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = InventoryAction.class,
+                names = {"MOVE_TO_OTHER_INVENTORY", "COLLECT_TO_CURSOR", "UNKNOWN"})
+        @DisplayName("an action reaching past the clicked slot is refused even in the player's own inventory")
+        void reachingActionsAreRefusedFromTheOwnInventory(InventoryAction action) {
+            boolean[] cancelled = {false};
+
+            listener.onInventoryClick(click(gui, FIRST_OWN_SLOT, action, cancelled));
+
+            assertThat(cancelled[0])
+                    .as("%s can move an item into the trade window from an own inventory slot", action)
+                    .isTrue();
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = InventoryAction.class,
+                names = {"PICKUP_ALL", "PICKUP_HALF", "PICKUP_ONE", "PLACE_ALL", "PLACE_ONE",
+                         "SWAP_WITH_CURSOR", "HOTBAR_SWAP", "DROP_ALL_SLOT", "DROP_ONE_SLOT"})
+        @DisplayName("an action confined to the clicked slot is left to the server in the player's own inventory")
+        void confinedActionsAreAllowedInTheOwnInventory(InventoryAction action) {
+            boolean[] cancelled = {false};
+
+            listener.onInventoryClick(click(gui, FIRST_OWN_SLOT, action, cancelled));
+
+            assertThat(cancelled[0])
+                    .as("%s cannot reach the trade window from an own inventory slot", action)
+                    .isFalse();
+        }
+
+        @Test
+        @DisplayName("a click presented without an action is refused rather than guessed at")
+        void anActionlessClickIsRefused() {
+            boolean[] cancelled = {false};
+
+            listener.onInventoryClick(click(gui, FIRST_OWN_SLOT, null, cancelled));
+
+            assertThat(cancelled[0])
+                    .as("a real event always carries an action; a caller that omits one gets the safe half")
+                    .isTrue();
+        }
+
+        @Test
+        @DisplayName("a drag confined to the player's own inventory is not refused")
+        void aDragConfinedToTheOwnInventoryIsNotRefused() {
+            InventoryDragEvent event = drag(gui, FIRST_OWN_SLOT, FIRST_OWN_SLOT + 1);
+
+            listener.onInventoryDrag(event);
+
+            verify(event, never()).setCancelled(true);
+        }
+
+        @Test
+        @DisplayName("a drag touching even one trade-window slot is refused entirely")
+        void aDragTouchingTheTradeWindowIsRefused() {
+            InventoryDragEvent event = drag(gui, FIRST_OWN_SLOT, EMPTY_WINDOW_SLOT);
+
+            listener.onInventoryDrag(event);
+
+            verify(event).setCancelled(true);
+        }
+
+        @Test
+        @DisplayName("the confirm page governs its own slots on the same terms")
+        void theConfirmPageGovernsItsOwnSlotsOnly() {
+            TradeConfirmPage page = mock(TradeConfirmPage.class);
+
+            boolean[] ownSlot = {false};
+            listener.onInventoryClick(click(page, TradeConfirmPage.SIZE, InventoryAction.PICKUP_ALL, ownSlot));
+            assertThat(ownSlot[0])
+                    .as("the viewer's own inventory is not part of a preview of somebody's offer")
+                    .isFalse();
+            verify(page, never()).handleClick(any(InventoryClickEvent.class));
+
+            boolean[] pageSlot = {false};
+            InventoryClickEvent pageClick =
+                    click(page, TradeConfirmPage.CONFIRM_SLOT, InventoryAction.PICKUP_ALL, pageSlot);
+            listener.onInventoryClick(pageClick);
+            assertThat(pageSlot[0])
+                    .as("positive control: a click inside the preview is still refused")
+                    .isTrue();
+            verify(page).handleClick(pageClick);
+        }
+
+        @Test
+        @DisplayName("a drag confined to the player's own inventory is not refused while the confirm page is open either")
+        void aConfirmPageDragInTheOwnInventoryIsNotRefused() {
+            TradeConfirmPage page = mock(TradeConfirmPage.class);
+            InventoryDragEvent event = drag(page, TradeConfirmPage.SIZE, TradeConfirmPage.SIZE + 1);
+
+            listener.onInventoryDrag(event);
+
+            verify(event, never()).setCancelled(true);
+        }
+    }
+
 }
