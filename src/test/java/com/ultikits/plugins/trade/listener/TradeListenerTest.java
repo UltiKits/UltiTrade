@@ -5,8 +5,10 @@ import com.ultikits.plugins.trade.config.TradeConfig;
 import com.ultikits.plugins.trade.entity.TradeSession;
 import com.ultikits.plugins.trade.gui.TradeConfirmPage;
 import com.ultikits.plugins.trade.gui.TradeGUI;
+import com.ultikits.plugins.trade.service.TradeLogService;
 import com.ultikits.plugins.trade.service.TradeService;
 
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -25,6 +27,7 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.UUID;
@@ -364,6 +367,103 @@ class TradeListenerTest {
             listener.onInventoryClick(event);
 
             assertCancelledAndNothingMoved(event);
+        }
+    }
+
+    /**
+     * An item taken back out of the trade window has to end up somewhere the acting player can
+     * recover it. These cases run the listener against a REAL {@link TradeService}, not the mock the
+     * outer class injects, so they observe the delivery itself — the inventory call and the drop —
+     * rather than a delegation to a stub that would report success while nothing was delivered
+     * (UltiKits/UltiTrade#20).
+     */
+    @Nested
+    @DisplayName("removing a placed item never destroys it (UltiKits/UltiTrade#20)")
+    class RemovedItemIsNeverDestroyed {
+
+        private TradeGUI gui;
+        private TradeSession session;
+        private ItemStack offered;
+
+        @BeforeEach
+        void openWindowWithOnePlacedItem() throws Exception {
+            TradeService realService = new TradeService();
+            UltiTradeTestHelper.setField(realService, "config", config);
+            UltiTradeTestHelper.setField(realService, "logService", mock(TradeLogService.class));
+            UltiTradeTestHelper.setField(listener, "tradeService", realService);
+
+            session = new TradeSession(player1, player2);
+            offered = new ItemStack(Material.DIAMOND, 64);
+            session.setItem(uuid1, 0, offered);
+
+            gui = mock(TradeGUI.class);
+            when(gui.getSession()).thenReturn(session);
+            when(gui.isYourSlot(TradeGUI.YOUR_SLOTS[0])).thenReturn(true);
+            when(gui.getItemIndex(TradeGUI.YOUR_SLOTS[0])).thenReturn(0);
+        }
+
+        /**
+         * Click the slot that already holds the placed item, which is the listener's remove-item
+         * branch: the clicked slot's current item is the real offered item, not a glass pane.
+         */
+        private InventoryClickEvent clickPlacedItem() {
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(gui);
+            InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getInventory()).thenReturn(top);
+            when(event.getWhoClicked()).thenReturn(player1);
+            when(event.getRawSlot()).thenReturn(TradeGUI.YOUR_SLOTS[0]);
+            when(event.getCurrentItem()).thenReturn(offered);
+            return event;
+        }
+
+        /**
+         * Proves the remove-item branch actually ran, so the drop assertions below cannot pass
+         * vacuously: the offer left the session and the inventory was asked to take the item.
+         */
+        private void assertRemovalBranchRan() {
+            assertThat(session.getPlayerItems(uuid1)).doesNotContainKey(0);
+            verify(player1.getInventory()).addItem(offered);
+        }
+
+        @Test
+        @DisplayName("inventory completely full: the item drops at the acting player's feet instead of being destroyed")
+        void fullInventoryDropsTheRemovedItem() {
+            HashMap<Integer, ItemStack> overflow = new HashMap<>();
+            overflow.put(0, offered);
+            when(player1.getInventory().addItem(offered)).thenReturn(overflow);
+
+            listener.onInventoryClick(clickPlacedItem());
+
+            assertRemovalBranchRan();
+            verify(player1.getWorld()).dropItemNaturally(player1.getLocation(), offered);
+        }
+
+        @Test
+        @DisplayName("inventory has room: the item goes back into the inventory and nothing is dropped")
+        void roomInInventoryDropsNothing() {
+            when(player1.getInventory().addItem(offered)).thenReturn(new HashMap<>());
+
+            listener.onInventoryClick(clickPlacedItem());
+
+            assertRemovalBranchRan();
+            verify(player1.getWorld(), never()).dropItemNaturally(any(Location.class), any(ItemStack.class));
+        }
+
+        @Test
+        @DisplayName("every stack the inventory could not take is dropped, not only the first")
+        void everyOverflowStackIsDropped() {
+            ItemStack secondStack = new ItemStack(Material.GOLD_INGOT, 16);
+            HashMap<Integer, ItemStack> overflow = new HashMap<>();
+            overflow.put(0, offered);
+            overflow.put(1, secondStack);
+            when(player1.getInventory().addItem(offered)).thenReturn(overflow);
+
+            listener.onInventoryClick(clickPlacedItem());
+
+            assertRemovalBranchRan();
+            verify(player1.getWorld()).dropItemNaturally(player1.getLocation(), offered);
+            verify(player1.getWorld()).dropItemNaturally(player1.getLocation(), secondStack);
         }
     }
 
