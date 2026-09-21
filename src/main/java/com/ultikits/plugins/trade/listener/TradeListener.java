@@ -119,6 +119,16 @@ public class TradeListener implements Listener {
         TradeSession session = gui.getSession();
         int slot = event.getRawSlot();
 
+        // Only the two traders may act on this window. TradeGUI's slot test carries no perspective and
+        // TradeSession treats everyone who is not player 1 as player 2, so a third viewer of this
+        // inventory — which another plugin can arrange — would otherwise have their click handled as
+        // player 2's, and since UltiKits/UltiTrade#31 an occupied-slot click always delivers the stored
+        // offer to whoever clicked (UltiKits/UltiTrade#38).
+        if (!session.isParticipant(player.getUniqueId())) {
+            event.setCancelled(true);
+            return;
+        }
+
         // Every slot of the trade window holds a display or control item, and the player's own
         // offered items are managed through the session, so no click may ever move an item by
         // itself. Cancel first; whether a feature is enabled decides only which action runs below
