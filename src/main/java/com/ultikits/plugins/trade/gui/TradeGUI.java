@@ -37,6 +37,18 @@ public class TradeGUI implements InventoryHolder {
     // Right side (5-8 columns): Their items (slots 5-8, 14-17, 23-26, 32-35)
     // Bottom row: Status and confirm button
     
+    /**
+     * How many slots this window has, and so how far its raw-slot range reaches.
+     * <p>
+     * Named here rather than written as a literal in each place that needs it, because the number
+     * decides two separate things that have to agree: the inventory this class creates, and where
+     * {@code TradeListener} stops treating a raw slot as part of the trade window and starts
+     * treating it as one of the acting player's own inventory slots. When those two disagree the
+     * consequence is silent — either a window slot is left ungoverned, or the player's own
+     * inventory is governed as if it were part of the offer (UltiKits/UltiTrade#39).
+     */
+    public static final int SIZE = 54;
+
     public static final int[] YOUR_SLOTS = {0, 1, 2, 3, 9, 10, 11, 12, 18, 19, 20, 21, 27, 28, 29, 30};
     public static final int[] THEIR_SLOTS = {5, 6, 7, 8, 14, 15, 16, 17, 23, 24, 25, 26, 32, 33, 34, 35};
     public static final int[] SEPARATOR_SLOTS = {4, 13, 22, 31, 40};
@@ -54,7 +66,7 @@ public class TradeGUI implements InventoryHolder {
         this.session = session;
         this.viewer = viewer;
         
-        this.inventory = Bukkit.createInventory(this, 54, buildTitle());
+        this.inventory = Bukkit.createInventory(this, SIZE, buildTitle());
         
         initializeGUI();
     }

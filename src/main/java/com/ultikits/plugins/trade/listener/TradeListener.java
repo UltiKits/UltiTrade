@@ -19,6 +19,7 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
@@ -46,6 +47,14 @@ public class TradeListener implements Listener {
     @Autowired
     private TradeConfig config;
     
+    /**
+     * How many of the acting player's own inventory slots a container view maps into its raw-slot
+     * range: the 27 storage slots plus the 9 hotbar slots, immediately after the window's own slots.
+     * The armour and off-hand slots are not mapped into a chest-style view at all, so a raw slot past
+     * this range belongs to neither inventory and is refused rather than assumed to be the player's.
+     */
+    private static final int MAPPED_PLAYER_SLOTS = 36;
+
     // Track players waiting for input (money/exp)
     private final Map<UUID, InputType> waitingForInput = new HashMap<>();
     
@@ -103,6 +112,9 @@ public class TradeListener implements Listener {
     public void onInventoryClick(InventoryClickEvent event) {
         // Handle TradeConfirmPage clicks
         if (event.getInventory().getHolder() instanceof TradeConfirmPage) {
+            if (isConfinedToOwnInventory(event, TradeConfirmPage.SIZE)) {
+                return;
+            }
             event.setCancelled(true);
             TradeConfirmPage confirmPage = (TradeConfirmPage) event.getInventory().getHolder();
             confirmPage.handleClick(event);
@@ -119,17 +131,39 @@ public class TradeListener implements Listener {
         TradeSession session = gui.getSession();
         int slot = event.getRawSlot();
 
+        // Only the two traders may act on this window. TradeGUI's slot test carries no perspective and
+        // TradeSession treats everyone who is not player 1 as player 2, so a third viewer of this
+        // inventory — which another plugin can arrange — would otherwise have their click handled as
+        // player 2's, and since UltiKits/UltiTrade#31 an occupied-slot click always delivers the stored
+        // offer to whoever clicked (UltiKits/UltiTrade#38).
+        //
+        // Deliberately ahead of the region test below, so a non-participant is refused everywhere in
+        // this view including their own inventory half: somebody who is not in the trade has no
+        // business in this window at all, and they can only be looking at it because another plugin
+        // put them there. The cost is a restriction in an already-abnormal state; the alternative
+        // would widen an item-safety guard for no reachable benefit.
+        if (!session.isParticipant(player.getUniqueId())) {
+            event.setCancelled(true);
+            return;
+        }
+
+        // The acting player's own inventory is not part of anybody's offer, and refusing a click
+        // there left no production gesture able to put an item on the cursor — which the place branch
+        // below reads — so nothing could ever be staked (UltiKits/UltiTrade#39).
+        if (!isTradeWindowSlot(slot)) {
+            if (isConfinedToOwnInventory(event, TradeGUI.SIZE)) {
+                return;
+            }
+            event.setCancelled(true);
+            return;
+        }
+
         // Every slot of the trade window holds a display or control item, and the player's own
         // offered items are managed through the session, so no click may ever move an item by
         // itself. Cancel first; whether a feature is enabled decides only which action runs below
         // (UltiKits/UltiTrade#25).
         event.setCancelled(true);
-        
-        // Click outside the trade GUI
-        if (slot >= 54) {
-            return;
-        }
-        
+
         // Handle confirm button
         if (slot == TradeGUI.CONFIRM_SLOT) {
             if (session.isConfirmed(player.getUniqueId())) {
@@ -225,32 +259,105 @@ public class TradeListener implements Listener {
             session.setConfirmed(session.getOtherPlayer(player.getUniqueId()), false);
             
             ItemStack cursor = event.getCursor();
-            ItemStack current = event.getCurrentItem();
-            
             int index = gui.getItemIndex(slot);
-            
-            // If clicking on glass pane, it's empty - allow placing
-            if (current != null && current.getType().name().contains("STAINED_GLASS_PANE")) {
-                if (cursor != null && !cursor.getType().isAir()) {
-                    // Place item
+
+            // Whether this slot holds an offer is read from the session, which is the only authority
+            // on what this player has put up. It used to be inferred from the rendered item's
+            // material name ("...STAINED_GLASS_PANE" meant empty), and a player's own stained glass
+            // pane is indistinguishable from the empty-slot placeholder that way: placing another
+            // item over it silently replaced, and so destroyed, the stored pane, and it could not be
+            // taken back out at all (UltiKits/UltiTrade#31).
+            ItemStack offered = session.getPlayerItems(player.getUniqueId()).get(index);
+            // getCursor() is @NotNull in this Paper API; the null half only guards a caller that
+            // presents a bare event, and isAir() is the live test for "holding nothing".
+            boolean holdingItem = cursor != null && !cursor.getType().isAir();
+
+            if (offered == null) {
+                // Empty slot: accept the item on the cursor, if there is one.
+                if (holdingItem) {
                     session.setItem(player.getUniqueId(), index, cursor.clone());
                     event.getView().setCursor(null);
                     gui.playItemSound();
                     updateBothGUIs(session);
                 }
-            } else if (current != null && !current.getType().isAir()) {
-                // Remove item
-                session.setItem(player.getUniqueId(), index, null);
-                
-                // Give item back to player
-                player.getInventory().addItem(current);
-                tradeService.playSound(player, Sound.ENTITY_ITEM_PICKUP);
-                updateBothGUIs(session);
+                return;
             }
+
+            // Occupied slot: the stored offer always leaves the slot and always comes back to the
+            // player, whether this click is a plain take-back or a swap for the item on the cursor.
+            // Whatever the inventory cannot hold is dropped at the player's feet rather than
+            // discarded, the same contract the cancel and complete paths use (UltiKits/UltiTrade#20).
+            // One slot write, and the hand-back immediately after it, so nothing sits between the
+            // removal and the delivery.
+            session.setItem(player.getUniqueId(), index, holdingItem ? cursor.clone() : null);
+            tradeService.giveOrDrop(player, offered);
+            if (holdingItem) {
+                event.getView().setCursor(null);
+                gui.playItemSound();
+            }
+            tradeService.playSound(player, Sound.ENTITY_ITEM_PICKUP);
+            updateBothGUIs(session);
             return;
         }
     }
     
+    /**
+     * Whether a raw slot belongs to the trade window itself rather than to the acting player's own
+     * inventory.
+     * <p>
+     * A negative raw slot — {@code -999}, a click outside every inventory — is not a window slot, and
+     * is not one of the player's either, so it is governed by the caller's refusal branch.
+     *
+     * @param rawSlot the clicked raw slot
+     * @return true if the slot is one of the trade window's own
+     */
+    private static boolean isTradeWindowSlot(int rawSlot) {
+        return rawSlot >= 0 && rawSlot < TradeGUI.SIZE;
+    }
+
+    /**
+     * Whether this interaction begins and ends inside the acting player's own inventory, and so is
+     * none of this module's business.
+     * <p>
+     * Two conditions, both necessary. The raw slot has to be one the view maps to the player's own
+     * inventory — {@code windowSize} up to {@code windowSize + }{@value #MAPPED_PLAYER_SLOTS}{@code
+     * - 1}. And the action has to be confined to the slot it was clicked on: three are not, and are
+     * refused from an own slot exactly as they are refused from a window slot.
+     * <ul>
+     *   <li>{@code MOVE_TO_OTHER_INVENTORY} — a shift-click from the player's side scans the trade
+     *       window for somewhere to put the stack, so the item lands in a window the module owns.</li>
+     *   <li>{@code COLLECT_TO_CURSOR} — a double-click sweeps every slot of <em>both</em> inventories
+     *       for matching items, so it can pull a display item out of the window.</li>
+     *   <li>{@code UNKNOWN} — reach unknown, so assume the widest.</li>
+     * </ul>
+     * That is the same three the GUI library this ecosystem builds on refuses, for the same reason.
+     *
+     * @param event      the click being considered
+     * @param windowSize how many slots the open window has, which is where the player's own
+     *                   inventory starts in the view's raw-slot range
+     * @return true if the click may be left to the server
+     */
+    private static boolean isConfinedToOwnInventory(InventoryClickEvent event, int windowSize) {
+        int rawSlot = event.getRawSlot();
+        if (rawSlot < windowSize || rawSlot >= windowSize + MAPPED_PLAYER_SLOTS) {
+            return false;
+        }
+        InventoryAction action = event.getAction();
+        if (action == null) {
+            // A real event always carries an action; a caller presenting a bare event gets the safe
+            // half rather than a guess.
+            return false;
+        }
+        switch (action) {
+            case MOVE_TO_OTHER_INVENTORY:
+            case COLLECT_TO_CURSOR:
+            case UNKNOWN:
+                return false;
+            default:
+                return true;
+        }
+    }
+
     /**
      * Handle chat input for money/exp.
      */
@@ -352,11 +459,36 @@ public class TradeListener implements Listener {
         });
     }
     
+    /**
+     * Refuses a drag that touches the open window, and leaves alone one that does not.
+     * <p>
+     * {@code InventoryEvent#getInventory()} returns the <em>top</em> inventory of the view, so a drag
+     * confined to the player's own inventory reports this module's holder and was refused with the
+     * rest — the same defect as the click path's, one layer over (UltiKits/UltiTrade#39).
+     * <p>
+     * A drag is answered as a whole: {@code getRawSlots()} names every slot it would write, and there
+     * is no way to apply it to some of them, so one window slot among them refuses all of it. The
+     * refusal only ever adds a cancellation and never clears one, so a drag another plugin has
+     * already refused stays refused.
+     *
+     * @param event the drag being considered
+     */
     @EventHandler
     public void onInventoryDrag(InventoryDragEvent event) {
-        if (event.getInventory().getHolder() instanceof TradeGUI ||
-            event.getInventory().getHolder() instanceof TradeConfirmPage) {
-            event.setCancelled(true);
+        final int windowSize;
+        if (event.getInventory().getHolder() instanceof TradeGUI) {
+            windowSize = TradeGUI.SIZE;
+        } else if (event.getInventory().getHolder() instanceof TradeConfirmPage) {
+            windowSize = TradeConfirmPage.SIZE;
+        } else {
+            return;
+        }
+
+        for (int rawSlot : event.getRawSlots()) {
+            if (rawSlot >= 0 && rawSlot < windowSize) {
+                event.setCancelled(true);
+                return;
+            }
         }
     }
     

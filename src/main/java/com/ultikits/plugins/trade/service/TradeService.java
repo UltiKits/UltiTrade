@@ -99,9 +99,22 @@ public class TradeService {
      * Shutdown the service.
      */
     public void shutdown() {
-        // Cancel all active sessions
+        // Cancel all active sessions. Each is isolated: a failure while closing one trade must not
+        // skip the trades after it, which is how one unschedulable log write used to destroy every
+        // staked item on the server (UltiKits/UltiTrade#34).
         for (TradeSession session : activeSessions.values()) {
-            cancelTrade(session, "插件关闭");
+            try {
+                cancelTrade(session, "插件关闭");
+            } catch (RuntimeException e) {
+                // A handler whose only job is to stop one failure costing the other trades their items
+                // must not be able to throw itself. The injected plugin is the only thing it needs, and
+                // a service that never received one would otherwise turn this rescue into the very
+                // abort it exists to prevent (measured: this line raised a NullPointerException from
+                // inside the catch).
+                if (plugin != null) {
+                    plugin.getLogger().warn(e, "Failed to cancel a trade during shutdown; continuing with the remaining trades.");
+                }
+            }
         }
         
         // Cleanup BossBars
@@ -721,20 +734,14 @@ public class TradeService {
         // Give player1's items to player2
         for (ItemStack item : items1.values()) {
             if (item != null) {
-                HashMap<Integer, ItemStack> overflow = player2.getInventory().addItem(item);
-                for (ItemStack drop : overflow.values()) {
-                    player2.getWorld().dropItemNaturally(player2.getLocation(), drop);
-                }
+                giveOrDrop(player2, item);
             }
         }
         
         // Give player2's items to player1
         for (ItemStack item : items2.values()) {
             if (item != null) {
-                HashMap<Integer, ItemStack> overflow = player1.getInventory().addItem(item);
-                for (ItemStack drop : overflow.values()) {
-                    player1.getWorld().dropItemNaturally(player1.getLocation(), drop);
-                }
+                giveOrDrop(player1, item);
             }
         }
         
@@ -743,11 +750,11 @@ public class TradeService {
         player2.closeInventory();
         
         session.setState(TradeSession.TradeState.COMPLETED);
-        
-        // Log the trade
-        logService.logCompletedTrade(session, player1, player2, moneyTax, expTax);
-        
         cleanupSession(session);
+
+        // After the state change and the cleanup, so that a failure here cannot leave a paid trade
+        // that the pending close event can still cancel and refund a second time (UltiKits/UltiTrade#34).
+        logService.logCompletedTrade(session, player1, player2, moneyTax, expTax);
         
         // Notify players
         String completeMsg = ChatColor.translateAlternateColorCodes('&', config.getTradeCompleteMessage());
@@ -766,17 +773,16 @@ public class TradeService {
         Player player1 = Bukkit.getPlayer(session.getPlayer1());
         Player player2 = Bukkit.getPlayer(session.getPlayer2());
         
-        // Log cancelled trade
-        logService.logCancelledTrade(session, reason);
-        
-        // Return items to original owners
+        // Return items to original owners. Nothing that can fail runs before this: the staked items
+        // are the players' property, and the trade log is a courtesy. This used to start with the log
+        // call, which schedules an asynchronous write — and during server shutdown the scheduler
+        // rejects a task for the already-disabled plugin, so the throw left this method before a
+        // single item was returned and aborted shutdown's loop over the remaining trades
+        // (UltiKits/UltiTrade#34). The log now runs at the end, where its failure costs nothing.
         if (player1 != null) {
             for (ItemStack item : session.getPlayerItems(session.getPlayer1()).values()) {
                 if (item != null) {
-                    HashMap<Integer, ItemStack> overflow = player1.getInventory().addItem(item);
-                    for (ItemStack drop : overflow.values()) {
-                        player1.getWorld().dropItemNaturally(player1.getLocation(), drop);
-                    }
+                    giveOrDrop(player1, item);
                 }
             }
             player1.closeInventory();
@@ -791,10 +797,7 @@ public class TradeService {
         if (player2 != null) {
             for (ItemStack item : session.getPlayerItems(session.getPlayer2()).values()) {
                 if (item != null) {
-                    HashMap<Integer, ItemStack> overflow = player2.getInventory().addItem(item);
-                    for (ItemStack drop : overflow.values()) {
-                        player2.getWorld().dropItemNaturally(player2.getLocation(), drop);
-                    }
+                    giveOrDrop(player2, item);
                 }
             }
             player2.closeInventory();
@@ -808,6 +811,9 @@ public class TradeService {
         
         session.setState(TradeSession.TradeState.CANCELLED);
         cleanupSession(session);
+
+        // Last, once every item is back with its owner and the session is closed.
+        logService.logCancelledTrade(session, reason);
     }
     
     /**
@@ -820,6 +826,41 @@ public class TradeService {
         }
     }
     
+    /**
+     * Give an item to a player, dropping at the player's own feet whatever the inventory cannot
+     * hold.
+     * <p>
+     * {@link org.bukkit.inventory.Inventory#addItem(ItemStack...)} returns the stacks it could not
+     * store. Discarding that return value destroys them, which is what UltiKits/UltiTrade#20
+     * reported for the trade window's remove-item click. Every path in this module that hands an
+     * item back to a player goes through this one method, so no call site can discard the leftover
+     * again.
+     *
+     * The item is copied before delivery. {@code CraftInventory#addItem} reports its leftover by
+     * calling {@code setAmount} on the stack it is given, so passing a caller's own object rewrites it:
+     * for a merge into an existing partial stack that left the trade session recording a smaller amount
+     * than the player actually staked, and the trade log serialises the session
+     * (UltiKits/UltiTrade#37).
+     *
+     * @param player the player to give the item to, and at whose location any overflow is dropped;
+     *               must not be {@code null}
+     * @param item   the item to give; {@code null} or an empty stack is nothing to give and is ignored
+     * @throws IllegalArgumentException if {@code player} is {@code null}
+     * @since 1.0.0
+     */
+    public void giveOrDrop(Player player, ItemStack item) {
+        if (player == null) {
+            throw new IllegalArgumentException("player must not be null");
+        }
+        if (item == null || item.getType().isAir()) {
+            return;
+        }
+        HashMap<Integer, ItemStack> overflow = player.getInventory().addItem(item.clone());
+        for (ItemStack drop : overflow.values()) {
+            player.getWorld().dropItemNaturally(player.getLocation(), drop);
+        }
+    }
+
     /**
      * Cleanup session.
      */

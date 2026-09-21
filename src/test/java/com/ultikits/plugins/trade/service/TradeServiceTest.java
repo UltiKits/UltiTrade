@@ -1,7 +1,9 @@
 package com.ultikits.plugins.trade.service;
 
 import com.ultikits.plugins.trade.UltiTradeTestHelper;
+import com.ultikits.ultitools.interfaces.DataOperator;
 import com.ultikits.plugins.trade.config.TradeConfig;
+import com.ultikits.plugins.trade.entity.TradeLogData;
 import com.ultikits.plugins.trade.entity.TradeRequest;
 import com.ultikits.plugins.trade.entity.TradeSession;
 import com.cryptomorin.xseries.particles.XParticle;
@@ -12,6 +14,10 @@ import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
+import org.bukkit.plugin.IllegalPluginAccessException;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.scheduler.BukkitScheduler;
+import org.bukkit.scheduler.BukkitTask;
 import org.junit.jupiter.api.*;
 
 import java.util.HashMap;
@@ -688,8 +694,8 @@ class TradeServiceTest {
 
             service.completeTrade(session);
 
-            verify(inv2).addItem(diamond);
-            verify(inv1).addItem(gold);
+            verify(inv2).addItem(UltiTradeTestHelper.deliveredCopyOf(diamond));
+            verify(inv1).addItem(UltiTradeTestHelper.deliveredCopyOf(gold));
             assertThat(session.getState()).isEqualTo(TradeSession.TradeState.COMPLETED);
         }
 
@@ -950,7 +956,7 @@ class TradeServiceTest {
             service.cancelTrade(session, "test reason");
 
             // player1 should get their diamond back
-            verify(player1.getInventory()).addItem(diamond);
+            verify(player1.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(diamond));
         }
 
         @Test
@@ -1065,6 +1071,199 @@ class TradeServiceTest {
             assertThat(pendingRequests).isEmpty();
             assertThat(activeSessions).isEmpty();
             assertThat(playerSessionMap).isEmpty();
+        }
+    }
+
+
+    /**
+     * Shutdown hands every staked item back even though no task can be scheduled at that point.
+     * <p>
+     * These cases use a REAL {@link TradeLogService} whose Bukkit plugin reports
+     * {@code isEnabled() == false}, and a scheduler that models the measured {@code CraftScheduler}
+     * contract — {@code validate} throws {@link IllegalPluginAccessException} for a plugin that is not
+     * enabled. MockBukkit's scheduler does not enforce that check, which is why this defect could not
+     * appear in a unit test that did not model it, and the existing shutdown case asserts only
+     * {@code verify(logService).logCancelledTrade(...)} on a mock — the very call that used to abort the
+     * hand-back (UltiKits/UltiTrade#34).
+     */
+    @Nested
+    @DisplayName("shutdown returns every stake even with the plugin already disabled (UltiKits/UltiTrade#34)")
+    class ShutdownWithThePluginDisabled {
+
+        private DataOperator<TradeLogData> logOperator;
+        private Player player3;
+        private Player player4;
+        private UUID uuid3;
+        private UUID uuid4;
+
+        @SuppressWarnings("unchecked")
+        @BeforeEach
+        void wireARealLogServiceOnADisabledPlugin() throws Exception {
+            logOperator = mock(DataOperator.class);
+
+            TradeLogService realLogService = new TradeLogService();
+            UltiTradeTestHelper.setField(realLogService, "plugin", UltiTradeTestHelper.getMockPlugin());
+            UltiTradeTestHelper.setField(realLogService, "config", config);
+            UltiTradeTestHelper.setField(realLogService, "logOperator", logOperator);
+            UltiTradeTestHelper.setField(realLogService, "settingsOperator", mock(DataOperator.class));
+
+            Plugin disabledPlugin = mock(Plugin.class);
+            when(disabledPlugin.isEnabled()).thenReturn(false);
+            UltiTradeTestHelper.setField(realLogService, "bukkitPlugin", disabledPlugin);
+            UltiTradeTestHelper.setField(service, "logService", realLogService);
+
+            BukkitScheduler scheduler = org.bukkit.Bukkit.getScheduler();
+            doAnswer(invocation -> {
+                Plugin target = invocation.getArgument(0);
+                if (target == null || !target.isEnabled()) {
+                    throw new IllegalPluginAccessException(
+                            "Plugin attempted to register task while disabled");
+                }
+                return mock(BukkitTask.class);
+            }).when(scheduler).runTaskAsynchronously(any(Plugin.class), any(Runnable.class));
+
+            uuid3 = UUID.randomUUID();
+            uuid4 = UUID.randomUUID();
+            player3 = UltiTradeTestHelper.createMockPlayer("Player3", uuid3);
+            player4 = UltiTradeTestHelper.createMockPlayer("Player4", uuid4);
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+            when(server.getPlayer(uuid3)).thenReturn(player3);
+            when(server.getPlayer(uuid4)).thenReturn(player4);
+            for (Player p : new Player[]{player1, player2, player3, player4}) {
+                when(p.getInventory().addItem(any(ItemStack.class))).thenReturn(new HashMap<>());
+            }
+        }
+
+        private TradeSession liveSession(Player a, UUID ua, ItemStack stakeA,
+                                        Player b, UUID ub, ItemStack stakeB) throws Exception {
+            TradeSession session = new TradeSession(a, b);
+            session.setItem(ua, 0, stakeA);
+            session.setItem(ub, 0, stakeB);
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(ua, session.getSessionId());
+            playerSessionMap.put(ub, session.getSessionId());
+            return session;
+        }
+
+        @Test
+        @DisplayName("both players of an open trade get their own stake back")
+        void everyStakeIsReturned() throws Exception {
+            ItemStack stake1 = new ItemStack(Material.DIAMOND, 3);
+            ItemStack stake2 = new ItemStack(Material.GOLD_INGOT, 5);
+            liveSession(player1, uuid1, stake1, player2, uuid2, stake2);
+
+            service.shutdown();
+
+            verify(player1.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(stake1));
+            verify(player2.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(stake2));
+        }
+
+        @Test
+        @DisplayName("a second open trade is not skipped because the first one's log could not be scheduled")
+        void aSecondSessionIsNotSkipped() throws Exception {
+            ItemStack stake1 = new ItemStack(Material.DIAMOND, 3);
+            ItemStack stake2 = new ItemStack(Material.GOLD_INGOT, 5);
+            ItemStack stake3 = new ItemStack(Material.EMERALD, 7);
+            ItemStack stake4 = new ItemStack(Material.IRON_INGOT, 9);
+            liveSession(player1, uuid1, stake1, player2, uuid2, stake2);
+            liveSession(player3, uuid3, stake3, player4, uuid4, stake4);
+
+            service.shutdown();
+
+            verify(player1.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(stake1));
+            verify(player2.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(stake2));
+            verify(player3.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(stake3));
+            verify(player4.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(stake4));
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            assertThat(activeSessions).isEmpty();
+        }
+
+        @Test
+        @DisplayName("the cancellation is still recorded: with no scheduler available the entry is written on the calling thread")
+        void theAuditRecordSurvivesShutdown() throws Exception {
+            liveSession(player1, uuid1, new ItemStack(Material.DIAMOND, 3),
+                        player2, uuid2, new ItemStack(Material.GOLD_INGOT, 5));
+
+            service.shutdown();
+
+            verify(logOperator).insert(any(TradeLogData.class));
+        }
+    }
+
+    /**
+     * What a player staked must still read correctly after delivery, because that is what the trade log
+     * serialises. {@code CraftInventory#addItem} reports its leftover by calling {@code setAmount} on
+     * the stack it was given (measured in the Paper 1.21.11 bytecode), so a shared hand-back helper must
+     * not pass the session's own object (UltiKits/UltiTrade#37).
+     */
+    @Nested
+    @DisplayName("delivery does not rewrite what the session says was staked (UltiKits/UltiTrade#37)")
+    class DeliveryDoesNotMutateTheStake {
+
+        /**
+         * Models {@code CraftInventory#addItem} merging into an existing partial stack: everything is
+         * accepted, and the argument is left reporting what the merge consumed.
+         */
+        private void stubMergingInventory(Player receiver, int remainderWrittenBack) {
+            when(receiver.getInventory().addItem(any(ItemStack.class))).thenAnswer(invocation -> {
+                ItemStack passed = invocation.getArgument(0);
+                passed.setAmount(remainderWrittenBack);
+                return new HashMap<Integer, ItemStack>();
+            });
+        }
+
+        @Test
+        @DisplayName("a completed trade leaves the staked stack reading its original amount")
+        void completedTradeKeepsTheStakedAmount() throws Exception {
+            when(config.isEnableExpTrade()).thenReturn(false);
+            ItemStack stake = new ItemStack(Material.DIAMOND, 64);
+            TradeSession session = new TradeSession(player1, player2);
+            session.setItem(uuid1, 0, stake);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+            stubMergingInventory(player2, 60);
+
+            service.completeTrade(session);
+
+            // The delivery happened, so this is not a vacuous pass ...
+            verify(player2.getInventory()).addItem(any(ItemStack.class));
+            // ... and the session still reports what was actually staked, which is what the log reads.
+            assertThat(session.getPlayerItems(uuid1).get(0).getAmount()).isEqualTo(64);
+        }
+
+        @Test
+        @DisplayName("a cancelled trade leaves the staked stack reading its original amount")
+        void cancelledTradeKeepsTheStakedAmount() throws Exception {
+            ItemStack stake = new ItemStack(Material.DIAMOND, 64);
+            TradeSession session = new TradeSession(player1, player2);
+            session.setItem(uuid1, 0, stake);
+
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+            stubMergingInventory(player1, 60);
+
+            service.cancelTrade(session, "test reason");
+
+            verify(player1.getInventory()).addItem(any(ItemStack.class));
+            assertThat(session.getPlayerItems(uuid1).get(0).getAmount()).isEqualTo(64);
         }
     }
 
@@ -1427,8 +1626,8 @@ class TradeServiceTest {
 
             service.cancelTrade(session, "test reason");
 
-            verify(player1.getInventory()).addItem(diamond);
-            verify(player2.getInventory()).addItem(gold);
+            verify(player1.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(diamond));
+            verify(player2.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(gold));
         }
 
         @Test

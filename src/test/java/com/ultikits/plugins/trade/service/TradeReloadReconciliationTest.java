@@ -102,6 +102,11 @@ class TradeReloadReconciliationTest {
         logService = new TradeLogService();
         UltiTradeTestHelper.setField(logService, "plugin", UltiTradeTestHelper.getMockPlugin());
         UltiTradeTestHelper.setField(logService, "config", config);
+        // TradeLogService#init always resolves this before any reload can reach the service; without it
+        // the service looks like one belonging to a disabled plugin, which production code now treats as
+        // the shutdown path (UltiKits/UltiTrade#34).
+        UltiTradeTestHelper.setField(logService, "bukkitPlugin",
+                org.bukkit.Bukkit.getPluginManager().getPlugin("UltiTools"));
 
         SimpleContainer context = mock(SimpleContainer.class);
         when(context.getBean(TradeService.class)).thenReturn(tradeService);
@@ -607,8 +612,11 @@ class TradeReloadReconciliationTest {
             assertThat(tradeService.hasEconomy()).isTrue();
 
             session = new TradeSession(offerer, counterparty);
-            offererItem = mock(ItemStack.class);
-            counterpartyItem = mock(ItemStack.class);
+            // Real stacks of two distinguishable materials, not mocks: the delivery path copies the
+            // stack it hands over (UltiKits/UltiTrade#37) and a Mockito mock's clone() is null, while the
+            // verifications below match by equality and so stay exactly as discriminating as before.
+            offererItem = new ItemStack(Material.DIAMOND, 4);
+            counterpartyItem = new ItemStack(Material.GOLD_INGOT, 6);
             session.setItem(offerer.getUniqueId(), 0, offererItem);
             session.setItem(counterparty.getUniqueId(), 0, counterpartyItem);
             session.setMoney(offerer.getUniqueId(), 1000.0);
@@ -632,10 +640,10 @@ class TradeReloadReconciliationTest {
             verify(vaultEconomy, never()).withdrawPlayer(any(Player.class), anyDouble());
             verify(vaultEconomy, never()).depositPlayer(any(Player.class), anyDouble());
             // No item crossed sides; each side got back exactly its own offer.
-            verify(counterpartyInventory, never()).addItem(offererItem);
-            verify(offererInventory, never()).addItem(counterpartyItem);
-            verify(offererInventory, times(1)).addItem(offererItem);
-            verify(counterpartyInventory, times(1)).addItem(counterpartyItem);
+            verify(counterpartyInventory, never()).addItem(UltiTradeTestHelper.deliveredCopyOf(offererItem));
+            verify(offererInventory, never()).addItem(UltiTradeTestHelper.deliveredCopyOf(counterpartyItem));
+            verify(offererInventory, times(1)).addItem(UltiTradeTestHelper.deliveredCopyOf(offererItem));
+            verify(counterpartyInventory, times(1)).addItem(UltiTradeTestHelper.deliveredCopyOf(counterpartyItem));
             // No completed-trade log entry and therefore no money statistic.
             verify(sessionLog, never()).logCompletedTrade(any(), any(), any(), anyDouble(), anyInt());
             // Both players are told why.
@@ -657,8 +665,8 @@ class TradeReloadReconciliationTest {
             assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
             verify(vaultEconomy, never()).withdrawPlayer(any(Player.class), anyDouble());
             verify(vaultEconomy, never()).depositPlayer(any(Player.class), anyDouble());
-            verify(counterpartyInventory, never()).addItem(offererItem);
-            verify(offererInventory, never()).addItem(counterpartyItem);
+            verify(counterpartyInventory, never()).addItem(UltiTradeTestHelper.deliveredCopyOf(offererItem));
+            verify(offererInventory, never()).addItem(UltiTradeTestHelper.deliveredCopyOf(counterpartyItem));
             verify(sessionLog, never()).logCompletedTrade(any(), any(), any(), anyDouble(), anyInt());
             verify(counterparty).sendMessage(contains(MONEY_UNAVAILABLE_REASON));
         }
@@ -690,7 +698,7 @@ class TradeReloadReconciliationTest {
             assertThat(session.getState()).isEqualTo(TradeSession.TradeState.TRADING);
             assertThat(session.isConfirmed(offerer.getUniqueId())).isFalse();
             verify(vaultEconomy, never()).withdrawPlayer(any(Player.class), anyDouble());
-            verify(counterpartyInventory, never()).addItem(offererItem);
+            verify(counterpartyInventory, never()).addItem(UltiTradeTestHelper.deliveredCopyOf(offererItem));
             verify(offerer).sendMessage(contains(RECONFIRM_AFTER_RELOAD));
         }
 
@@ -707,8 +715,8 @@ class TradeReloadReconciliationTest {
             assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
             verify(counterparty, never()).giveExp(anyInt());
             verify(offerer, never()).setExp(anyFloat());
-            verify(counterpartyInventory, never()).addItem(offererItem);
-            verify(offererInventory, never()).addItem(counterpartyItem);
+            verify(counterpartyInventory, never()).addItem(UltiTradeTestHelper.deliveredCopyOf(offererItem));
+            verify(offererInventory, never()).addItem(UltiTradeTestHelper.deliveredCopyOf(counterpartyItem));
             verify(sessionLog, never()).logCompletedTrade(any(), any(), any(), anyDouble(), anyInt());
             verify(offerer).sendMessage(contains(EXP_UNAVAILABLE_REASON));
         }
@@ -723,8 +731,8 @@ class TradeReloadReconciliationTest {
             tradeService.confirmTrade(counterparty);
 
             assertThat(session.getState()).isEqualTo(TradeSession.TradeState.COMPLETED);
-            verify(counterpartyInventory).addItem(offererItem);
-            verify(offererInventory).addItem(counterpartyItem);
+            verify(counterpartyInventory).addItem(UltiTradeTestHelper.deliveredCopyOf(offererItem));
+            verify(offererInventory).addItem(UltiTradeTestHelper.deliveredCopyOf(counterpartyItem));
         }
     }
 
