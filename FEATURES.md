@@ -38,7 +38,7 @@ for UAT execution and issue reconciliation — the public description of these f
   `ultitrade.use` node in code, by hand, rather than through the validator chain (it is not a
   `@CmdMapping` at all) — recorded in its own Permission cell for that reason.
 - **Source:** `ClassName#member` — the class and member that actually reads or applies the
-  feature — for every Kind, `config` included: all 31 `config` rows below cite the reading
+  feature — for every Kind, `config` included: all 30 `config` rows below cite the reading
   member, or the config class's own field declaration when no reading member exists anywhere in
   this module's source.
 - **Row order:** by section, then by ID ascending within the section, except where a dependency
@@ -96,7 +96,8 @@ rather than an error:
 
 **Positive control:** the line-start form returns `@CmdExecutor` = 1, `@CmdMapping` = 8,
 `@EventListener` = 1 (class), `@EventHandler` = 6 (handler methods), `@Scheduled` = 1,
-`@ConditionalOnConfig` = 0, `@ConfigEntity` = 1 (class), `@ConfigEntry` = 31 — confirmed by
+`@ConditionalOnConfig` = 0, `@ConfigEntity` = 1 (class), `@ConfigEntry` = 30 (31 before
+`UltiKits/UltiTrade#18` removed `trade-timeout`) — confirmed by
 reading `TradeCommand.java` directly (8 `@CmdMapping` sites: `<player>`, `accept`, `deny`,
 `cancel`, `toggle`, `block <player>`, `unblock <player>`, bare `""`) and `TradeListener.java`
 directly (6 `@EventHandler` sites: `onPlayerInteractEntity`, `onInventoryClick`, `onPlayerChat`,
@@ -235,10 +236,12 @@ is what an operator actually observes.
 ## Configuration
 
 Every `@ConfigEntry`-annotated field on this module's one `@ConfigEntity` class, `TradeConfig`
-(`config/trade.yml`, 31 keys total — matching the reconciliation table's own `@ConfigEntry` count
-of 31 exactly).
+(`config/trade.yml`, 30 keys total — matching the reconciliation table's own `@ConfigEntry` count
+of 30 exactly). `trade-timeout` is no longer among them: it was declared as the trade window's
+timeout, but no open-window timer exists, so `UltiKits/UltiTrade#18` removed it (feature request
+`UltiKits/UltiTrade#41`); a copy left in an operator's file has no effect.
 
-**Six of the thirty-one keys are declared and validated but never read by any production code in
+**Six of the thirty keys are declared and validated but never read by any production code in
 this module — each is called out in its own row below with the filed issue number
 (`UltiKits/UltiTrade#17`) rather than a claim that flipping it changes anything.** Confirmed for
 each by `grep -rn <getterName> src/main/java`, returning no hit outside `TradeConfig` itself.
@@ -279,4 +282,3 @@ site instead of reading the configured (also Chinese-only) message.
 | ultitrade.config.trade.messages.unblock-success | Declared as the unblock-success confirmation message; `/trade unblock` actually sends a different, hardcoded Chinese literal instead of reading this key. Known product defect, `UltiKits/UltiTrade#17` | config | `config/trade.yml: messages.unblock-success (default: a Chinese-language message meaning "Removed {PLAYER} from your trade blacklist!", has no effect, see UltiKits/UltiTrade#17)` | n/a | n/a | admin | brief | TradeConfig#unblockSuccessMessage (declared, never read outside this class) |
 | ultitrade.config.trade.request-timeout | Seconds a sent trade request remains valid before `ultitrade.request.timeout-cleanup` expires it; also the countdown length shown on the recipient's BossBar | config | `config/trade.yml: request-timeout (default: 30)` | n/a | n/a | admin | brief | TradeService#sendRequest, TradeRequest#isExpired, TradeService#showRequestBossBar, TradeService#cleanupExpiredRequests |
 | ultitrade.config.trade.trade-tax | Fraction of offered money deducted as tax on a completed trade (0 disables) | config | `config/trade.yml: trade-tax (default: 0.0)` | n/a | n/a | admin | brief | TradeService#completeTrade |
-| ultitrade.config.trade.trade-timeout | Declared as the trade-window timeout in seconds; no scheduled task or check in this module's source reads it to actually expire an open `TradeGUI` session by elapsed time — a trade only ends via explicit cancel/complete/quit/GUI-close, never by this timer. Known product defect, `UltiKits/UltiTrade#18` | config | `config/trade.yml: trade-timeout (default: 120, has no effect, see UltiKits/UltiTrade#18)` | n/a | n/a | admin | brief | TradeConfig#tradeTimeout (declared, never read outside this class) |

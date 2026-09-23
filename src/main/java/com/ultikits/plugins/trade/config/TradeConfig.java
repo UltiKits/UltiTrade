@@ -26,10 +26,6 @@ public class TradeConfig extends AbstractConfigEntity {
     @ConfigEntry(path = "request-timeout", comment = "交易请求超时时间（秒）")
     private int requestTimeout = 30;
 
-    @Range(min = 30, max = 600)
-    @ConfigEntry(path = "trade-timeout", comment = "交易窗口超时时间（秒）")
-    private int tradeTimeout = 120;
-
     @Range(min = 0, max = 1000)
     @ConfigEntry(path = "max-distance", comment = "交易最大距离（格），0为无限制")
     private int maxDistance = 50;

@@ -142,5 +142,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   "UltiTrade config reloaded!", printed in Chinese under either `language` setting), and the
   never-consulted `trade_reloaded` language key that described it. UltiTools 6.3.0 logs one reload line per module
   (`Module 'UltiTrade' reloaded.`) (UltiKits/UltiTrade#15).
+- The `trade-timeout` setting in `config/trade.yml`. It never took effect in any version: nothing
+  read it, and an open trade window has no time limit at all — it ends only when a player cancels,
+  both players confirm, a player quits or a player closes the window. A pending trade *request*
+  still expires after `request-timeout` seconds; that setting is unchanged. Removing the setting
+  does not reject the feature it described: a time limit for an open trade window is kept on
+  record as a feature request, UltiKits/UltiTrade#41 (UltiKits/UltiTrade#18).
 - 移除本模块在 `/ul reload UltiTrade` 时输出的"UltiTrade 配置已重载！"控制台行，以及未被使用的
   `trade_reloaded` 语言键。UltiTools 6.3.0 会为每个模块输出一行重载日志（UltiKits/UltiTrade#15）。
+- 移除 `config/trade.yml` 中的 `trade-timeout` 设置项。它在任何版本中都从未生效：没有任何代码读取它，而已打开的
+  交易窗口根本没有时间限制——只有玩家取消、双方确认、一方退出或关闭窗口时才会结束。待处理的交易*请求*仍会在
+  `request-timeout` 秒后过期，该设置项不变。移除该设置项并不代表否决它所描述的功能：为已打开的交易窗口设置时间
+  限制已作为功能请求 UltiKits/UltiTrade#41 留档（UltiKits/UltiTrade#18）。

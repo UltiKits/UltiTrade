@@ -16,7 +16,7 @@ import org.bukkit.Bukkit;
  * - Money trading support (Vault)
  * - Experience trading support
  * - Trade confirmation system
- * - Trade timeout with BossBar countdown
+ * - Trade request timeout with BossBar countdown
  * - Trade logging and statistics
  * - Player blacklist
  * - Shift+right-click trading
