@@ -35,17 +35,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `config` folder (entries `trade_toggle_on`, `trade_toggle_off`, `block_success`, `unblock_success`,
   `already_blocked`, `not_blocked`), so they follow the server's `language` setting: English under
   `language: en`, Chinese under `language: zh`. Previously each was a fixed Chinese sentence under
-  either setting. The wording is now the language file's, so the toggle replies no longer add a second
-  sentence about whether other players can send you trade requests. Only these six replies change:
-  the grey line after a successful `/trade block` ("this player will not be able to send you trade
-  requests"), the refusals for blocking yourself or naming an offline player, and the command's other
+  either setting. The wording is now the language file's, which changes five of the six Chinese
+  replies as well: the two toggle replies no longer add a second sentence about whether other players
+  can send you trade requests; the already-blocked and not-blocked refusals now say "already in the
+  blacklist" and "not in the blacklist" instead of "in your trade blacklist"; and the unblock reply is
+  reworded slightly ("removed from the trade blacklist"). Only the block-success reply reads exactly as
+  before. In English the already-blocked and not-blocked refusals say "your blacklist". Only these six
+  replies change: the grey line after a successful `/trade block` ("this player will not be able to
+  send you trade requests"), the refusals for blocking yourself or naming an offline player, and the command's other
   text are still Chinese under either setting (UltiKits/UltiTrade#16) (UltiKits/UltiTrade#17).
 - `/trade toggle`、`/trade block` 和 `/trade unblock` 的回复——开启或关闭交易、把玩家加入或移出交易黑名单，
   以及对方已在或不在黑名单时的拒绝提示——现在来自本模块的语言文件，即 `config` 文件夹旁的
   `lang/<语言>.yml`（条目 `trade_toggle_on`、`trade_toggle_off`、`block_success`、`unblock_success`、
   `already_blocked`、`not_blocked`），因此会跟随服务器的 `language` 设置：`language: en` 下为英文，
-  `language: zh` 下为中文。此前无论哪种设置，这些回复都是固定的中文句子。措辞现以语言文件为准，因此开关交易的
-  回复不再附带第二句关于其他玩家能否向你发送交易请求的说明。只有这六条回复发生变化：`/trade block` 成功后的
+  `language: zh` 下为中文。此前无论哪种设置，这些回复都是固定的中文句子。措辞现以语言文件为准，六条中文回复中有五条
+  的措辞也随之改变：开关交易的两条回复不再附带第二句关于其他玩家能否向你发送交易请求的说明；"已经在你的交易黑名单中"
+  改为"已在黑名单中"，"不在你的交易黑名单中"改为"不在黑名单中"；"从交易黑名单中移除"改为"从交易黑名单移除"。
+  只有拉黑成功的回复与之前完全相同。只有这六条回复发生变化：`/trade block` 成功后的
   灰色提示行（"该玩家将无法向你发送交易请求"）、拉黑自己或指定离线玩家时的拒绝提示，以及该命令的其余文本，
   在两种设置下仍为中文（UltiKits/UltiTrade#16）（UltiKits/UltiTrade#17）。
 
