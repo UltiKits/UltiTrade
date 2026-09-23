@@ -7,6 +7,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- The replies to `/trade toggle`, `/trade block` and `/trade unblock` — trading turned on or off, a
+  player added to or removed from your trade blacklist, and the refusals for a player who already is
+  or is not on it — now come from this module's language file, `lang/<language>.yml` beside the
+  `config` folder (entries `trade_toggle_on`, `trade_toggle_off`, `block_success`, `unblock_success`,
+  `already_blocked`, `not_blocked`), so they follow the server's `language` setting: English under
+  `language: en`, Chinese under `language: zh`. Previously each was a fixed Chinese sentence under
+  either setting. The wording is now the language file's, so the toggle replies no longer add a second
+  sentence about whether other players can send you trade requests. Only these six replies change:
+  the grey line after a successful `/trade block` ("this player will not be able to send you trade
+  requests"), the refusals for blocking yourself or naming an offline player, and the command's other
+  text are still Chinese under either setting (UltiKits/UltiTrade#16) (UltiKits/UltiTrade#17).
+- `/trade toggle`、`/trade block` 和 `/trade unblock` 的回复——开启或关闭交易、把玩家加入或移出交易黑名单，
+  以及对方已在或不在黑名单时的拒绝提示——现在来自本模块的语言文件，即 `config` 文件夹旁的
+  `lang/<语言>.yml`（条目 `trade_toggle_on`、`trade_toggle_off`、`block_success`、`unblock_success`、
+  `already_blocked`、`not_blocked`），因此会跟随服务器的 `language` 设置：`language: en` 下为英文，
+  `language: zh` 下为中文。此前无论哪种设置，这些回复都是固定的中文句子。措辞现以语言文件为准，因此开关交易的
+  回复不再附带第二句关于其他玩家能否向你发送交易请求的说明。只有这六条回复发生变化：`/trade block` 成功后的
+  灰色提示行（"该玩家将无法向你发送交易请求"）、拉黑自己或指定离线玩家时的拒绝提示，以及该命令的其余文本，
+  在两种设置下仍为中文（UltiKits/UltiTrade#16）（UltiKits/UltiTrade#17）。
+
 ### Fixed
 
 - Reloading this module (`/ul reload UltiTrade`) now re-reads `config/trade.yml` and refreshes the
@@ -148,9 +170,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   still expires after `request-timeout` seconds; that setting is unchanged. Removing the setting
   does not reject the feature it described: a time limit for an open trade window is kept on
   record as a feature request, UltiKits/UltiTrade#41 (UltiKits/UltiTrade#18).
+- The six settings `messages.toggle-on`, `messages.toggle-off`, `messages.block-success`,
+  `messages.unblock-success`, `messages.already-blocked` and `messages.not-blocked` in
+  `config/trade.yml`. None of them ever took effect in any version: the commands they describe sent
+  fixed text of their own, so editing them never changed what a player saw. Those replies now come
+  from the language file (see `### Changed`), which is where their text is changed; removing the
+  settings moves that ability to the file that already held the text in both languages rather than
+  taking it away. The seven other `messages.*` settings are read and are unchanged
+  (UltiKits/UltiTrade#17).
 - 移除本模块在 `/ul reload UltiTrade` 时输出的"UltiTrade 配置已重载！"控制台行，以及未被使用的
   `trade_reloaded` 语言键。UltiTools 6.3.0 会为每个模块输出一行重载日志（UltiKits/UltiTrade#15）。
 - 移除 `config/trade.yml` 中的 `trade-timeout` 设置项。它在任何版本中都从未生效：没有任何代码读取它，而已打开的
   交易窗口根本没有时间限制——只有玩家取消、双方确认、一方退出或关闭窗口时才会结束。待处理的交易*请求*仍会在
   `request-timeout` 秒后过期，该设置项不变。移除该设置项并不代表否决它所描述的功能：为已打开的交易窗口设置时间
   限制已作为功能请求 UltiKits/UltiTrade#41 留档（UltiKits/UltiTrade#18）。
+- 移除 `config/trade.yml` 中的六个设置项 `messages.toggle-on`、`messages.toggle-off`、`messages.block-success`、
+  `messages.unblock-success`、`messages.already-blocked` 和 `messages.not-blocked`。它们在任何版本中都从未生效：
+  它们所描述的命令一直发送自己固定的文本，修改这些设置项从未改变玩家看到的内容。这些回复现在来自语言文件
+  （见 `### Changed`），应在那里修改其文本；移除这些设置项并不是取消修改文本的能力，而是把它移到了早已以两种语言
+  保存这些文本的文件中。其余七个 `messages.*` 设置项会被读取，保持不变（UltiKits/UltiTrade#17）。

@@ -2,6 +2,7 @@ package com.ultikits.plugins.trade.commands;
 
 import com.ultikits.plugins.trade.service.TradeLogService;
 import com.ultikits.plugins.trade.service.TradeService;
+import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.abstracts.command.BaseCommandExecutor;
 import com.ultikits.ultitools.annotations.command.*;
 
@@ -24,12 +25,29 @@ import org.bukkit.entity.Player;
 )
 public class TradeCommand extends BaseCommandExecutor {
     
+    private final UltiToolsPlugin plugin;
     private final TradeService tradeService;
     private final TradeLogService logService;
-    
-    public TradeCommand(TradeService tradeService, TradeLogService logService) {
+
+    public TradeCommand(UltiToolsPlugin plugin, TradeService tradeService, TradeLogService logService) {
+        this.plugin = plugin;
         this.tradeService = tradeService;
         this.logService = logService;
+    }
+
+    /**
+     * A reply from this module's language catalogue ({@code lang/<language>.yml}), with
+     * {@code {PLAYER}} filled in and {@code &} colour codes applied. The toggle and blocklist replies
+     * come from here so that they follow the server's {@code language} setting; the
+     * {@code config/trade.yml} keys that once described them were never read and are removed
+     * (UltiKits/UltiTrade#17).
+     *
+     * @param key        catalogue key
+     * @param playerName the name substituted for {@code {PLAYER}}
+     * @return the text to send
+     */
+    private String catalogueMessage(String key, String playerName) {
+        return ChatColor.translateAlternateColorCodes('&', plugin.i18n(key).replace("{PLAYER}", playerName));
     }
     
     @CmdMapping(format = "<player>")
@@ -70,11 +88,7 @@ public class TradeCommand extends BaseCommandExecutor {
     @CmdMapping(format = "toggle")
     public void toggle(@CmdSender Player player) {
         boolean newState = logService.toggleTrade(player);
-        if (newState) {
-            player.sendMessage(ChatColor.GREEN + "已开启交易功能！其他玩家现在可以向你发送交易请求。");
-        } else {
-            player.sendMessage(ChatColor.YELLOW + "已关闭交易功能！其他玩家将无法向你发送交易请求。");
-        }
+        player.sendMessage(catalogueMessage(newState ? "trade_toggle_on" : "trade_toggle_off", player.getName()));
     }
     
     @CmdMapping(format = "block <player>")
@@ -92,12 +106,12 @@ public class TradeCommand extends BaseCommandExecutor {
         }
         
         if (logService.isBlocked(player.getUniqueId(), target.getUniqueId())) {
-            player.sendMessage(ChatColor.RED + target.getName() + " 已经在你的交易黑名单中！");
+            player.sendMessage(catalogueMessage("already_blocked", target.getName()));
             return;
         }
         
         logService.blockPlayer(player, target.getUniqueId());
-        player.sendMessage(ChatColor.GREEN + "已将 " + target.getName() + " 添加到交易黑名单！");
+        player.sendMessage(catalogueMessage("block_success", target.getName()));
         player.sendMessage(ChatColor.GRAY + "该玩家将无法向你发送交易请求。");
     }
     
@@ -110,12 +124,12 @@ public class TradeCommand extends BaseCommandExecutor {
         }
         
         if (!logService.isBlocked(player.getUniqueId(), target.getUniqueId())) {
-            player.sendMessage(ChatColor.RED + target.getName() + " 不在你的交易黑名单中！");
+            player.sendMessage(catalogueMessage("not_blocked", target.getName()));
             return;
         }
         
         logService.unblockPlayer(player, target.getUniqueId());
-        player.sendMessage(ChatColor.GREEN + "已将 " + target.getName() + " 从交易黑名单中移除！");
+        player.sendMessage(catalogueMessage("unblock_success", target.getName()));
     }
     
     @CmdMapping(format = "")
