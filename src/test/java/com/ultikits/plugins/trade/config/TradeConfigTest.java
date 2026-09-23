@@ -1,6 +1,12 @@
 package com.ultikits.plugins.trade.config;
 
+import com.ultikits.ultitools.annotations.ConfigEntry;
+
 import org.junit.jupiter.api.*;
+
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -14,6 +20,66 @@ class TradeConfigTest {
         config = new TradeConfig();
     }
 
+    /** Every key TradeConfig declares, read from its {@code @ConfigEntry} annotations. */
+    private static List<String> declaredKeys() {
+        List<String> keys = new ArrayList<>();
+        for (Field field : TradeConfig.class.getDeclaredFields()) {
+            ConfigEntry entry = field.getAnnotation(ConfigEntry.class);
+            if (entry != null) {
+                keys.add(entry.path());
+            }
+        }
+        return keys;
+    }
+
+    // The two tests below are top-level methods, not @Nested, so that each can be selected on its
+    // own by name (-Dtest=TradeConfigTest#method) for its issue's revert proof.
+
+    /**
+     * UltiKits/UltiTrade#18. A pending trade request expires after {@code request-timeout}; an open
+     * trade window has no elapsed-time expiry at all, so {@code trade-timeout} described a feature
+     * that does not exist. The maintainer's ruling (2026-09-22) removes the setting (feature request
+     * UltiKits/UltiTrade#41). The only timeout settings left are the request's own.
+     */
+    @Test
+    @DisplayName("the only timeout settings declared are the trade request's (UltiKits/UltiTrade#18)")
+    void declaresOnlyTheRequestTimeouts() {
+        List<String> timeoutKeys = new ArrayList<>();
+        for (String key : declaredKeys()) {
+            if (key.contains("timeout")) {
+                timeoutKeys.add(key);
+            }
+        }
+
+        assertThat(timeoutKeys).containsExactlyInAnyOrder("request-timeout", "messages.request-timeout");
+    }
+
+    /**
+     * UltiKits/UltiTrade#17. Seven {@code messages.*} keys are read by the module; six more, for the
+     * replies of {@code /trade toggle}, {@code /trade block} and {@code /trade unblock}, never were.
+     * The maintainer's ruling (2026-09-22) moves those replies into the language catalogue and
+     * removes the six keys, and says nothing about the seven that are read, so they stay.
+     */
+    @Test
+    @DisplayName("the message settings declared are exactly the seven the module reads (UltiKits/UltiTrade#17)")
+    void declaresExactlyTheSevenReadMessages() {
+        List<String> messageKeys = new ArrayList<>();
+        for (String key : declaredKeys()) {
+            if (key.startsWith("messages.")) {
+                messageKeys.add(key);
+            }
+        }
+
+        assertThat(messageKeys).containsExactlyInAnyOrder(
+                "messages.request-sent",
+                "messages.request-received",
+                "messages.request-timeout",
+                "messages.trade-complete",
+                "messages.trade-cancelled",
+                "messages.trade-disabled",
+                "messages.player-blocked");
+    }
+
     @Nested
     @DisplayName("Default Values")
     class DefaultValues {
@@ -22,7 +88,6 @@ class TradeConfigTest {
         @DisplayName("Should have correct basic settings defaults")
         void basicSettingsDefaults() {
             assertThat(config.getRequestTimeout()).isEqualTo(30);
-            assertThat(config.getTradeTimeout()).isEqualTo(120);
             assertThat(config.getMaxDistance()).isEqualTo(50);
             assertThat(config.isAllowCrossWorld()).isFalse();
         }
@@ -93,13 +158,6 @@ class TradeConfigTest {
         void requestTimeout() {
             config.setRequestTimeout(60);
             assertThat(config.getRequestTimeout()).isEqualTo(60);
-        }
-
-        @Test
-        @DisplayName("Should set and get trade timeout")
-        void tradeTimeout() {
-            config.setTradeTimeout(300);
-            assertThat(config.getTradeTimeout()).isEqualTo(300);
         }
 
         @Test
@@ -261,48 +319,6 @@ class TradeConfigTest {
         void playerBlockedMessage() {
             config.setPlayerBlockedMessage("&cBlocked!");
             assertThat(config.getPlayerBlockedMessage()).isEqualTo("&cBlocked!");
-        }
-
-        @Test
-        @DisplayName("Should set and get toggle on message")
-        void toggleOnMessage() {
-            config.setToggleOnMessage("&aEnabled!");
-            assertThat(config.getToggleOnMessage()).isEqualTo("&aEnabled!");
-        }
-
-        @Test
-        @DisplayName("Should set and get toggle off message")
-        void toggleOffMessage() {
-            config.setToggleOffMessage("&cDisabled!");
-            assertThat(config.getToggleOffMessage()).isEqualTo("&cDisabled!");
-        }
-
-        @Test
-        @DisplayName("Should set and get block success message")
-        void blockSuccessMessage() {
-            config.setBlockSuccessMessage("&aBlocked {PLAYER}");
-            assertThat(config.getBlockSuccessMessage()).isEqualTo("&aBlocked {PLAYER}");
-        }
-
-        @Test
-        @DisplayName("Should set and get unblock success message")
-        void unblockSuccessMessage() {
-            config.setUnblockSuccessMessage("&aUnblocked {PLAYER}");
-            assertThat(config.getUnblockSuccessMessage()).isEqualTo("&aUnblocked {PLAYER}");
-        }
-
-        @Test
-        @DisplayName("Should set and get already blocked message")
-        void alreadyBlockedMessage() {
-            config.setAlreadyBlockedMessage("&cAlready blocked!");
-            assertThat(config.getAlreadyBlockedMessage()).isEqualTo("&cAlready blocked!");
-        }
-
-        @Test
-        @DisplayName("Should set and get not blocked message")
-        void notBlockedMessage() {
-            config.setNotBlockedMessage("&cNot blocked!");
-            assertThat(config.getNotBlockedMessage()).isEqualTo("&cNot blocked!");
         }
     }
 }
