@@ -18,8 +18,9 @@ import org.bukkit.configuration.file.YamlConfiguration;
  * does nothing to the files already on disk: the framework only ever writes a declared default for a
  * key that is <em>missing</em>, so an existing install keeps the key, keeps whatever value the
  * operator gave it, and gets no indication that the value means nothing. This class is that
- * indication -- one warning per leftover key, naming the module, the file and the key, and saying
- * where the setting went.
+ * indication -- one warning per leftover key that still has a value (see
+ * {@link #warnAboutLeftovers}), naming the module, the file and the key, and saying where the
+ * setting went.
  *
  * @author wisdomme
  * @version 1.0.0
@@ -69,7 +70,12 @@ public final class RemovedConfigKeys {
     }
 
     /**
-     * Emit one warning per removed key that is still present in the operator's configuration file.
+     * Emit one warning per removed key that is still present, with a value, in the operator's
+     * configuration file.
+     * <p>
+     * A key left with no value ({@code trade-timeout:} or {@code trade-timeout: ~}) is not reported:
+     * Bukkit's YAML loader drops a null-valued key, so it reads back exactly as if it were absent. It
+     * carries no setting for the operator to lose, and the framework never writes one.
      * <p>
      * Silent when the file is absent or unreadable -- there is then nothing to report and nothing to
      * be sure of. A parse failure is deliberately not reported here: the framework's own config
