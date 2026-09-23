@@ -17,8 +17,15 @@ import lombok.Setter;
  */
 @Getter
 @Setter
-@ConfigEntity("config/trade.yml")
+@ConfigEntity(TradeConfig.CONFIG_FILE)
 public class TradeConfig extends AbstractConfigEntity {
+
+    /**
+     * This entity's file, relative to the module's folder. The one place the path is written: the
+     * annotation above, the constructor and the removed-key check in {@code UltiTrade} all read it
+     * from here, so they cannot drift apart (UltiKits/UltiTrade#17, #18).
+     */
+    public static final String CONFIG_FILE = "config/trade.yml";
     
     // ==================== Basic Settings ====================
 
@@ -124,6 +131,6 @@ public class TradeConfig extends AbstractConfigEntity {
     private String playerBlockedMessage = "&c对方已将你加入黑名单！";
     
     public TradeConfig() {
-        super("config/trade.yml");
+        super(CONFIG_FILE);
     }
 }

@@ -7,6 +7,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- A console warning for each removed setting still in `config/trade.yml`. The seven settings this
+  version removes (`trade-timeout`, and `messages.toggle-on`, `messages.toggle-off`,
+  `messages.block-success`, `messages.unblock-success`, `messages.already-blocked`,
+  `messages.not-blocked`; see `### Removed`) stay in the file of a server upgraded from an earlier
+  version, because the framework never deletes a key from an operator's file. While any of them is
+  there, the module logs one warning per key when it is enabled and on every reload of it
+  (`/ul reload` or `/ul reload UltiTrade`), naming the file and the key and saying where the setting
+  went; the key can simply be deleted (UltiKits/UltiTrade#17, UltiKits/UltiTrade#18).
+- 为 `config/trade.yml` 中仍保留的每个已移除设置项输出一条控制台警告。本版本移除的七个设置项（`trade-timeout`，
+  以及 `messages.toggle-on`、`messages.toggle-off`、`messages.block-success`、`messages.unblock-success`、
+  `messages.already-blocked`、`messages.not-blocked`，见 `### Removed`）会保留在从旧版本升级的服务器的文件中，
+  因为框架从不删除运维文件中的键。只要其中任何一个还在，本模块会在启用时以及每次重载本模块时
+  （`/ul reload` 或 `/ul reload UltiTrade`）为每个键记录一条警告，指出文件、键名以及该设置的去向；直接删除该键即可
+  （UltiKits/UltiTrade#17、UltiKits/UltiTrade#18）。
+
 ### Changed
 
 - The replies to `/trade toggle`, `/trade block` and `/trade unblock` — trading turned on or off, a
