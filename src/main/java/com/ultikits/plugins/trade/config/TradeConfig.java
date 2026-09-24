@@ -17,18 +17,21 @@ import lombok.Setter;
  */
 @Getter
 @Setter
-@ConfigEntity("config/trade.yml")
+@ConfigEntity(TradeConfig.CONFIG_FILE)
 public class TradeConfig extends AbstractConfigEntity {
+
+    /**
+     * This entity's file, relative to the module's folder. The one place the path is written: the
+     * annotation above, the constructor and the removed-key check in {@code UltiTrade} all read it
+     * from here, so they cannot drift apart (UltiKits/UltiTrade#17, #18).
+     */
+    public static final String CONFIG_FILE = "config/trade.yml";
     
     // ==================== Basic Settings ====================
 
     @Range(min = 5, max = 600)
     @ConfigEntry(path = "request-timeout", comment = "交易请求超时时间（秒）")
     private int requestTimeout = 30;
-
-    @Range(min = 30, max = 600)
-    @ConfigEntry(path = "trade-timeout", comment = "交易窗口超时时间（秒）")
-    private int tradeTimeout = 120;
 
     @Range(min = 0, max = 1000)
     @ConfigEntry(path = "max-distance", comment = "交易最大距离（格），0为无限制")
@@ -126,32 +129,8 @@ public class TradeConfig extends AbstractConfigEntity {
     @NotEmpty
     @ConfigEntry(path = "messages.player-blocked", comment = "被拉黑")
     private String playerBlockedMessage = "&c对方已将你加入黑名单！";
-
-    @NotEmpty
-    @ConfigEntry(path = "messages.toggle-on", comment = "开启交易")
-    private String toggleOnMessage = "&a你已开启交易功能！";
-
-    @NotEmpty
-    @ConfigEntry(path = "messages.toggle-off", comment = "关闭交易")
-    private String toggleOffMessage = "&c你已关闭交易功能！";
-
-    @NotEmpty
-    @ConfigEntry(path = "messages.block-success", comment = "拉黑成功")
-    private String blockSuccessMessage = "&a已将 {PLAYER} 加入交易黑名单！";
-
-    @NotEmpty
-    @ConfigEntry(path = "messages.unblock-success", comment = "取消拉黑")
-    private String unblockSuccessMessage = "&a已将 {PLAYER} 移出交易黑名单！";
-
-    @NotEmpty
-    @ConfigEntry(path = "messages.already-blocked", comment = "已经拉黑")
-    private String alreadyBlockedMessage = "&c{PLAYER} 已在你的黑名单中！";
-
-    @NotEmpty
-    @ConfigEntry(path = "messages.not-blocked", comment = "未拉黑")
-    private String notBlockedMessage = "&c{PLAYER} 不在你的黑名单中！";
     
     public TradeConfig() {
-        super("config/trade.yml");
+        super(CONFIG_FILE);
     }
 }

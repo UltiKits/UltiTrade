@@ -189,7 +189,6 @@ public final class UltiTradeTestHelper {
     public static TradeConfig createDefaultConfig() {
         TradeConfig config = mock(TradeConfig.class);
         lenient().when(config.getRequestTimeout()).thenReturn(30);
-        lenient().when(config.getTradeTimeout()).thenReturn(120);
         lenient().when(config.getMaxDistance()).thenReturn(50);
         lenient().when(config.isAllowCrossWorld()).thenReturn(false);
         lenient().when(config.isEnableMoneyTrade()).thenReturn(true);

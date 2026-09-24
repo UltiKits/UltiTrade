@@ -20,9 +20,9 @@ for UAT execution and issue reconciliation — the public description of these f
   `placeholder`, `persistence`, `gate`. This module has no `gate` rows (0 `@ConditionalOnConfig`
   sites, confirmed below) — the Kind stays in the vocabulary for cross-repository consistency
   even though it does not appear below. Unlike UltiChat and UltiRemoteBag, this module DOES carry
-  `placeholder` rows (`TradePlaceholderExpansion`). The three rows under `## Lifecycle Hooks` are
-  `event` rows with no `@EventHandler` site behind them: module unload and `/ul reload` are
-  framework-invoked lifecycle steps, not commands this repository maps or config reads, so `event`
+  `placeholder` rows (`TradePlaceholderExpansion`). The four rows under `## Lifecycle Hooks` are
+  `event` rows with no `@EventHandler` site behind them: module enable, module unload and
+  `/ul reload` are framework-invoked lifecycle steps, not commands this repository maps or config reads, so `event`
   is the closest-fitting Kind.
 - **Tier**, exactly three: `player`, `admin`, `internal`. Judged from what the feature is for,
   not from whether it carries a permission string.
@@ -38,7 +38,7 @@ for UAT execution and issue reconciliation — the public description of these f
   `ultitrade.use` node in code, by hand, rather than through the validator chain (it is not a
   `@CmdMapping` at all) — recorded in its own Permission cell for that reason.
 - **Source:** `ClassName#member` — the class and member that actually reads or applies the
-  feature — for every Kind, `config` included: all 31 `config` rows below cite the reading
+  feature — for every Kind, `config` included: all 24 `config` rows below cite the reading
   member, or the config class's own field declaration when no reading member exists anywhere in
   this module's source.
 - **Row order:** by section, then by ID ascending within the section, except where a dependency
@@ -52,24 +52,29 @@ for UAT execution and issue reconciliation — the public description of these f
 - **A note on this module's actual language behaviour, read before any other row below:** this
   module ships a complete, accurate `lang/en.yml` and `lang/zh.yml` (62 keys each, faithfully
   paired, measured after `UltiKits/UltiTrade#15`'s lifecycle-hook migration removed the
-  `trade_reloaded` key together with the only log line it described) that are **never consulted** by real key anywhere in this module's source. Every
-  player-facing string in `TradeCommand`, `TradeService`, `TradeGUI`, `TradeConfirmPage`, and
-  `TradeListener` is a hardcoded Simplified Chinese literal; `TradeConfig`'s 13 message keys are
-  likewise Chinese-only string defaults with no i18n indirection at all. The only two
+  `trade_reloaded` key together with the only log line it described). **Six of those keys are
+  consulted by real key, and nothing else is:** `TradeCommand`'s replies to `/trade toggle`,
+  `/trade block` and `/trade unblock` — `trade_toggle_on`, `trade_toggle_off`, `block_success`,
+  `already_blocked`, `unblock_success`, `not_blocked` — come from the catalogue as of
+  `UltiKits/UltiTrade#17`, so they follow `language`. Every other player-facing string in
+  `TradeCommand`, `TradeService`, `TradeGUI`, `TradeConfirmPage`, and `TradeListener` is a
+  hardcoded Simplified Chinese literal; `TradeConfig`'s 7 message keys are likewise Chinese-only
+  string defaults with no i18n indirection at all. The only other two
   `i18n(...)` calls in the whole module (`UltiTrade.java`, enable/disable log lines) pass a
   raw CHINESE SENTENCE as the lookup key itself (e.g. a call meaning literally `i18n("UltiTrade enabled!")`, but written with the Chinese text as the key) rather than one
   of the 62 real keys (`trade_enabled`, etc.) — confirmed by reading
   `entities/Language.java#getLocalizedText`: a dictionary miss returns the input string
   unchanged, so these two calls print the same Chinese text under `language: en` as under
-  `language: zh`. **Setting `language: en` therefore has zero observable effect anywhere in this
-  module**, despite the framework's default `supported()` scan (`interfaces/Localized.java`)
-  finding both `en` and `zh` lang files and letting the module resolve to `en` without error.
-  Filed as `UltiKits/UltiTrade#16`. Every Feature/Expected quotation below is therefore given in
-  its real, shipped form — Chinese, in English gloss — never in the unused English lang key's
-  text, and no checklist row carries a `language: en` precondition for this module's own strings,
-  because that precondition would produce a false expectation (`UAT-CHECKLIST.md`'s
-  `ultitrade.lifecycle.reload` and `ultitrade.lifecycle.reload-money-trade` set it only for two
-  framework-owned console lines).
+  `language: zh`. **Setting `language: en` therefore has no observable effect anywhere in this
+  module except those six replies**, despite the framework's default `supported()` scan
+  (`interfaces/Localized.java`) finding both `en` and `zh` lang files and letting the module
+  resolve to `en` without error. Filed as `UltiKits/UltiTrade#16`. Every other Feature/Expected
+  quotation below is therefore given in its real, shipped form — Chinese, in English gloss —
+  never in the unused English lang key's text; the six catalogue replies are quoted verbatim from
+  `lang/en.yml`, and only the checklist rows that assert them carry a `language: en` precondition
+  for this module's own strings, because anywhere else that precondition would produce a false
+  expectation (`UAT-CHECKLIST.md`'s `ultitrade.lifecycle.reload` and
+  `ultitrade.lifecycle.reload-money-trade` set it only for two framework-owned console lines).
 
 ### Reconciliation command family
 
@@ -96,7 +101,9 @@ rather than an error:
 
 **Positive control:** the line-start form returns `@CmdExecutor` = 1, `@CmdMapping` = 8,
 `@EventListener` = 1 (class), `@EventHandler` = 6 (handler methods), `@Scheduled` = 1,
-`@ConditionalOnConfig` = 0, `@ConfigEntity` = 1 (class), `@ConfigEntry` = 31 — confirmed by
+`@ConditionalOnConfig` = 0, `@ConfigEntity` = 1 (class), `@ConfigEntry` = 24 (31 before
+`UltiKits/UltiTrade#18` removed `trade-timeout` and `UltiKits/UltiTrade#17` removed six
+`messages.*` keys) — confirmed by
 reading `TradeCommand.java` directly (8 `@CmdMapping` sites: `<player>`, `accept`, `deny`,
 `cancel`, `toggle`, `block <player>`, `unblock <player>`, bare `""`) and `TradeListener.java`
 directly (6 `@EventHandler` sites: `onPlayerInteractEntity`, `onInventoryClick`, `onPlayerChat`,
@@ -130,10 +137,10 @@ players; `TradeListener#onPlayerInteractEntity` is a second entry point for the 
 
 | ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
 |---|---|---|---|---|---|---|---|---|
-| ultitrade.settings.block | Add a named, currently-ONLINE player to the sender's own trade blocklist, refusing to add self or a name that is already blocked | command | `/trade block <player>` | ultitrade.use | player | player | brief | TradeCommand#blockPlayer, TradeLogService#blockPlayer |
+| ultitrade.settings.block | Add a named, currently-ONLINE player to the sender's own trade blocklist, refusing to add self or a name that is already blocked. The success reply and the already-blocked refusal are the language catalogue's `block_success` and `already_blocked` entries, so they follow `language`; the second line after a success and the self and offline refusals are still Chinese literals, so under `language: en` a successful block prints one English line followed by one Chinese line, a known mixed-language reply tracked by `UltiKits/UltiTrade#16` (`UltiKits/UltiTrade#17`) | command | `/trade block <player>` | ultitrade.use | player | player | brief | TradeCommand#blockPlayer, TradeLogService#blockPlayer |
 | ultitrade.settings.help | Show the command list plus the sender's own current trade-enabled status | command | `/trade` (bare) or `/trade help` (via `handleHelp`) | ultitrade.use | player | player | brief | TradeCommand#help |
-| ultitrade.settings.toggle | Flip the sender's own trade-enabled flag; while disabled, other players cannot send this player a trade request (`ultitrade.trade-disabled-target` below) | command | `/trade toggle` | ultitrade.use | player | player | brief | TradeCommand#toggle, TradeLogService#toggleTrade |
-| ultitrade.settings.unblock | Remove a named, currently-ONLINE player from the sender's own trade blocklist, refusing if that name is not currently blocked | command | `/trade unblock <player>` | ultitrade.use | player | player | brief | TradeCommand#unblockPlayer, TradeLogService#unblockPlayer |
+| ultitrade.settings.toggle | Flip the sender's own trade-enabled flag; while disabled, other players cannot send this player a trade request (`ultitrade.request.send` above). The reply is the language catalogue's `trade_toggle_on` or `trade_toggle_off` entry, so it follows `language` (`UltiKits/UltiTrade#17`) | command | `/trade toggle` | ultitrade.use | player | player | brief | TradeCommand#toggle, TradeLogService#toggleTrade |
+| ultitrade.settings.unblock | Remove a named, currently-ONLINE player from the sender's own trade blocklist, refusing if that name is not currently blocked. The success reply and the not-blocked refusal are the language catalogue's `unblock_success` and `not_blocked` entries, so they follow `language`; the offline refusal is still a Chinese literal (`UltiKits/UltiTrade#17`, `#16`) | command | `/trade unblock <player>` | ultitrade.use | player | player | brief | TradeCommand#unblockPlayer, TradeLogService#unblockPlayer |
 
 ## Trade Session
 
@@ -205,8 +212,12 @@ deal (taxes, threshold, which offers are allowed) always follow the reloaded con
 open windows are redrawn and confirmations voided, while a pending trade request keeps the
 `request-timeout` it was sent with, because that is a promise to the receiving player of how long they
 have; a changed timeout applies to requests sent after the reload. An exception from
-one reconciliation is logged at SEVERE, naming the keys it could not apply, and the other still runs. Neither hook is reachable through a command
-this repository maps itself, so all three rows below are `event`-Kind, not `command`-Kind.
+one reconciliation is logged at SEVERE, naming the keys it could not apply, and the other still runs. Before
+any of that, the hook repeats the check `registerSelf()` makes when the module is enabled: it warns
+about every key this version no longer reads that is still in the operator's `config/trade.yml`
+(`ultitrade.lifecycle.removed-key-warning`, `UltiKits/UltiTrade#17`, `#18`). None of these entry
+points is reachable through a command this repository maps itself, so all four rows below are
+`event`-Kind, not `command`-Kind.
 `ultitrade.lifecycle.reload` records what `/ul reload UltiTrade` now changes for an operator:
 `ConfigManager#reloadConfigs` re-initialises, in place, the same `TradeConfig` instance the
 container injected into `TradeService`, and `TradeService` reads its getters at call time.
@@ -214,8 +225,9 @@ container injected into `TradeService`, and `TradeService` reads its getters at 
 
 | ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
 |---|---|---|---|---|---|---|---|---|
-| ultitrade.lifecycle.reload | `/ul reload UltiTrade` re-reads `config/trade.yml` into the running module, so an edited value such as `max-distance` applies to the next trade request without a restart; `max-distance` needs no reload work from this module's `onReload()` hook. With `enable-money-trade: true` and a Vault economy provider registered the module prints no reload line of its own; with money trading on and Vault or its provider missing, each reload logs the module's warning `Vault not found! Money trading disabled.` or `No Vault economy provider is registered! Money trading disabled.`; with money trading off it performs no lookup and logs nothing. Before `UltiKits/UltiTrade#15` the module's reload override replaced the framework's reload and only logged, so an edit took effect only after a restart | event | `/ul reload UltiTrade` (framework calls `reloadSelf()`, which reloads configuration, refreshes language, reports `@ConditionalOnConfig` drift and logs its own per-module line) | n/a | n/a | admin | brief | TradeService#sendRequest |
+| ultitrade.lifecycle.reload | `/ul reload UltiTrade` re-reads `config/trade.yml` into the running module, so an edited value such as `max-distance` applies to the next trade request without a restart; `max-distance` needs no reload work from this module's `onReload()` hook. With `enable-money-trade: true` and a Vault economy provider registered the module prints no reload line of its own apart from `ultitrade.lifecycle.removed-key-warning`'s one WARNING per removed key still in `config/trade.yml` (none on a fresh file, seven on a file an earlier version wrote); with money trading on and Vault or its provider missing, each reload logs the module's warning `Vault not found! Money trading disabled.` or `No Vault economy provider is registered! Money trading disabled.`; with money trading off it performs no lookup and logs nothing. Before `UltiKits/UltiTrade#15` the module's reload override replaced the framework's reload and only logged, so an edit took effect only after a restart | event | `/ul reload UltiTrade` (framework calls `reloadSelf()`, which reloads configuration, refreshes language, reports `@ConditionalOnConfig` drift and logs its own per-module line) | n/a | n/a | admin | brief | TradeService#sendRequest |
 | ultitrade.lifecycle.reload-money-trade | `/ul reload UltiTrade` applies an edited `enable-money-trade` in both directions: after a `false` to `true` edit the trade GUI offers money trading without a restart (a gold nugget in the money slot, and clicking it opens the chat amount prompt), and after a `true` to `false` edit it shows the disabled barrier instead. `UltiTrade#onReload()` re-runs the Vault economy lookup, or drops the provider when money trading is off; the same hook also reschedules the old-log cleanup task, so `enable-trade-log` and `cleanup-interval-hours` edits apply without a restart too (that half is evidenced by unit tests only, because observing a cleanup run on a server takes at least an hour). A trade that already carries money when money trading becomes unavailable is cancelled when it completes: no money moves, each side gets back its own items, and both players are told money trading is currently unavailable (also unit-test evidenced). Before `UltiKits/UltiTrade#26` the lookup and the task were set up only when the module started, so turning money trading on took effect only after a restart | event | `/ul reload UltiTrade` (framework calls `reloadSelf()`, which reloads configuration first and then invokes this hook) | n/a | n/a | admin | brief | UltiTrade#onReload, TradeService#reloadEconomy, TradeLogService#reloadCleanupTask, TradeService#completeTrade |
+| ultitrade.lifecycle.removed-key-warning | When the module is enabled and again on every reload of it (`/ul reload` or `/ul reload UltiTrade`), read the operator's own `config/trade.yml` and, for each key this version no longer reads that is still in it with a value, log one console WARNING naming the file, the key, where the setting went and that the key can be deleted. The seven such keys are `trade-timeout`, removed by `UltiKits/UltiTrade#18` (nothing replaces it; the warning names `request-timeout` as unchanged and feature request `UltiKits/UltiTrade#41`), and `messages.toggle-on`, `messages.toggle-off`, `messages.block-success`, `messages.unblock-success`, `messages.already-blocked` and `messages.not-blocked`, removed by `UltiKits/UltiTrade#17` (each warning names the language catalogue entry that now holds the reply: `trade_toggle_on`, `trade_toggle_off`, `block_success`, `unblock_success`, `already_blocked`, `not_blocked`). The framework writes a declared default only for a missing key and never deletes one, so every server that ran an earlier version still has all seven. The warnings are emitted in that order, once per key present, on every enable and reload until the key is deleted. A missing or unparseable file produces no warning, and neither does a key left with no value (`trade-timeout:` or `~`): Bukkit drops a null-valued key when it reads the file, so it reads back as absent. An error inside the check itself is logged as one warning and never stops the module enabling or reloading. The file checked is the one `TradeConfig` binds (`TradeConfig#CONFIG_FILE`) | event | module enable (server start, or loading the module) and every reload of it: bare `/ul reload`, which reloads every module, or `/ul reload UltiTrade` | n/a | n/a | admin | brief | UltiTrade#registerSelf, UltiTrade#onReload, RemovedConfigKeys#warnAboutLeftovers |
 | ultitrade.lifecycle.unload | When the module is unloaded (for example by `/upm uninstall UltiTrade`), shut down `TradeService` then `TradeLogService`, unregister the `ultitrade` PlaceholderAPI expansion if one was registered and clear the reference so a repeated unload cannot unregister it twice, then log the module's own "disabled" console line (the Chinese literal in `UltiTrade#onUnregister`, printed identically under either `language`, `UltiKits/UltiTrade#16`) | event | unload the `UltiTrade` module at runtime (framework calls `unregisterSelf()`, which invokes this hook before its own command/listener cleanup) | n/a | n/a | admin | brief | UltiTrade#onUnregister |
 
 ## Data persistence
@@ -235,17 +247,14 @@ is what an operator actually observes.
 ## Configuration
 
 Every `@ConfigEntry`-annotated field on this module's one `@ConfigEntity` class, `TradeConfig`
-(`config/trade.yml`, 31 keys total — matching the reconciliation table's own `@ConfigEntry` count
-of 31 exactly).
-
-**Six of the thirty-one keys are declared and validated but never read by any production code in
-this module — each is called out in its own row below with the filed issue number
-(`UltiKits/UltiTrade#17`) rather than a claim that flipping it changes anything.** Confirmed for
-each by `grep -rn <getterName> src/main/java`, returning no hit outside `TradeConfig` itself.
-Unlike UltiRemoteBag's equivalent dead keys, these six are messages `TradeCommand` genuinely needs
-for the exact behaviour they name (toggle-on, toggle-off, block-success, unblock-success,
-already-blocked, not-blocked) — the command hardcodes a DIFFERENT, Chinese-only literal at each
-site instead of reading the configured (also Chinese-only) message.
+(`config/trade.yml`, 24 keys total — matching the reconciliation table's own `@ConfigEntry` count
+of 24 exactly). `trade-timeout` is no longer among them: it was declared as the trade window's
+timeout, but no open-window timer exists, so `UltiKits/UltiTrade#18` removed it (feature request
+`UltiKits/UltiTrade#41`). Nor are the six `messages.*` keys `toggle-on`, `toggle-off`,
+`block-success`, `unblock-success`, `already-blocked` and `not-blocked`: nothing ever read them, and
+the replies they described now come from the language catalogue (`ultitrade.settings.toggle`,
+`.block`, `.unblock` above), so `UltiKits/UltiTrade#17` removed them. A copy of any of the seven
+left in an operator's file has no effect. Every key below is read.
 
 | ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
 |---|---|---|---|---|---|---|---|---|
@@ -264,19 +273,12 @@ site instead of reading the configured (also Chinese-only) message.
 | ultitrade.config.trade.gui-title | The `TradeGUI` inventory title template, with a `{PLAYER}` placeholder for the other participant's name | config | `config/trade.yml: gui-title (default: a Chinese-language template meaning "Trading with {PLAYER}")` | n/a | n/a | admin | brief | TradeGUI#TradeGUI |
 | ultitrade.config.trade.log-retention-days | Age, in days, past which a `trade_logs` row is deleted by the retention-cleanup task | config | `config/trade.yml: log-retention-days (default: 30)` | n/a | n/a | admin | brief | TradeLogService#cleanupOldLogs |
 | ultitrade.config.trade.max-distance | Maximum block distance between two players for a trade request to be sendable; `0` disables the distance check entirely | config | `config/trade.yml: max-distance (default: 50)` | n/a | n/a | admin | brief | TradeService#sendRequest |
-| ultitrade.config.trade.messages.already-blocked | Declared as the "already blocked" refusal message; `/trade block` actually sends a different, hardcoded Chinese literal instead of reading this key. Known product defect, `UltiKits/UltiTrade#17` | config | `config/trade.yml: messages.already-blocked (default: a Chinese-language message meaning "{PLAYER} is already in your blacklist!", has no effect, see UltiKits/UltiTrade#17)` | n/a | n/a | admin | brief | TradeConfig#alreadyBlockedMessage (declared, never read outside this class) |
-| ultitrade.config.trade.messages.block-success | Declared as the block-success confirmation message; `/trade block` actually sends a different, hardcoded Chinese literal instead of reading this key. Known product defect, `UltiKits/UltiTrade#17` | config | `config/trade.yml: messages.block-success (default: a Chinese-language message meaning "Added {PLAYER} to your trade blacklist!", has no effect, see UltiKits/UltiTrade#17)` | n/a | n/a | admin | brief | TradeConfig#blockSuccessMessage (declared, never read outside this class) |
-| ultitrade.config.trade.messages.not-blocked | Declared as the "not blocked" refusal message; `/trade unblock` actually sends a different, hardcoded Chinese literal instead of reading this key. Known product defect, `UltiKits/UltiTrade#17` | config | `config/trade.yml: messages.not-blocked (default: a Chinese-language message meaning "{PLAYER} is not in your blacklist!", has no effect, see UltiKits/UltiTrade#17)` | n/a | n/a | admin | brief | TradeConfig#notBlockedMessage (declared, never read outside this class) |
 | ultitrade.config.trade.messages.player-blocked | Message shown to a sender whose target has blocked them | config | `config/trade.yml: messages.player-blocked (default: a Chinese-language message meaning "The other party has blocked you!")` | n/a | n/a | admin | brief | TradeService#sendRequest |
 | ultitrade.config.trade.messages.request-received | Message shown to the recipient of a trade request, only when `enable-clickable-buttons` is false | config | `config/trade.yml: messages.request-received (default: a Chinese-language template meaning "{PLAYER} wants to trade with you! Type /trade accept to accept")` | n/a | n/a | admin | brief | TradeService#notifyTradeRequest |
 | ultitrade.config.trade.messages.request-sent | Message shown to the sender immediately after a trade request is sent | config | `config/trade.yml: messages.request-sent (default: a Chinese-language template meaning "Trade request sent to {PLAYER}!")` | n/a | n/a | admin | brief | TradeService#sendRequest |
 | ultitrade.config.trade.messages.request-timeout | Message shown to the recipient when their pending request expires unanswered | config | `config/trade.yml: messages.request-timeout (default: a Chinese-language message meaning "Trade request has timed out!")` | n/a | n/a | admin | brief | TradeService#cleanupExpiredRequests |
-| ultitrade.config.trade.messages.toggle-off | Declared as the trade-disabled confirmation message; `/trade toggle` actually sends a different, hardcoded Chinese literal instead of reading this key. Known product defect, `UltiKits/UltiTrade#17` | config | `config/trade.yml: messages.toggle-off (default: a Chinese-language message meaning "You have disabled trading!", has no effect, see UltiKits/UltiTrade#17)` | n/a | n/a | admin | brief | TradeConfig#toggleOffMessage (declared, never read outside this class) |
-| ultitrade.config.trade.messages.toggle-on | Declared as the trade-enabled confirmation message; `/trade toggle` actually sends a different, hardcoded Chinese literal instead of reading this key. Known product defect, `UltiKits/UltiTrade#17` | config | `config/trade.yml: messages.toggle-on (default: a Chinese-language message meaning "You have enabled trading!", has no effect, see UltiKits/UltiTrade#17)` | n/a | n/a | admin | brief | TradeConfig#toggleOnMessage (declared, never read outside this class) |
 | ultitrade.config.trade.messages.trade-cancelled | Message shown to both sides when a trade is cancelled, with an optional reason appended in parentheses | config | `config/trade.yml: messages.trade-cancelled (default: a Chinese-language message meaning "Trade cancelled!")` | n/a | n/a | admin | brief | TradeService#cancelTrade |
 | ultitrade.config.trade.messages.trade-complete | Message shown to both sides on a successfully completed trade | config | `config/trade.yml: messages.trade-complete (default: a Chinese-language message meaning "Trade complete!")` | n/a | n/a | admin | brief | TradeService#completeTrade |
 | ultitrade.config.trade.messages.trade-disabled | Message shown to a sender whose target currently has trading toggled off | config | `config/trade.yml: messages.trade-disabled (default: a Chinese-language message meaning "The other party has disabled trading!")` | n/a | n/a | admin | brief | TradeService#sendRequest |
-| ultitrade.config.trade.messages.unblock-success | Declared as the unblock-success confirmation message; `/trade unblock` actually sends a different, hardcoded Chinese literal instead of reading this key. Known product defect, `UltiKits/UltiTrade#17` | config | `config/trade.yml: messages.unblock-success (default: a Chinese-language message meaning "Removed {PLAYER} from your trade blacklist!", has no effect, see UltiKits/UltiTrade#17)` | n/a | n/a | admin | brief | TradeConfig#unblockSuccessMessage (declared, never read outside this class) |
 | ultitrade.config.trade.request-timeout | Seconds a sent trade request remains valid before `ultitrade.request.timeout-cleanup` expires it; also the countdown length shown on the recipient's BossBar | config | `config/trade.yml: request-timeout (default: 30)` | n/a | n/a | admin | brief | TradeService#sendRequest, TradeRequest#isExpired, TradeService#showRequestBossBar, TradeService#cleanupExpiredRequests |
 | ultitrade.config.trade.trade-tax | Fraction of offered money deducted as tax on a completed trade (0 disables) | config | `config/trade.yml: trade-tax (default: 0.0)` | n/a | n/a | admin | brief | TradeService#completeTrade |
-| ultitrade.config.trade.trade-timeout | Declared as the trade-window timeout in seconds; no scheduled task or check in this module's source reads it to actually expire an open `TradeGUI` session by elapsed time — a trade only ends via explicit cancel/complete/quit/GUI-close, never by this timer. Known product defect, `UltiKits/UltiTrade#18` | config | `config/trade.yml: trade-timeout (default: 120, has no effect, see UltiKits/UltiTrade#18)` | n/a | n/a | admin | brief | TradeConfig#tradeTimeout (declared, never read outside this class) |

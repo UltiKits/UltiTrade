@@ -7,9 +7,16 @@ import com.ultikits.ultitools.context.SimpleContainer;
 import com.ultikits.ultitools.interfaces.impl.logger.PluginLogger;
 
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
+import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Field;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -198,6 +205,141 @@ class UltiTradeTest {
                     .isInstanceOf(NoSuchMethodException.class);
             assertThatCode(() -> UltiTrade.class.getDeclaredMethod("onReload"))
                     .doesNotThrowAnyException();
+        }
+    }
+
+    /**
+     * UltiKits/UltiTrade#17 and #18. {@code RemovedConfigKeysTest} guards the check's predicate; these
+     * tests guard its WIRING, which is a separate claim: with the call sites deleted the predicate
+     * tests stay green, and a server with leftover keys prints nothing, exactly like a server without
+     * them. Both entry points are covered -- module enable and every reload of the module -- because a
+     * guard on one would leave the other free to lose its call silently.
+     * <p>
+     * The operator's file is reached through {@code operatorConfigFile()}, a package-private seam: the
+     * framework's {@code getConfigFile} is {@code protected final}, so this package can neither call
+     * nor stub it, and a mocked plugin returns {@code null} from it.
+     */
+    @Nested
+    @DisplayName("the removed-key check is actually called (UltiKits/UltiTrade#17, #18)")
+    class RemovedKeyCheckWiring {
+
+        private static final String FILE_WITH_REMOVED_KEYS =
+                "request-timeout: 30\ntrade-timeout: 120\nmessages:\n  request-timeout: 'x'\n  toggle-on: 'x'\n";
+
+        private static final String FILE_WITHOUT_REMOVED_KEYS =
+                "request-timeout: 30\nmessages:\n  request-timeout: 'x'\n";
+
+        private PluginLogger logger;
+        private TradeService tradeService;
+        private TradeLogService logService;
+
+        private UltiTrade pluginReading(File dir, String body) throws IOException {
+            File file = new File(dir, "trade.yml");
+            Files.write(file.toPath(), body.getBytes(StandardCharsets.UTF_8));
+
+            UltiTrade plugin = mock(UltiTrade.class);
+            logger = mock(PluginLogger.class);
+            SimpleContainer context = mock(SimpleContainer.class);
+            tradeService = mock(TradeService.class);
+            logService = mock(TradeLogService.class);
+            when(plugin.getLogger()).thenReturn(logger);
+            when(plugin.getContext()).thenReturn(context);
+            when(context.getBean(TradeService.class)).thenReturn(tradeService);
+            when(context.getBean(TradeLogService.class)).thenReturn(logService);
+            when(plugin.i18n(anyString())).thenAnswer(inv -> inv.getArgument(0));
+            when(plugin.operatorConfigFile()).thenReturn(file);
+            return plugin;
+        }
+
+        private List<String> warnings() {
+            ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
+            verify(logger, atLeast(0)).warn(captor.capture());
+            return captor.getAllValues();
+        }
+
+        @Test
+        @DisplayName("POSITIVE CONTROL: enabling the module warns about each leftover key, and still enables")
+        void registerSelfWarns(@TempDir File dir) throws IOException {
+            UltiTrade plugin = pluginReading(dir, FILE_WITH_REMOVED_KEYS);
+            when(plugin.registerSelf()).thenCallRealMethod();
+
+            assertThat(plugin.registerSelf()).isTrue();
+
+            assertThat(warnings()).hasSize(2);
+            assertThat(warnings().get(0)).contains("'trade-timeout'");
+            assertThat(warnings().get(1)).contains("'messages.toggle-on'");
+            verify(tradeService).init();
+            verify(logService).init();
+        }
+
+        @Test
+        @DisplayName("POSITIVE CONTROL: a reload of the module warns about each leftover key, and still reconciles")
+        void onReloadWarns(@TempDir File dir) throws IOException {
+            UltiTrade plugin = pluginReading(dir, FILE_WITH_REMOVED_KEYS);
+            doCallRealMethod().when(plugin).onReload();
+
+            plugin.onReload();
+
+            assertThat(warnings()).hasSize(2);
+            assertThat(warnings().get(0)).contains("'trade-timeout'");
+            assertThat(warnings().get(1)).contains("'messages.toggle-on'");
+            verify(logService).reloadCleanupTask();
+            verify(tradeService).reloadEconomy();
+        }
+
+        @Test
+        @DisplayName("the check reads the same file TradeConfig declares, from one source")
+        void readsTheFileTradeConfigDeclares() {
+            // Every other test here stubs operatorConfigFile(), so if the path the check resolves
+            // ever drifted from the file TradeConfig binds, the production check would read a file
+            // that does not exist, return silently, and look exactly like a server with no leftover
+            // key. The path the check uses must equal both places TradeConfig names its file.
+            UltiTrade plugin = mock(UltiTrade.class);
+            when(plugin.operatorConfigPath()).thenCallRealMethod();
+
+            String declared = com.ultikits.plugins.trade.config.TradeConfig.class
+                    .getAnnotation(com.ultikits.ultitools.annotations.ConfigEntity.class).value();
+
+            assertThat(declared).isEqualTo("config/trade.yml");
+            assertThat(new com.ultikits.plugins.trade.config.TradeConfig().getConfigFilePath())
+                    .isEqualTo(declared);
+            assertThat(plugin.operatorConfigPath()).isEqualTo(declared);
+        }
+
+        @Test
+        @DisplayName("a failure inside the check never costs the module its enable or its reload")
+        void aFailingCheckNeverFailsEnableOrReload(@TempDir File dir) throws IOException {
+            UltiTrade plugin = pluginReading(dir, FILE_WITH_REMOVED_KEYS);
+            when(plugin.operatorConfigFile())
+                    .thenThrow(new java.io.UncheckedIOException(new IOException("disk unavailable")));
+            when(plugin.registerSelf()).thenCallRealMethod();
+            doCallRealMethod().when(plugin).onReload();
+
+            assertThat(plugin.registerSelf()).isTrue();
+            assertThatCode(plugin::onReload).doesNotThrowAnyException();
+
+            ArgumentCaptor<String> messages = ArgumentCaptor.forClass(String.class);
+            verify(logger, times(2)).warn(any(Throwable.class), messages.capture());
+            assertThat(messages.getAllValues())
+                    .allSatisfy(m -> assertThat(m).contains("removed").contains("trade.yml"));
+            verify(tradeService).init();
+            verify(tradeService).reloadEconomy();
+        }
+
+        @Test
+        @DisplayName("neither entry point warns when the file holds no removed key")
+        void neitherWarnsOnACleanFile(@TempDir File dir) throws IOException {
+            // Paired with the two controls above: same entry points, same file, the removed keys
+            // taken out and nothing else changed.
+            UltiTrade onEnable = pluginReading(dir, FILE_WITHOUT_REMOVED_KEYS);
+            when(onEnable.registerSelf()).thenCallRealMethod();
+            assertThat(onEnable.registerSelf()).isTrue();
+            assertThat(warnings()).isEmpty();
+
+            UltiTrade onReload = pluginReading(dir, FILE_WITHOUT_REMOVED_KEYS);
+            doCallRealMethod().when(onReload).onReload();
+            onReload.onReload();
+            assertThat(warnings()).isEmpty();
         }
     }
 
