@@ -42,7 +42,7 @@ public class UltiTrade extends UltiToolsPlugin {
         // Deleting a key from TradeConfig does nothing to the operator's existing file, so tell them
         // about any key this version no longer reads (UltiKits/UltiTrade#17, #18).
         warnAboutRemovedConfigKeys();
-        blankShippedTextDefaults();
+        writeConfigTextInServerLanguage();
 
         // Initialize services
         initializeServices();
@@ -83,7 +83,7 @@ public class UltiTrade extends UltiToolsPlugin {
     @Override
     protected void onReload() {
         warnAboutRemovedConfigKeys();
-        blankShippedTextDefaults();
+        writeConfigTextInServerLanguage();
 
         TradeLogService logService = getContext().getBean(TradeLogService.class);
         if (logService != null) {
@@ -123,16 +123,17 @@ public class UltiTrade extends UltiToolsPlugin {
     }
 
     /**
-     * Blanks the trade-window title and every message in {@code config/trade.yml} that still holds a
-     * default an earlier version shipped (all were Chinese) and saves the file, so the language file's
-     * text takes over in the server's language; any other value is the operator's and is kept
-     * (maintainer ruling 2026-09-24 (d), UltiKits/UltiTrade#16). Runs at start-up and on every reload,
-     * after the framework has read the file and before anything reads the texts; a blank value matches
-     * no shipped default, so it is never rewritten twice.
+     * Writes the trade-window title and every message in {@code config/trade.yml} that is still built-in
+     * text in the server's language and saves the file once, so the file holds what the module sends;
+     * any other value is the operator's and is kept (maintainer decision 2026-09-25,
+     * UltiKits/UltiTrade#16). Runs from {@link #registerSelf()} before any service reads the texts and
+     * from {@link #onReload()}, both after the module's language is loaded -- never from a configuration
+     * change listener, which the framework fires before it reloads the language. A value already in the
+     * current language matches nothing to replace, so a second start writes nothing.
      */
-    private void blankShippedTextDefaults() {
+    private void writeConfigTextInServerLanguage() {
         TradeConfig config = getConfig(TradeConfig.class);
-        if (config == null || !config.migrateLegacyDefaults()) {
+        if (config == null || !config.materializeText(this::i18n)) {
             return;
         }
         try {

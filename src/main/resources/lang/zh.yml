@@ -3,9 +3,14 @@ trade_enabled: "UltiTrade 已启用！"
 trade_disabled: "UltiTrade 已禁用！"
 
 # 交易请求
-request_sent: "&a已向 &e{PLAYER} &a发送交易请求！"
-request_received: "&e{PLAYER} &f请求与你交易！使用 &a/trade accept &f接受或 &c/trade deny &f拒绝"
 request_timeout: "&c交易请求已超时！"
+
+# config/trade.yml 中的消息（messages.*）：仍为内置文本时以此语言写入该文件
+message_request_sent: "&a已向 &f{PLAYER} &a发送交易请求！"
+message_request_received: "&e{PLAYER} &f请求与你交易！输入 /trade accept 接受"
+message_trade_disabled: "&c对方已关闭交易功能！"
+message_player_blocked: "&c对方已将你加入黑名单！"
+
 request_denied: "&c{PLAYER} 拒绝了你的交易请求！"
 
 # 交易状态
@@ -19,8 +24,6 @@ player_offline: "&c对方已离线！"
 # 交易开关和黑名单
 trade_toggle_on: "&a已开启交易功能！"
 trade_toggle_off: "&e已关闭交易功能！"
-trade_disabled_target: "&c{PLAYER} 已关闭交易功能！"
-player_blocked: "&c你已被 {PLAYER} 屏蔽！"
 block_success: "&a已将 {PLAYER} 添加到交易黑名单！"
 unblock_success: "&a已将 {PLAYER} 从交易黑名单移除！"
 already_blocked: "&c{PLAYER} 已在黑名单中！"
@@ -186,4 +189,4 @@ removed_key_warning: "{FILE} 仍包含 '{KEY}'，此版本的 UltiTrade 已不�
 removed_key_reason_trade_timeout: "它从未生效：已打开的交易窗口没有时间限制，也没有其他设置取代它。待处理的交易请求仍会在 'request-timeout' 之后过期，该设置未变。为已打开的交易窗口设置时间限制是功能请求 UltiKits/UltiTrade#41（UltiKits/UltiTrade#18）。"
 removed_key_reason_moved: "它的值从未显示给玩家。它描述的回复现在来自本模块语言文件（lang/<语言>.yml，与 config/trade.yml 位于同一模块文件夹）中的 '{ENTRY}' 条目，因此会跟随服务器的语言设置；请在那里修改（UltiKits/UltiTrade#17）。"
 
-log_config_default_save_failed: "将 {FILE} 中旧版本附带的默认文本替换为空值后保存失败；本次运行已使用语言文件中的文本，下次启动时会再次尝试替换。"
+log_config_default_save_failed: "按服务器语言写入 {FILE} 中的标题与消息后保存失败；本次运行已使用新的文本，下次启动时会再次写入该文件。"

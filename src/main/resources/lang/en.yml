@@ -3,9 +3,14 @@ trade_enabled: "UltiTrade enabled!"
 trade_disabled: "UltiTrade disabled!"
 
 # Trade Request
-request_sent: "&aTrading request sent to &e{PLAYER}&a!"
-request_received: "&e{PLAYER} &fwants to trade with you! Use &a/trade accept &for &c/trade deny"
 request_timeout: "&cTrading request has timed out!"
+
+# Messages config/trade.yml holds (messages.*), written there in the server's language while they are still built-in text
+message_request_sent: "&aTrade request sent to &f{PLAYER}&a!"
+message_request_received: "&e{PLAYER} &fwants to trade with you! Type /trade accept to accept"
+message_trade_disabled: "&cThat player has trading disabled!"
+message_player_blocked: "&cThat player has blocked you!"
+
 request_denied: "&c{PLAYER} denied your trading request!"
 
 # Trade Status
@@ -19,8 +24,6 @@ player_offline: "&cThe other player is offline!"
 # Trade Toggle and Blacklist
 trade_toggle_on: "&aTrade enabled!"
 trade_toggle_off: "&eTrade disabled!"
-trade_disabled_target: "&c{PLAYER} has trading disabled!"
-player_blocked: "&cYou are blocked by {PLAYER}!"
 block_success: "&aAdded {PLAYER} to your trade blacklist!"
 unblock_success: "&aRemoved {PLAYER} from your trade blacklist!"
 already_blocked: "&c{PLAYER} is already in your blacklist!"
@@ -186,4 +189,4 @@ removed_key_warning: "{FILE} still contains '{KEY}', which this version of UltiT
 removed_key_reason_trade_timeout: "It never took effect: an open trade window has no time limit, and nothing replaces the setting. A pending trade request still expires after 'request-timeout', which is unchanged. A time limit for an open trade window is feature request UltiKits/UltiTrade#41 (UltiKits/UltiTrade#18)."
 removed_key_reason_moved: "Its value was never shown to players. The reply it described now comes from the '{ENTRY}' entry of this module's language file (lang/<language>.yml, in the same module folder as config/trade.yml), so it follows the server's language setting; edit it there (UltiKits/UltiTrade#17)."
 
-log_config_default_save_failed: "Could not save {FILE} after replacing the text defaults an earlier version shipped with blank values; the language file's text is used this session, and the replacement is tried again at the next start."
+log_config_default_save_failed: "Could not save {FILE} after writing its title and messages in the server's language; the new text is used this session, and the file is written again at the next start."

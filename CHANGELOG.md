@@ -29,27 +29,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- The trade-window title (`gui-title`) and the seven messages in `config/trade.yml`
-  (`messages.request-sent`, `request-received`, `request-timeout`, `trade-complete`, `trade-cancelled`,
-  `trade-disabled`, `player-blocked`) now follow `language` unless you have customised them. Their
-  default is now blank, and a blank value shows the language file's text in the server's language;
-  previously the default was fixed Chinese text, so `language: en` had no effect on them
-  (UltiKits/UltiTrade#16). On upgrade, at start-up and on every reload of the module, a value that is
-  exactly the Chinese default an earlier version shipped is replaced with a blank value and the file is
-  saved; any other value is yours and is shown as written. Under `language: zh` four of these read a
-  little differently from the old defaults, because the language file's wording is used: the
-  request-received line also mentions `/trade deny`, the trade-disabled and player-blocked refusals
-  name the player, and the request-sent line shows the name in yellow. To keep the old Chinese text on
-  an English server, write it back after upgrading, changed in any way (even one character), since an
-  exact copy of the old default is blanked again.
-- `config/trade.yml` 中的交易界面标题（`gui-title`）与七条消息（`messages.request-sent`、`request-received`、
-  `request-timeout`、`trade-complete`、`trade-cancelled`、`trade-disabled`、`player-blocked`）现在除非被你自定义，
-  否则跟随 `language`。它们的默认值现为空，空值以服务器语言显示语言文件中的文本；此前默认值是写死的中文，所以
-  `language: en` 对它们不起作用（UltiKits/UltiTrade#16）。升级后，在启动时以及每次重载本模块时，与旧版本出厂中文默认值
-  完全相同的值会被替换为空值并保存文件；其他任何值都视为你的自定义，按原样显示。在 `language: zh` 下，其中四条与旧默认值
-  略有不同，因为采用的是语言文件的措辞：收到请求的提示会同时提到 `/trade deny`，对方已关闭交易与已被拉黑的拒绝提示会写出
-  玩家名，发送请求的提示中玩家名显示为黄色。若想在英文服务器上保留旧的中文文本，请在升级后把它写回，并做任意改动
-  （哪怕一个字符），因为与旧默认值完全相同的副本会再次被清空。
+- Message and title settings in `config/trade.yml` — the trade-window title (`gui-title`) and the seven
+  messages (`messages.request-sent`, `request-received`, `request-timeout`, `trade-complete`,
+  `trade-cancelled`, `trade-disabled`, `player-blocked`) — are written in the server's language when the
+  module starts, and the file is what the module shows (for example `messages.trade-complete: '&aTrade
+  completed!'` under `language: en`); previously they were fixed Chinese text, so `language: en` had no
+  effect on them. A setting that is still built-in text — in any language, or a default an earlier
+  version shipped — follows `language`: it is rewritten when the module starts or after `/ul reload`. A
+  setting you edited is kept. To keep a built-in text but stop it following `language`, change at least
+  one character. Under `language: zh` every one of them keeps exactly the Chinese text earlier versions
+  shipped. The language entries `request_sent`, `request_received`, `trade_disabled_target` and
+  `player_blocked`, which no code reads any more, are removed; the texts written into `trade.yml` come
+  from `message_request_sent`, `message_request_received`, `message_trade_disabled` and
+  `message_player_blocked` (UltiKits/UltiTrade#16).
+- `config/trade.yml` 中的消息与标题设置——交易界面标题（`gui-title`）与七条消息（`messages.request-sent`、
+  `request-received`、`request-timeout`、`trade-complete`、`trade-cancelled`、`trade-disabled`、`player-blocked`）——
+  在模块启动时按服务器语言写入，文件内容即模块显示的内容；此前它们是写死的中文，`language: en` 对它们不起作用。
+  仍为内置文本（任一语言的内置文本，或旧版本的出厂默认值）的设置会跟随 `language`：模块启动或执行 `/ul reload`
+  后改写为当前语言的文本。你改过的设置保持不变。若想保留内置文本又不让它跟随语言，请至少改动一个字符。在
+  `language: zh` 下它们都与旧版本出厂的中文文本完全相同。不再有代码读取的语言条目 `request_sent`、`request_received`、
+  `trade_disabled_target`、`player_blocked` 已删除；写入 `trade.yml` 的文本来自 `message_request_sent`、
+  `message_request_received`、`message_trade_disabled`、`message_player_blocked`（UltiKits/UltiTrade#16）。
 
 - The replies to `/trade toggle`, `/trade block` and `/trade unblock` — trading turned on or off, a
   player added to or removed from your trade blacklist, and the refusals for a player who already is
