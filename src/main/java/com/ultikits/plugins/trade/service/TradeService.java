@@ -922,6 +922,10 @@ public class TradeService {
         }
         String ownerLabel = describeOwner(owner);
         String summary = summarize(stacks);
+        RuntimeException saveFailure = null;
+        // Only building and inserting the row may lead to the drop below. What runs after a successful
+        // insert (the log line) stays outside this block: a failure there must not drop a stake the
+        // list already holds, or it would be handed out twice (Codex review on #45).
         try {
             if (pendingReturns == null) {
                 throw new IllegalStateException("the pending-returns list is not available");
@@ -932,25 +936,26 @@ public class TradeService {
             entry.setStackCount(stacks.size());
             entry.setCreatedAt(System.currentTimeMillis());
             pendingReturns.insert(entry);
-            if (plugin != null) {
-                plugin.getLogger().warn(i18n("log_pending_return_saved")
-                        .replace("{PLAYER}", ownerLabel)
-                        .replace("{COUNT}", String.valueOf(stacks.size()))
-                        .replace("{ITEMS}", summary));
-            }
         } catch (RuntimeException e) {
+            saveFailure = e;
+        }
+        if (saveFailure == null) {
+            logQuietly(() -> plugin.getLogger().warn(i18n("log_pending_return_saved")
+                    .replace("{PLAYER}", ownerLabel)
+                    .replace("{COUNT}", String.valueOf(stacks.size()))
+                    .replace("{ITEMS}", summary)));
+        } else {
+            RuntimeException e = saveFailure;
             Location where = lastKnownLocation(owner);
             for (ItemStack item : stacks) {
                 where.getWorld().dropItemNaturally(where, item);
             }
-            if (plugin != null) {
-                plugin.getLogger().error(e, i18n("log_pending_return_save_failed")
-                        .replace("{PLAYER}", ownerLabel)
-                        .replace("{COUNT}", String.valueOf(stacks.size()))
-                        .replace("{LOCATION}", where.getWorld().getName() + " "
-                                + where.getBlockX() + " " + where.getBlockY() + " " + where.getBlockZ())
-                        .replace("{ITEMS}", summary));
-            }
+            logQuietly(() -> plugin.getLogger().error(e, i18n("log_pending_return_save_failed")
+                    .replace("{PLAYER}", ownerLabel)
+                    .replace("{COUNT}", String.valueOf(stacks.size()))
+                    .replace("{LOCATION}", where.getWorld().getName() + " "
+                            + where.getBlockX() + " " + where.getBlockY() + " " + where.getBlockZ())
+                    .replace("{ITEMS}", summary)));
         }
     }
 
@@ -1006,6 +1011,22 @@ public class TradeService {
             plugin.getLogger().info(i18n("log_pending_return_delivered")
                     .replace("{PLAYER}", player.getName())
                     .replace("{COUNT}", String.valueOf(delivered)));
+        }
+    }
+
+    /**
+     * Write a log line after the stake's fate is settled, without letting a logging failure escape:
+     * {@link #cancelTrade(TradeSession, String)} must still reach {@code cleanupSession}, or a later
+     * cancel of the same session would save or drop the stake a second time.
+     */
+    private void logQuietly(Runnable line) {
+        if (plugin == null) {
+            return;
+        }
+        try {
+            line.run();
+        } catch (RuntimeException ignored) {
+            // The stake is already saved or dropped; the log line is a courtesy.
         }
     }
 
