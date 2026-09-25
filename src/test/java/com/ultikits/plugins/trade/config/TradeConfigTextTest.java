@@ -52,7 +52,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * {@code config/trade.yml} holds the trade-window title and every message in the server's language, and
- * the module sends exactly what the file holds (maintainer decision 2026-09-25, 17-CONTEXT D-16; UltiKits/UltiTrade#16).
+ * the module sends exactly what the file holds (maintainer decision 2026-09-25; UltiKits/UltiTrade#16).
  * A value that is still built-in text — any language's text from this jar, or the default an earlier
  * version shipped — follows {@code language} at enable and on reload, in both
  * directions; anything else is the operator's and is kept byte for byte. Every case runs the framework's
