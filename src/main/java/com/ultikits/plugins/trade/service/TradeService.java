@@ -926,7 +926,7 @@ public class TradeService {
         RuntimeException saveFailure = null;
         // Only building and inserting the row may lead to the drop below. What runs after a successful
         // insert (the log line) stays outside this block: a failure there must not drop a stake the
-        // list already holds, or it would be handed out twice (Codex review on #45).
+        // list already holds, or it would be handed out twice.
         try {
             if (pendingReturns == null) {
                 throw new IllegalStateException("the pending-returns list is not available");
@@ -1189,7 +1189,7 @@ public class TradeService {
     /**
      * Write {@code next} over the stored entry, and only once that write committed, make {@code entry}
      * (the in-memory copy the rest of the join reads, marker pruning included) say the same. A failed
-     * write leaves {@code entry} as the table still holds it (Codex review on #45).
+     * write leaves {@code entry} as the table still holds it.
      */
     private void write(PendingStakeReturn entry, PendingStakeReturn next) throws IllegalAccessException {
         pendingReturns.update(next);

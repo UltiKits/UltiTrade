@@ -281,7 +281,7 @@ class TradePendingReturnTest {
     }
 
     @Test
-    @DisplayName("A saved stake whose log line then fails is not also dropped (Codex P2 on #45)")
+    @DisplayName("A saved stake whose log line then fails is not also dropped")
     void aFailingLogAfterTheSaveDoesNotDropTheStake() throws Exception {
         org.mockito.Mockito.doThrow(new IllegalStateException("logger unavailable during shutdown"))
                 .when(logger).warn(anyString());
@@ -585,7 +585,7 @@ class TradePendingReturnTest {
     }
 
     @Test
-    @DisplayName("A partial completion whose write fails keeps its marker, so the next join does not hand the delivered part over again (Codex P1 on #45)")
+    @DisplayName("A partial completion whose write fails keeps its marker, so the next join does not hand the delivered part over again")
     void failedPartialCompletionKeepsTheMarker() throws Exception {
         service.completeTrade(sessionWithStakes());
         server.addPlayer(away);
