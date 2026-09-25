@@ -225,7 +225,7 @@ class TradeReloadReconciliationTest {
             reload("enable-money-trade: true\n");
 
             assertThat(tradeService.getEconomy()).isNull();
-            verify(UltiTradeTestHelper.getMockLogger()).warn("Vault not found! Money trading disabled.");
+            verify(UltiTradeTestHelper.getMockLogger()).warn(zhLine("log_vault_missing"));
         }
 
         @Test
@@ -238,7 +238,7 @@ class TradeReloadReconciliationTest {
             reload("enable-money-trade: true\n");
 
             verify(UltiTradeTestHelper.getMockLogger(), times(2))
-                    .warn("No Vault economy provider is registered! Money trading disabled.");
+                    .warn(zhLine("log_no_economy_provider"));
         }
 
         @Test
@@ -893,5 +893,11 @@ class TradeReloadReconciliationTest {
         Field field = UltiToolsPlugin.class.getDeclaredField("resourceFolderPath");
         field.setAccessible(true);
         field.set(plugin, path);
+    }
+
+    /** The Chinese catalogue's console line for {@code key}, or a marker naming the missing key (UltiKits/UltiTrade#16). */
+    private static String zhLine(String key) {
+        return com.ultikits.plugins.trade.i18n.CatalogueText.entries("zh")
+                .getOrDefault(key, "<lang/zh has no " + key + ">");
     }
 }

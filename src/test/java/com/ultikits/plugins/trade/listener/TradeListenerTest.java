@@ -57,6 +57,7 @@ class TradeListenerTest {
         UltiTradeTestHelper.setUp();
 
         tradeService = mock(TradeService.class);
+        com.ultikits.plugins.trade.i18n.TradeSeams.speak(tradeService, "zh");
         config = UltiTradeTestHelper.createDefaultConfig();
 
         listener = new TradeListener();
@@ -393,6 +394,8 @@ class TradeListenerTest {
         @BeforeEach
         void openWindowWithOnePlacedItem() throws Exception {
             TradeService realService = new TradeService();
+            // The module plugin, whose language file the service reads (UltiKits/UltiTrade#16)
+            UltiTradeTestHelper.setField(realService, "plugin", UltiTradeTestHelper.getMockPlugin());
             UltiTradeTestHelper.setField(realService, "config", config);
             UltiTradeTestHelper.setField(realService, "logService", mock(TradeLogService.class));
             UltiTradeTestHelper.setField(listener, "tradeService", realService);
@@ -497,6 +500,8 @@ class TradeListenerTest {
         @BeforeEach
         void openWindow() throws Exception {
             TradeService realService = new TradeService();
+            // The module plugin, whose language file the service reads (UltiKits/UltiTrade#16)
+            UltiTradeTestHelper.setField(realService, "plugin", UltiTradeTestHelper.getMockPlugin());
             UltiTradeTestHelper.setField(realService, "config", config);
             UltiTradeTestHelper.setField(realService, "logService", mock(TradeLogService.class));
             UltiTradeTestHelper.setField(listener, "tradeService", realService);
@@ -653,6 +658,8 @@ class TradeListenerTest {
         @BeforeEach
         void openWindow() throws Exception {
             TradeService realService = new TradeService();
+            // The module plugin, whose language file the service reads (UltiKits/UltiTrade#16)
+            UltiTradeTestHelper.setField(realService, "plugin", UltiTradeTestHelper.getMockPlugin());
             UltiTradeTestHelper.setField(realService, "config", config);
             UltiTradeTestHelper.setField(realService, "logService", mock(TradeLogService.class));
             UltiTradeTestHelper.setField(listener, "tradeService", realService);
@@ -1349,6 +1356,8 @@ class TradeListenerTest {
         @BeforeEach
         void openWindow() throws Exception {
             TradeService realService = new TradeService();
+            // The module plugin, whose language file the service reads (UltiKits/UltiTrade#16)
+            UltiTradeTestHelper.setField(realService, "plugin", UltiTradeTestHelper.getMockPlugin());
             UltiTradeTestHelper.setField(realService, "config", config);
             UltiTradeTestHelper.setField(realService, "logService", mock(TradeLogService.class));
             UltiTradeTestHelper.setField(listener, "tradeService", realService);

@@ -65,6 +65,10 @@ class TradeConfigReloadTest {
         assertThat(config.getMaxDistance()).isEqualTo(50);
 
         TradeService service = new TradeService();
+
+        // The module plugin, whose language file the service reads (UltiKits/UltiTrade#16)
+
+        UltiTradeTestHelper.setField(service, "plugin", UltiTradeTestHelper.getMockPlugin());
         TradeLogService logService = mock(TradeLogService.class);
         when(logService.isTradeEnabled(any())).thenReturn(true);
         when(logService.isBlocked(any(), any())).thenReturn(false);

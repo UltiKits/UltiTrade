@@ -36,6 +36,7 @@ class TradeGUITest {
         UltiTradeTestHelper.setUp();
 
         tradeService = mock(TradeService.class);
+        com.ultikits.plugins.trade.i18n.TradeSeams.speak(tradeService, "zh");
         config = UltiTradeTestHelper.createDefaultConfig();
         when(tradeService.getConfig()).thenReturn(config);
         when(tradeService.hasEconomy()).thenReturn(true);

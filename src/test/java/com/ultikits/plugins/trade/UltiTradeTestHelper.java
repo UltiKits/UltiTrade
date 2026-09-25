@@ -69,9 +69,10 @@ public final class UltiTradeTestHelper {
         mockLogger = mock(PluginLogger.class);
         lenient().when(mockPlugin.getLogger()).thenReturn(mockLogger);
 
-        // Mock i18n to return the key as-is
+        // i18n answers from the Chinese catalogue this module really ships, so a test sees the text an
+        // operator on the default language sees
         lenient().when(mockPlugin.i18n(anyString()))
-                .thenAnswer(inv -> inv.getArgument(0));
+                .thenAnswer(com.ultikits.plugins.trade.i18n.CatalogueText.answer("zh"));
 
         // Mock getDataOperator
         lenient().when(mockPlugin.getDataOperator(any()))

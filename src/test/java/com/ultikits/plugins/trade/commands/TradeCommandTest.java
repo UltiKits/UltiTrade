@@ -38,6 +38,7 @@ class TradeCommandTest {
         UltiTradeTestHelper.setUp();
 
         tradeService = mock(TradeService.class);
+        com.ultikits.plugins.trade.i18n.TradeSeams.speak(tradeService, "zh");
         logService = mock(TradeLogService.class);
         answerI18nFrom("en");
         command = constructLikeTheContainer(

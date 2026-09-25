@@ -52,6 +52,10 @@ class TradeServiceTest {
 
         service = new TradeService();
 
+        // The module plugin, whose language file the service reads (UltiKits/UltiTrade#16)
+
+        UltiTradeTestHelper.setField(service, "plugin", UltiTradeTestHelper.getMockPlugin());
+
         // Inject dependencies via reflection
         UltiTradeTestHelper.setField(service, "config", config);
         UltiTradeTestHelper.setField(service, "logService", logService);
@@ -1823,7 +1827,8 @@ class TradeServiceTest {
             service.init();
 
             assertThat(service.hasEconomy()).isFalse();
-            verify(UltiTradeTestHelper.getMockLogger()).warn("Vault not found! Money trading disabled.");
+            verify(UltiTradeTestHelper.getMockLogger()).warn(com.ultikits.plugins.trade.i18n.CatalogueText.entries("zh")
+                    .getOrDefault("log_vault_missing", "<lang/zh has no log_vault_missing>"));
         }
 
         @Test
