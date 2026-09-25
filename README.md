@@ -1,8 +1,8 @@
 # UltiTrade
 
 [![UltiTools-API](https://img.shields.io/badge/UltiTools--API-6.x-blue)](https://github.com/UltiKits/UltiTools-Reborn)
-[![Minecraft](https://img.shields.io/badge/Minecraft-1.13--1.21-green)](https://www.spigotmc.org/)
-[![Java](https://img.shields.io/badge/Java-8+-orange)](https://www.java.com/)
+[![Paper](https://img.shields.io/badge/Paper-1.21%2B-green)](https://papermc.io/)
+[![Java](https://img.shields.io/badge/Java-21%2B-orange)](https://adoptium.net/)
 
 UltiTrade 是一个功能完整的 Minecraft 玩家间交易系统插件，基于 UltiTools-API 框架开发。支持物品、金币、经验交易，具有完善的安全机制和丰富的用户体验功能。
 
