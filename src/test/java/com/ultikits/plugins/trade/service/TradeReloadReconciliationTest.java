@@ -99,6 +99,9 @@ class TradeReloadReconciliationTest {
         // does (UltiKits/UltiTrade#16)
         doAnswer(com.ultikits.plugins.trade.i18n.CatalogueText.answer("zh")).when(plugin).i18n(anyString());
         doReturn(config).when(plugin).getConfig(TradeConfig.class);
+        // The framework's language setting (UltiTools' config.yml), which the config-text pass reads;
+        // no framework instance runs here.
+        doReturn("zh").when(plugin).getLanguageCode();
 
         tradeService = new TradeService();
         UltiTradeTestHelper.setField(tradeService, "plugin", UltiTradeTestHelper.getMockPlugin());
