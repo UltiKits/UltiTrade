@@ -976,11 +976,17 @@ public class TradeService {
      *       are unchanged, so until step 2 is on disk it still lists everything;</li>
      *   <li>the items that fit go into the inventory, the token into the player's persistent data, and
      *       the player's data is saved: inventory and token reach the disk in one write;</li>
-     *   <li>the entry is completed: it keeps only the part that did not fit, or is removed.</li>
+     *   <li>at the player's next join, the entry is completed: it keeps only the part that did not fit,
+     *       or is removed.</li>
      * </ol>
-     * At the next join a marked entry is settled first: if the player's data holds its token, step 2
-     * reached the disk and the entry is completed; if not, the hand-over never did and the entry is
-     * unmarked and handed over again. A step that fails is left for that settlement; nothing is dropped.
+     * Step 3 is taken from what the disk says, not from what this session did: at a join the player's
+     * persistent data has just been read from their saved file, so a marked entry whose token is in it
+     * reached the disk and is completed, and one whose token is not never did and is unmarked and handed
+     * over again. Completing in the same session would trust that {@code saveData} wrote the file, and
+     * Paper's {@code saveData} logs a failed write and returns normally. The one exception is a server
+     * with player-data saving disabled ({@code players.disable-saving} in {@code spigot.yml}), where no
+     * token can ever reach the disk: there the entry is completed at once, as the player's inventory
+     * itself is never kept either. Nothing is dropped at the join.
      *
      * @param player the player who joined
      */
@@ -999,8 +1005,10 @@ public class TradeService {
         }
         int delivered = 0;
         int kept = 0;
+        boolean retry = false;
         for (PendingStakeReturn entry : entries) {
             if (entry.getDeliveryToken() != null && !settle(player, entry)) {
+                retry = true;
                 continue;
             }
             if (entry.getId() == null) {
@@ -1018,6 +1026,11 @@ public class TradeService {
             int[] outcome = handOver(player, entry, stacks);
             delivered += outcome[0];
             kept += outcome[1];
+            retry |= outcome[2] > 0;
+        }
+        pruneDeliveries(player, entries);
+        if (retry) {
+            player.sendMessage(text(i18n("message_pending_return_retry")));
         }
         if (kept > 0) {
             player.sendMessage(text(i18n("message_pending_return_partial")
@@ -1064,7 +1077,9 @@ public class TradeService {
     }
 
     /**
-     * Steps 1-3 for one entry. Returns {items handed over, items kept listed}.
+     * Steps 1 and 2 for one entry (step 3 follows at the next join, or at once when player-data saving is
+     * disabled). Returns {items handed over, items kept listed because they did not fit, 1 if the entry
+     * could not be handed over for a storage failure and waits for a later join}.
      */
     private int[] handOver(Player player, PendingStakeReturn entry, List<ItemStack> stacks) {
         List<ItemStack> given = new ArrayList<>();
@@ -1089,7 +1104,7 @@ public class TradeService {
         int givenCount = amount(given);
         int keptCount = amount(remaining);
         if (given.isEmpty()) {
-            return new int[] {0, keptCount};
+            return new int[] {0, keptCount, 0};
         }
         // Step 1: mark. On failure nothing may stay handed over, so the in-memory hand-over is undone.
         String token = UUID.randomUUID().toString();
@@ -1102,29 +1117,55 @@ public class TradeService {
             plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
                     .replace("{PLAYER}", player.getName())
                     .replace("{ID}", String.valueOf(entry.getId())));
-            return new int[] {0, amount(stacks)};
+            return new int[] {0, 0, 1};
         }
-        // Step 2: inventory and token reach the disk together.
+        // Step 2: inventory and token reach the disk together. Saved now so that the window before the
+        // next autosave closes; whether the write landed is read back at the next join (step 3).
         rememberDelivery(player, token);
         try {
             player.saveData();
         } catch (RuntimeException e) {
-            // The entry stays marked; the next join settles it from whatever the server saved by then.
             plugin.getLogger().warn(e, i18n("log_pending_return_player_save_failed")
                     .replace("{COUNT}", String.valueOf(givenCount))
                     .replace("{PLAYER}", player.getName()));
-            return new int[] {givenCount, keptCount};
         }
-        // Step 3: complete. On failure the next join completes it from the saved token.
+        if (playerDataSavingDisabled()) {
+            try {
+                complete(entry);
+                forgetDelivery(player, token);
+            } catch (RuntimeException | IllegalAccessException e) {
+                plugin.getLogger().error(e, i18n("log_pending_return_remove_failed")
+                        .replace("{PLAYER}", player.getName())
+                        .replace("{ID}", String.valueOf(entry.getId())));
+            }
+        }
+        return new int[] {givenCount, keptCount, 0};
+    }
+
+    /**
+     * Whether the server never writes player data ({@code players.disable-saving} in {@code spigot.yml}).
+     * Read on each hand-over, so a changed setting applies at the next join.
+     */
+    boolean playerDataSavingDisabled() {
         try {
-            complete(entry);
-            forgetDelivery(player, token);
-        } catch (RuntimeException | IllegalAccessException e) {
-            plugin.getLogger().error(e, i18n("log_pending_return_remove_failed")
-                    .replace("{PLAYER}", player.getName())
-                    .replace("{ID}", String.valueOf(entry.getId())));
+            return Bukkit.spigot().getSpigotConfig().getBoolean("players.disable-saving", false);
+        } catch (RuntimeException | LinkageError e) {
+            return false;
         }
-        return new int[] {givenCount, keptCount};
+    }
+
+    /** Drop every saved marker that no entry of this player carries any more. */
+    private static void pruneDeliveries(Player player, List<PendingStakeReturn> entries) {
+        Set<String> live = new HashSet<>();
+        for (PendingStakeReturn entry : entries) {
+            if (entry.getId() != null && entry.getDeliveryToken() != null) {
+                live.add(entry.getDeliveryToken());
+            }
+        }
+        Set<String> tokens = savedDeliveries(player);
+        if (tokens.retainAll(live)) {
+            writeDeliveries(player, tokens);
+        }
     }
 
     /** Keep only the part that did not fit, or remove the entry (its id is then cleared). */
