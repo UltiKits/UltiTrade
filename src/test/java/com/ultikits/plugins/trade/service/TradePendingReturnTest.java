@@ -322,6 +322,28 @@ class TradePendingReturnTest {
     }
 
     @Test
+    @DisplayName("A saved stake whose log line then fails is not also dropped (Codex P2 on #45)")
+    void aFailingLogAfterTheSaveDoesNotDropTheStake() throws Exception {
+        org.mockito.Mockito.doThrow(new IllegalStateException("logger unavailable during shutdown"))
+                .when(logger).warn(anyString());
+
+        try {
+            service.completeTrade(sessionWithStakes());
+        } catch (IllegalStateException expected) {
+            // Whether the logging failure escapes is not what this test is about.
+        }
+
+        assertThat(store.rowsOf(away.getUniqueId())).as("the stake was saved once").hasSize(1);
+        int dropped = 0;
+        for (Item item : world.getEntitiesByClass(Item.class)) {
+            if (item.getItemStack().getType() == Material.DIAMOND) {
+                dropped += item.getItemStack().getAmount();
+            }
+        }
+        assertThat(dropped).as("and not also dropped into the world, which would hand it out twice").isZero();
+    }
+
+    @Test
     @DisplayName("An entry that cannot be removed is not handed over, and is handed over once at the next join")
     void removeFailureDeliversNothingThenOnce() throws Exception {
         service.completeTrade(sessionWithStakes());
