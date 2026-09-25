@@ -18,6 +18,28 @@ class TradeConfigTest {
     @BeforeEach
     void setUp() {
         config = new TradeConfig();
+        // Bound to a plugin answering from the Chinese language file, as the framework's init() binds
+        // it: a blank text setting reads its text from there (UltiKits/UltiTrade#16).
+        com.ultikits.ultitools.abstracts.UltiToolsPlugin plugin =
+                org.mockito.Mockito.mock(com.ultikits.ultitools.abstracts.UltiToolsPlugin.class);
+        org.mockito.Mockito.when(plugin.i18n(org.mockito.ArgumentMatchers.anyString()))
+                .thenAnswer(com.ultikits.plugins.trade.i18n.CatalogueText.answer("zh"));
+        com.ultikits.plugins.trade.i18n.TradeSeams.bind(config, plugin);
+    }
+
+    @Test
+    @DisplayName("the trade-window title and every message default to blank, so the language file supplies them (UltiKits/UltiTrade#16)")
+    void textSettingsDefaultBlank() throws Exception {
+        TradeConfig fresh = new TradeConfig();
+        for (String name : new String[] {"guiTitle", "requestSentMessage", "requestReceivedMessage",
+                "requestTimeoutMessage", "tradeCompleteMessage", "tradeCancelledMessage",
+                "tradeDisabledMessage", "playerBlockedMessage"}) {
+            Field f = TradeConfig.class.getDeclaredField(name);
+            f.setAccessible(true);
+            assertThat(f.get(fresh)).as(name).isEqualTo("");
+            assertThat(f.isAnnotationPresent(com.ultikits.ultitools.annotations.config.NotEmpty.class))
+                    .as(name + " must accept a blank value").isFalse();
+        }
     }
 
     /** Every key TradeConfig declares, read from its {@code @ConfigEntry} annotations. */
