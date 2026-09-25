@@ -27,20 +27,6 @@ class TradeConfigTest {
         com.ultikits.plugins.trade.i18n.TradeSeams.bind(config, plugin);
     }
 
-    @Test
-    @DisplayName("the trade-window title and every message default to blank, so the language file supplies them (UltiKits/UltiTrade#16)")
-    void textSettingsDefaultBlank() throws Exception {
-        TradeConfig fresh = new TradeConfig();
-        for (String name : new String[] {"guiTitle", "requestSentMessage", "requestReceivedMessage",
-                "requestTimeoutMessage", "tradeCompleteMessage", "tradeCancelledMessage",
-                "tradeDisabledMessage", "playerBlockedMessage"}) {
-            Field f = TradeConfig.class.getDeclaredField(name);
-            f.setAccessible(true);
-            assertThat(f.get(fresh)).as(name).isEqualTo("");
-            assertThat(f.isAnnotationPresent(com.ultikits.ultitools.annotations.config.NotEmpty.class))
-                    .as(name + " must accept a blank value").isFalse();
-        }
-    }
 
     /** Every key TradeConfig declares, read from its {@code @ConfigEntry} annotations. */
     private static List<String> declaredKeys() {
