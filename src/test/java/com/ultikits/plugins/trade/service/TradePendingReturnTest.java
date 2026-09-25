@@ -358,6 +358,28 @@ class TradePendingReturnTest {
     }
 
     @Test
+    @DisplayName("After a delivery the player's data is saved at once, holding the stake (Codex P1 on #45)")
+    void deliveryIsMadeDurableAtOnce() throws Exception {
+        service.completeTrade(sessionWithStakes());
+        PlayerMock joined = org.mockito.Mockito.spy(away);
+        List<String> order = new ArrayList<>();
+        store.onDelete = () -> order.add("row removed");
+        org.mockito.Mockito.doAnswer(inv -> {
+            // What the save writes: the inventory as it is at this moment.
+            order.add("player saved holding " + count(joined, Material.DIAMOND) + " diamonds");
+            return null;
+        }).when(joined).saveData();
+        server.addPlayer(away);
+
+        service.deliverPendingReturns(joined);
+
+        // The row is removed before anything is handed over (a failure cannot deliver twice), and the
+        // player's data is written straight after, with the stake in it, so a crash no longer rolls
+        // the delivery back to the last autosave after the only durable copy was deleted.
+        assertThat(order).containsExactly("row removed", "player saved holding 10 diamonds");
+    }
+
+    @Test
     @DisplayName("An entry that cannot be removed is not handed over, and is handed over once at the next join")
     void removeFailureDeliversNothingThenOnce() throws Exception {
         service.completeTrade(sessionWithStakes());
@@ -410,6 +432,7 @@ class TradePendingReturnTest {
         final List<PendingStakeReturn> rows = new ArrayList<>();
         boolean failInsert;
         boolean failDelete;
+        Runnable onDelete = () -> { };
         private int nextId = 1;
 
         List<PendingStakeReturn> rowsOf(UUID owner) {
@@ -449,6 +472,7 @@ class TradePendingReturnTest {
                 throw new IllegalStateException("simulated delete failure");
             }
             rows.removeIf(row -> row.getId().equals(id));
+            onDelete.run();
         }
 
         @Override
