@@ -10,7 +10,7 @@ for real-machine verification, not user-facing documentation.
 > reach `pass`, `fail`, or `blocked`. **Nearly every meaningful row in this repository needs a
 > SECOND online player** as the trade partner — a trade is inherently two-sided. Every row below
 > states this explicitly in its own Preconditions rather than leaving it implied, because the
-> executing agent has to arrange the second account before the row can even start.
+> tester has to arrange the second account before the row can even start.
 
 ## Conventions
 
