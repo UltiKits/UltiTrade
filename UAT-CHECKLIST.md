@@ -17,27 +17,26 @@ for real-machine verification, not user-facing documentation.
 - **Columns:** `ID`, `Preconditions`, `Steps`, `Expected`, `Layer`, `Covers`.
 - **ID:** cites its `FEATURES.md` ID verbatim. A negative case suffixes the checklist ID only,
   as `.neg-<slug>` — a negative case still tests the same feature, so the base ID is unchanged.
-- **Layer**, copied verbatim from Laojun's own `ultitools-real-client-uat` skill so no
+- **Layer**, copied verbatim from the real-client acceptance tooling's fixed vocabulary so no
   translation step exists at dispatch time: `protocol`, `java-client`, `os-input`, `pixel`,
   `server`, `human`.
-- **Human-authenticated-session rows (D-27b):** a row whose Steps can only be exercised through
+- **Human-authenticated-session rows:** a row whose Steps can only be exercised through
   the maintainer's own authenticated UltiCloud panel session carries the fixed Preconditions
   phrase `maintainer-authenticated UltiCloud panel session (personal credentials)` and Layer
   `human`. This repository has no such row — it has no panel-capability surface of its own — so
   none is currently affected; the convention is stated here for template consistency.
 - **Expected** must name an observable truth — an exact chat line, a log line, a database row,
   an inventory slot — and never the words "it works".
-- **Covers** back-references a Phase 9 GUI-excluded class name; left blank when no such class
-  applies. `TradeGUI` and `TradeConfirmPage` are this module's two entries in that register
-  (`.planning/phases/09-module-ecosystem-readiness-and-test-coverage/gui-exclusions/
-  UltiTrade.md`), so every pixel-layer row exercising either GUI names it in this column.
+- **Covers** back-references a GUI class excluded from the JaCoCo coverage gate; left blank when no such class
+  applies. `TradeGUI` and `TradeConfirmPage` are this module's two excluded GUI classes, so
+  every pixel-layer row exercising either GUI names it in this column.
 - A row whose Preconditions name a prior CHECKLIST row must appear after that row in file order —
   asserted mechanically: for every row, every checklist ID cited in its Preconditions cell must
-  have a strictly smaller line number in this file than the row citing it (sweep class 8, D-27a).
+  have a strictly smaller line number in this file than the row citing it.
   **A dependency on a row from a DIFFERENT, later-appearing section is described in prose (the
   command to run), never by citing that row's ID** — this avoids a forward reference while still
   telling the executor exactly how to reach the state.
-- **Config-per-file rule (D-06):** one checklist row per `@ConfigEntity`-annotated class, never
+- **Config-per-file rule:** one checklist row per `@ConfigEntity`-annotated class, never
   one row per key. This module ships exactly one `@ConfigEntity` (`TradeConfig`,
   `config/trade.yml`), so exactly one config row exists below (ID suffixed `-yml`,
   `ultitrade.config.trade-yml`). This module ships no Maven-filtered (build-time) config file, so
@@ -52,9 +51,9 @@ for real-machine verification, not user-facing documentation.
   Preconditions set one.
 - **Config text rows:** `ultitrade.config.trade.materialize-fresh` and `ultitrade.config.trade.materialize-switch`
   exercise `FEATURES.md`'s `ultitrade.lifecycle.legacy-text-defaults` on a fresh file and across a `language`
-  switch; they are named by the phase's config-text convention (`<prefix>.config.<file stem>.materialize-*`)
+  switch; they are named by the config-text naming convention (`<prefix>.config.<file stem>.materialize-*`)
   rather than by that ID, and the upgrade case keeps the existing row `ultitrade.lifecycle.legacy-text-defaults`.
-- **Item-safety is this module's own hazard class (T-10-21):** every negative row that could lose
+- **Item-safety is this module's own hazard class:** every negative row that could lose
   or duplicate an item states the EXACT item state on both sides afterward, not merely "the trade
   is cancelled".
 
@@ -186,7 +185,7 @@ so every row here carries a `language: en` precondition.
 
 ## Configuration
 
-One row per `@ConfigEntity` class (D-06's config-per-file rule), not per key: `TradeConfig`
+One row per `@ConfigEntity` class (the config-per-file rule), not per key: `TradeConfig`
 (`config/trade.yml`, 24 keys), matching `FEATURES.md`'s `## Configuration` section exactly. This
 row confirms every key is present at its documented default and that none of the seven keys this
 version removed is written into a fresh file (`trade-timeout`, `UltiKits/UltiTrade#18`;

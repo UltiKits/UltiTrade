@@ -130,11 +130,11 @@ class TradeCommandTest {
 
     /**
      * UltiKits/UltiTrade#17. The six replies below used to be Chinese literals in the command, and
-     * {@code config/trade.yml} carried six {@code messages.*} keys for them that nothing read. The
-     * maintainer's ruling (2026-09-22): the keys are removed and the text comes from the language
-     * catalogue, so an English server answers in English and a Chinese one in Chinese. Each test
-     * therefore requires the exact rendered catalogue entry, for both shipped languages -- a
-     * substring of the old literal would pass against it and prove nothing.
+     * {@code config/trade.yml} carried six {@code messages.*} keys for them that nothing read. By
+     * design the keys are removed and the text comes from the language catalogue, so an English
+     * server answers in English and a Chinese one in Chinese. Each test therefore requires the
+     * exact rendered catalogue entry, for both shipped languages -- a substring of the old
+     * literal would pass against it and prove nothing.
      */
     @Nested
     @DisplayName("replies come from the language catalogue (UltiKits/UltiTrade#17)")

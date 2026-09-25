@@ -1190,8 +1190,7 @@ class TradeServiceTest {
         void everyStakeIsReturnedWithoutAnInjectedPlugin() throws Exception {
             // The cancellation reason now comes from the language file. A service with no injected
             // plugin must not throw while resolving it: the per-trade catch in shutdown() would
-            // swallow the exception before the stakes were returned (gate-1 IN-02 of the language
-            // sweep).
+            // swallow the exception before the stakes were returned.
             UltiTradeTestHelper.setField(service, "plugin", null);
             ItemStack stake1 = new ItemStack(Material.DIAMOND, 3);
             ItemStack stake2 = new ItemStack(Material.GOLD_INGOT, 5);
