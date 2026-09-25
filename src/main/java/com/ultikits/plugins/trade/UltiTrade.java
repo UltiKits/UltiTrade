@@ -11,6 +11,7 @@ import com.ultikits.ultitools.annotations.UltiToolsModule;
 import org.bukkit.Bukkit;
 
 import java.io.File;
+import java.io.IOException;
 
 /**
  * UltiTrade - Player-to-player trading system.
@@ -34,17 +35,6 @@ import java.io.File;
 @UltiToolsModule(scanBasePackages = {"com.ultikits.plugins.trade"})
 public class UltiTrade extends UltiToolsPlugin {
 
-    static final String CLEANUP_RECONCILE_FAILED =
-            "Could not apply enable-trade-log or cleanup-interval-hours from the reloaded configuration;"
-            + " the old-log cleanup task keeps its previous schedule until the next successful /ul reload UltiTrade";
-    static final String ECONOMY_RECONCILE_FAILED =
-            "Could not apply enable-money-trade from the reloaded configuration;"
-            + " money trading keeps its previous provider until the next successful /ul reload UltiTrade";
-
-    static final String CONFIRMATION_RESET_FAILED =
-            "Could not void the confirmations of open trades or redraw their windows after the reload;"
-            + " a trade confirmed or displayed before the reload may complete on the reloaded terms";
-
     private TradePlaceholderExpansion placeholderExpansion;
 
     @Override
@@ -52,6 +42,7 @@ public class UltiTrade extends UltiToolsPlugin {
         // Deleting a key from TradeConfig does nothing to the operator's existing file, so tell them
         // about any key this version no longer reads (UltiKits/UltiTrade#17, #18).
         warnAboutRemovedConfigKeys();
+        blankShippedTextDefaults();
 
         // Initialize services
         initializeServices();
@@ -59,7 +50,7 @@ public class UltiTrade extends UltiToolsPlugin {
         // Register PlaceholderAPI expansion if available
         registerPlaceholderAPI();
 
-        getLogger().info(i18n("UltiTrade 已启用！"));
+        getLogger().info(i18n("trade_enabled"));
         return true;
     }
 
@@ -74,7 +65,7 @@ public class UltiTrade extends UltiToolsPlugin {
             placeholderExpansion = null;
         }
 
-        getLogger().info(i18n("UltiTrade 已禁用！"));
+        getLogger().info(i18n("trade_disabled"));
     }
 
     /**
@@ -92,13 +83,14 @@ public class UltiTrade extends UltiToolsPlugin {
     @Override
     protected void onReload() {
         warnAboutRemovedConfigKeys();
+        blankShippedTextDefaults();
 
         TradeLogService logService = getContext().getBean(TradeLogService.class);
         if (logService != null) {
             try {
                 logService.reloadCleanupTask();
             } catch (RuntimeException e) {
-                getLogger().error(e, CLEANUP_RECONCILE_FAILED);
+                getLogger().error(e, i18n("log_cleanup_reconcile_failed"));
             }
         }
 
@@ -107,7 +99,7 @@ public class UltiTrade extends UltiToolsPlugin {
             try {
                 tradeService.reloadEconomy();
             } catch (RuntimeException e) {
-                getLogger().error(e, ECONOMY_RECONCILE_FAILED);
+                getLogger().error(e, i18n("log_economy_reconcile_failed"));
             }
 
             // Confirmations given before the reload may cover terms the reload changed, and open
@@ -116,7 +108,7 @@ public class UltiTrade extends UltiToolsPlugin {
                 tradeService.resetConfirmationsAfterReload();
                 tradeService.refreshOpenTradeWindowsAfterReload();
             } catch (RuntimeException e) {
-                getLogger().error(e, CONFIRMATION_RESET_FAILED);
+                getLogger().error(e, i18n("log_confirmation_reset_failed"));
             }
         }
     }
@@ -124,10 +116,29 @@ public class UltiTrade extends UltiToolsPlugin {
     private void warnAboutRemovedConfigKeys() {
         // Advisory only: nothing it throws may cost the module its enable or its reload.
         try {
-            RemovedConfigKeys.warnAboutLeftovers(operatorConfigFile(), getLogger()::warn);
+            RemovedConfigKeys.warnAboutLeftovers(operatorConfigFile(), getLogger()::warn, this);
         } catch (RuntimeException e) {
-            getLogger().warn(e, "Could not check " + TradeConfig.CONFIG_FILE
-                    + " for removed configuration keys; the module continues without that check.");
+            getLogger().warn(e, i18n("log_removed_key_check_failed").replace("{FILE}", TradeConfig.CONFIG_FILE));
+        }
+    }
+
+    /**
+     * Blanks the trade-window title and every message in {@code config/trade.yml} that still holds a
+     * default an earlier version shipped (all were Chinese) and saves the file, so the language file's
+     * text takes over in the server's language; any other value is the operator's and is kept
+     * (maintainer ruling 2026-09-24 (d), UltiKits/UltiTrade#16). Runs at start-up and on every reload,
+     * after the framework has read the file and before anything reads the texts; a blank value matches
+     * no shipped default, so it is never rewritten twice.
+     */
+    private void blankShippedTextDefaults() {
+        TradeConfig config = getConfig(TradeConfig.class);
+        if (config == null || !config.migrateLegacyDefaults()) {
+            return;
+        }
+        try {
+            config.save();
+        } catch (IOException e) {
+            getLogger().warn(e, i18n("log_config_default_save_failed").replace("{FILE}", TradeConfig.CONFIG_FILE));
         }
     }
 
@@ -192,7 +203,7 @@ public class UltiTrade extends UltiToolsPlugin {
      */
     private void registerPlaceholderAPI() {
         if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") == null) {
-            getLogger().info("PlaceholderAPI 未找到，跳过 Placeholder 注册。");
+            getLogger().info(i18n("log_placeholderapi_missing"));
             return;
         }
 
@@ -201,7 +212,7 @@ public class UltiTrade extends UltiToolsPlugin {
 
         placeholderExpansion = new TradePlaceholderExpansion(tradeService, logService);
         if (placeholderExpansion.register()) {
-            getLogger().info("PlaceholderAPI 扩展已注册！");
+            getLogger().info(i18n("log_placeholderapi_registered"));
         }
     }
 }

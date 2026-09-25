@@ -29,6 +29,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- The trade-window title (`gui-title`) and the seven messages in `config/trade.yml`
+  (`messages.request-sent`, `request-received`, `request-timeout`, `trade-complete`, `trade-cancelled`,
+  `trade-disabled`, `player-blocked`) now follow `language` unless you have customised them. Their
+  default is now blank, and a blank value shows the language file's text in the server's language;
+  previously the default was fixed Chinese text, so `language: en` had no effect on them
+  (UltiKits/UltiTrade#16). On upgrade, at start-up and on every reload of the module, a value that is
+  exactly the Chinese default an earlier version shipped is replaced with a blank value and the file is
+  saved; any other value is yours and is shown as written. Under `language: zh` four of these read a
+  little differently from the old defaults, because the language file's wording is used: the
+  request-received line also mentions `/trade deny`, the trade-disabled and player-blocked refusals
+  name the player, and the request-sent line shows the name in yellow. To keep the old Chinese text on
+  an English server, write it back after upgrading, changed in any way (even one character), since an
+  exact copy of the old default is blanked again.
+- `config/trade.yml` 中的交易界面标题（`gui-title`）与七条消息（`messages.request-sent`、`request-received`、
+  `request-timeout`、`trade-complete`、`trade-cancelled`、`trade-disabled`、`player-blocked`）现在除非被你自定义，
+  否则跟随 `language`。它们的默认值现为空，空值以服务器语言显示语言文件中的文本；此前默认值是写死的中文，所以
+  `language: en` 对它们不起作用（UltiKits/UltiTrade#16）。升级后，在启动时以及每次重载本模块时，与旧版本出厂中文默认值
+  完全相同的值会被替换为空值并保存文件；其他任何值都视为你的自定义，按原样显示。在 `language: zh` 下，其中四条与旧默认值
+  略有不同，因为采用的是语言文件的措辞：收到请求的提示会同时提到 `/trade deny`，对方已关闭交易与已被拉黑的拒绝提示会写出
+  玩家名，发送请求的提示中玩家名显示为黄色。若想在英文服务器上保留旧的中文文本，请在升级后把它写回，并做任意改动
+  （哪怕一个字符），因为与旧默认值完全相同的副本会再次被清空。
+
 - The replies to `/trade toggle`, `/trade block` and `/trade unblock` — trading turned on or off, a
   player added to or removed from your trade blacklist, and the refusals for a player who already is
   or is not on it — now come from this module's language file, `lang/<language>.yml` beside the
@@ -40,12 +62,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   can send you trade requests; the already-blocked and not-blocked refusals now say "already in the
   blacklist" and "not in the blacklist" instead of "in your trade blacklist"; and the unblock reply is
   reworded slightly ("removed from the trade blacklist"). Only the block-success reply reads exactly as
-  before. In English the already-blocked and not-blocked refusals say "your blacklist". Only these six
-  replies change: the grey line after a successful `/trade block` ("this player will not be able to
-  send you trade requests"), the refusals for blocking yourself or naming an offline player, and the command's other
-  text are still Chinese under either setting. Under `language: en` a successful `/trade block`
-  therefore prints an English line followed by that Chinese line; this mixed-language reply is known
-  and is tracked by UltiKits/UltiTrade#16 (UltiKits/UltiTrade#17).
+  before. In English the already-blocked and not-blocked refusals say "your blacklist". The rest of the
+  command's text follows `language` as well; see `### Fixed` (UltiKits/UltiTrade#17).
 - `/trade toggle`、`/trade block` 和 `/trade unblock` 的回复——开启或关闭交易、把玩家加入或移出交易黑名单，
   以及对方已在或不在黑名单时的拒绝提示——现在来自本模块的语言文件，即 `config` 文件夹旁的
   `lang/<语言>.yml`（条目 `trade_toggle_on`、`trade_toggle_off`、`block_success`、`unblock_success`、
@@ -53,12 +71,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `language: zh` 下为中文。此前无论哪种设置，这些回复都是固定的中文句子。措辞现以语言文件为准，六条中文回复中有五条
   的措辞也随之改变：开关交易的两条回复不再附带第二句关于其他玩家能否向你发送交易请求的说明；"已经在你的交易黑名单中"
   改为"已在黑名单中"，"不在你的交易黑名单中"改为"不在黑名单中"；"从交易黑名单中移除"改为"从交易黑名单移除"。
-  只有拉黑成功的回复与之前完全相同。只有这六条回复发生变化：`/trade block` 成功后的
-  灰色提示行（"该玩家将无法向你发送交易请求"）、拉黑自己或指定离线玩家时的拒绝提示，以及该命令的其余文本，
-  在两种设置下仍为中文。因此在 `language: en` 下，成功执行 `/trade block` 会先输出一行英文、再输出上述一行中文；
-  这一中英混杂的回复是已知问题，由 UltiKits/UltiTrade#16 跟踪（UltiKits/UltiTrade#17）。
+  只有拉黑成功的回复与之前完全相同。该命令的其余文本同样跟随 `language`，见 `### Fixed`（UltiKits/UltiTrade#17）。
 
 ### Fixed
+
+- `language: en` now applies to everything this module shows or logs: every `/trade` reply and its
+  help, the trade request (clickable buttons, their hover text and the countdown BossBar), the
+  request, accept, deny and cancel replies and every cancellation reason, the trade window and the
+  large-trade confirmation page (titles, item names, lore, buttons, tax lines), the money and
+  experience input prompts and replies, the PlaceholderAPI display values (`enabled_display`,
+  `last_trade_time`, `last_trade_ago`), the command description, and the console lines. Most of this
+  was fixed Chinese text in every language, although the language files already held English text for
+  much of it that no code read; the console lines were fixed English text and now follow
+  `language: zh` too (UltiKits/UltiTrade#16). Language keys were renamed: the few lines that used a
+  Chinese sentence as their language key now use ASCII keys. If you edited this module's language
+  files, re-apply those edits to the new keys; until then the renamed lines show the built-in text.
+- `language: en` 现在对本模块显示或记录的全部内容生效：`/trade` 的所有回复与帮助，交易请求（可点击按钮、按钮的悬停
+  提示与倒计时 BossBar），请求、接受、拒绝与取消的回复及每一种取消原因，交易界面与大额交易确认页（标题、物品名称、
+  说明、按钮、税费行），金币与经验的输入提示及回复，PlaceholderAPI 的显示值（`enabled_display`、`last_trade_time`、
+  `last_trade_ago`），命令描述以及控制台日志。其中大部分原先在任何语言下都是写死的中文，而语言文件中其实已有其中许多
+  内容的无人读取的英文文本；控制台日志原先写死为英文，现在也跟随 `language: zh`（UltiKits/UltiTrade#16）。语言键已改名：
+  少数以中文句子作为语言键的行现在改用 ASCII 键。如果你修改过本模块的语言文件，请把这些修改重新应用到新键上；在此之前，
+  改名的行显示内置文本。
 
 - Reloading this module (`/ul reload UltiTrade`) now re-reads `config/trade.yml` and refreshes the
   language files, so an edited value such as `max-distance` applies without a restart. Previously
@@ -188,6 +222,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   会伸进窗口内：Shift 点击、双击收集，以及服务器报告为未知的操作（UltiKits/UltiTrade#39）。
 
 ### Removed
+
+- Seven language entries no code ever read: `confirm_required`, `confirmed`, `confirmation_cancelled`,
+  `request_expired`, `trade_started`, `gui_status_confirmed`, `gui_status_pending`. Removing them changes
+  nothing players see.
+- 移除七个从未有代码读取的语言条目：`confirm_required`、`confirmed`、`confirmation_cancelled`、`request_expired`、
+  `trade_started`、`gui_status_confirmed`、`gui_status_pending`。移除它们不会改变玩家看到的任何内容。
 
 - The module's own reload console line on `/ul reload UltiTrade` (a Chinese sentence meaning
   "UltiTrade config reloaded!", printed in Chinese under either `language` setting), and the

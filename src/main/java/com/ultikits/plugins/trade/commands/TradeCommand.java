@@ -21,7 +21,7 @@ import org.bukkit.entity.Player;
 @CmdExecutor(
     alias = {"trade", "t"},
     permission = "ultitrade.use",
-    description = "玩家交易系统"
+    description = "command_description"
 )
 public class TradeCommand extends BaseCommandExecutor {
     
@@ -36,30 +36,33 @@ public class TradeCommand extends BaseCommandExecutor {
     }
 
     /**
-     * A reply from this module's language catalogue ({@code lang/<language>.yml}), with
-     * {@code {PLAYER}} filled in and {@code &} colour codes applied. The toggle and blocklist replies
-     * come from here so that they follow the server's {@code language} setting; the
-     * {@code config/trade.yml} keys that once described them were never read and are removed
-     * (UltiKits/UltiTrade#17).
+     * A reply from this module's language file ({@code lang/<language>.yml}), with {@code {PLAYER}}
+     * filled in and {@code &} colour codes applied, so it follows the server's {@code language}
+     * setting (UltiKits/UltiTrade#16, #17).
      *
-     * @param key        catalogue key
-     * @param playerName the name substituted for {@code {PLAYER}}
+     * @param languageText the language file's text, as {@code plugin.i18n(key)} returns it
+     * @param playerName   the name substituted for {@code {PLAYER}}
      * @return the text to send
      */
-    private String catalogueMessage(String key, String playerName) {
-        return ChatColor.translateAlternateColorCodes('&', plugin.i18n(key).replace("{PLAYER}", playerName));
+    private static String withPlayer(String languageText, String playerName) {
+        return ChatColor.translateAlternateColorCodes('&', languageText.replace("{PLAYER}", playerName));
+    }
+
+    /** The language file's text, {@code &} colour codes applied. */
+    private static String text(String languageText) {
+        return ChatColor.translateAlternateColorCodes('&', languageText);
     }
     
     @CmdMapping(format = "<player>")
     public void sendRequest(@CmdSender Player sender, @CmdParam("player") String targetName) {
         Player target = Bukkit.getPlayerExact(targetName);
         if (target == null) {
-            sender.sendMessage(ChatColor.RED + "玩家 " + targetName + " 不在线！");
+            sender.sendMessage(withPlayer(plugin.i18n("player_not_found"), targetName));
             return;
         }
         
         if (target.equals(sender)) {
-            sender.sendMessage(ChatColor.RED + "不能和自己交易！");
+            sender.sendMessage(text(plugin.i18n("cannot_trade_self")));
             return;
         }
         
@@ -79,7 +82,7 @@ public class TradeCommand extends BaseCommandExecutor {
     @CmdMapping(format = "cancel")
     public void cancel(@CmdSender Player player) {
         if (!tradeService.isTrading(player.getUniqueId())) {
-            player.sendMessage(ChatColor.RED + "你当前没有在交易！");
+            player.sendMessage(text(plugin.i18n("not_trading")));
             return;
         }
         tradeService.cancelTrade(player);
@@ -88,7 +91,9 @@ public class TradeCommand extends BaseCommandExecutor {
     @CmdMapping(format = "toggle")
     public void toggle(@CmdSender Player player) {
         boolean newState = logService.toggleTrade(player);
-        player.sendMessage(catalogueMessage(newState ? "trade_toggle_on" : "trade_toggle_off", player.getName()));
+        player.sendMessage(withPlayer(newState
+            ? plugin.i18n("trade_toggle_on")
+            : plugin.i18n("trade_toggle_off"), player.getName()));
     }
     
     @CmdMapping(format = "block <player>")
@@ -96,58 +101,58 @@ public class TradeCommand extends BaseCommandExecutor {
         Player target = Bukkit.getPlayerExact(targetName);
         if (target == null) {
             // Try to block by name even if offline
-            player.sendMessage(ChatColor.RED + "玩家 " + targetName + " 不在线！无法添加到黑名单。");
+            player.sendMessage(withPlayer(plugin.i18n("block_player_offline"), targetName));
             return;
         }
         
         if (target.equals(player)) {
-            player.sendMessage(ChatColor.RED + "不能将自己添加到黑名单！");
+            player.sendMessage(text(plugin.i18n("cannot_block_self")));
             return;
         }
         
         if (logService.isBlocked(player.getUniqueId(), target.getUniqueId())) {
-            player.sendMessage(catalogueMessage("already_blocked", target.getName()));
+            player.sendMessage(withPlayer(plugin.i18n("already_blocked"), target.getName()));
             return;
         }
         
         logService.blockPlayer(player, target.getUniqueId());
-        player.sendMessage(catalogueMessage("block_success", target.getName()));
-        player.sendMessage(ChatColor.GRAY + "该玩家将无法向你发送交易请求。");
+        player.sendMessage(withPlayer(plugin.i18n("block_success"), target.getName()));
+        player.sendMessage(text(plugin.i18n("block_success_hint")));
     }
     
     @CmdMapping(format = "unblock <player>")
     public void unblockPlayer(@CmdSender Player player, @CmdParam("player") String targetName) {
         Player target = Bukkit.getPlayerExact(targetName);
         if (target == null) {
-            player.sendMessage(ChatColor.RED + "玩家 " + targetName + " 不在线！无法从黑名单移除。");
+            player.sendMessage(withPlayer(plugin.i18n("unblock_player_offline"), targetName));
             return;
         }
         
         if (!logService.isBlocked(player.getUniqueId(), target.getUniqueId())) {
-            player.sendMessage(catalogueMessage("not_blocked", target.getName()));
+            player.sendMessage(withPlayer(plugin.i18n("not_blocked"), target.getName()));
             return;
         }
         
         logService.unblockPlayer(player, target.getUniqueId());
-        player.sendMessage(catalogueMessage("unblock_success", target.getName()));
+        player.sendMessage(withPlayer(plugin.i18n("unblock_success"), target.getName()));
     }
     
     @CmdMapping(format = "")
     public void help(@CmdSender Player player) {
-        player.sendMessage(ChatColor.GOLD + "=== UltiTrade 帮助 ===");
-        player.sendMessage(ChatColor.YELLOW + "/trade <玩家>" + ChatColor.WHITE + " - 发起交易请求");
-        player.sendMessage(ChatColor.YELLOW + "/trade accept" + ChatColor.WHITE + " - 接受交易请求");
-        player.sendMessage(ChatColor.YELLOW + "/trade deny" + ChatColor.WHITE + " - 拒绝交易请求");
-        player.sendMessage(ChatColor.YELLOW + "/trade cancel" + ChatColor.WHITE + " - 取消当前交易");
-        player.sendMessage(ChatColor.YELLOW + "/trade toggle" + ChatColor.WHITE + " - 开启/关闭交易功能");
-        player.sendMessage(ChatColor.YELLOW + "/trade block <玩家>" + ChatColor.WHITE + " - 屏蔽指定玩家");
-        player.sendMessage(ChatColor.YELLOW + "/trade unblock <玩家>" + ChatColor.WHITE + " - 取消屏蔽玩家");
+        player.sendMessage(text(plugin.i18n("help_header")));
+        player.sendMessage(text(plugin.i18n("help_request")));
+        player.sendMessage(text(plugin.i18n("help_accept")));
+        player.sendMessage(text(plugin.i18n("help_deny")));
+        player.sendMessage(text(plugin.i18n("help_cancel")));
+        player.sendMessage(text(plugin.i18n("help_toggle")));
+        player.sendMessage(text(plugin.i18n("help_block")));
+        player.sendMessage(text(plugin.i18n("help_unblock")));
         player.sendMessage("");
         
         // Show current status
         boolean tradeEnabled = logService.isTradeEnabled(player.getUniqueId());
-        player.sendMessage(ChatColor.GRAY + "交易状态: " + 
-            (tradeEnabled ? ChatColor.GREEN + "已开启" : ChatColor.RED + "已关闭"));
+        String status = tradeEnabled ? plugin.i18n("help_status_on") : plugin.i18n("help_status_off");
+        player.sendMessage(text(plugin.i18n("help_status").replace("{STATUS}", status)));
     }
     
     @Override

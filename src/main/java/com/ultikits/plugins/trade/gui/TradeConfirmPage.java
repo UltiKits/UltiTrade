@@ -60,7 +60,8 @@ public class TradeConfirmPage implements InventoryHolder {
         this.onCancel = onCancel;
         
         Player other = Bukkit.getPlayer(session.getOtherPlayer(viewer.getUniqueId()));
-        String title = ChatColor.GOLD + "确认与 " + (other != null ? other.getName() : "???") + " 的交易";
+        String title = text(tradeService.i18n("confirm_title")
+            .replace("{PLAYER}", other != null ? other.getName() : "???"));
         
         this.inventory = Bukkit.createInventory(this, SIZE, title);
         initializeGUI();
@@ -91,87 +92,87 @@ public class TradeConfirmPage implements InventoryHolder {
         
         List<String> infoLore = new ArrayList<>();
         infoLore.add("");
-        infoLore.add(ChatColor.YELLOW + "此交易需要二次确认！");
-        infoLore.add(ChatColor.GRAY + "(金币或经验超过 " + (int)threshold + ")");
+        infoLore.add(text(tradeService.i18n("confirm_needed")));
+        infoLore.add(filled(tradeService.i18n("confirm_threshold"), "{AMOUNT}", String.valueOf((int) threshold)));
         infoLore.add("");
-        infoLore.add(ChatColor.GREEN + "你将给出:");
-        infoLore.add(ChatColor.WHITE + "  金币: " + ChatColor.GOLD + String.format("%.2f", yourMoney));
+        infoLore.add(text(tradeService.i18n("confirm_you_give")));
+        infoLore.add(filled(tradeService.i18n("confirm_money_line"), "{AMOUNT}", String.format("%.2f", yourMoney)));
         if (taxRate > 0 && yourMoney > 0) {
-            infoLore.add(ChatColor.RED + "    税: -" + String.format("%.2f", yourMoney * taxRate));
+            infoLore.add(filled(tradeService.i18n("confirm_tax_line"), "{AMOUNT}", String.format("%.2f", yourMoney * taxRate)));
         }
-        infoLore.add(ChatColor.WHITE + "  经验: " + ChatColor.GREEN + yourExp);
+        infoLore.add(filled(tradeService.i18n("confirm_exp_line"), "{AMOUNT}", String.valueOf(yourExp)));
         if (expTaxRate > 0 && yourExp > 0) {
-            infoLore.add(ChatColor.RED + "    税: -" + (int)(yourExp * expTaxRate));
+            infoLore.add(filled(tradeService.i18n("confirm_tax_line"), "{AMOUNT}", String.valueOf((int) (yourExp * expTaxRate))));
         }
-        infoLore.add(ChatColor.WHITE + "  物品: " + session.getPlayerItems(viewerUuid).size() + " 个");
+        infoLore.add(filled(tradeService.i18n("confirm_items_line"), "{COUNT}", String.valueOf(session.getPlayerItems(viewerUuid).size())));
         infoLore.add("");
-        infoLore.add(ChatColor.AQUA + "你将收到:");
-        infoLore.add(ChatColor.WHITE + "  金币: " + ChatColor.GOLD + String.format("%.2f", theirMoney * (1 - taxRate)));
-        infoLore.add(ChatColor.WHITE + "  经验: " + ChatColor.GREEN + (int)(theirExp * (1 - expTaxRate)));
-        infoLore.add(ChatColor.WHITE + "  物品: " + session.getOtherPlayerItems(viewerUuid).size() + " 个");
+        infoLore.add(text(tradeService.i18n("confirm_you_receive")));
+        infoLore.add(filled(tradeService.i18n("confirm_money_line"), "{AMOUNT}", String.format("%.2f", theirMoney * (1 - taxRate))));
+        infoLore.add(filled(tradeService.i18n("confirm_exp_line"), "{AMOUNT}", String.valueOf((int) (theirExp * (1 - expTaxRate)))));
+        infoLore.add(filled(tradeService.i18n("confirm_items_line"), "{COUNT}", String.valueOf(session.getOtherPlayerItems(viewerUuid).size())));
         infoLore.add("");
-        infoLore.add(ChatColor.YELLOW + "请仔细确认交易内容！");
+        infoLore.add(text(tradeService.i18n("confirm_check_carefully")));
         
-        ItemStack infoItem = createItem(Material.PAPER, ChatColor.GOLD + "⚠ 交易确认", infoLore);
+        ItemStack infoItem = createItem(Material.PAPER, text(tradeService.i18n("confirm_info_title")), infoLore);
         inventory.setItem(INFO_SLOT, infoItem);
         
         // Display your items (3 slots)
-        displayItems(session.getPlayerItems(viewerUuid), YOUR_ITEMS_START, ChatColor.GREEN + "你的物品");
+        displayItems(session.getPlayerItems(viewerUuid), YOUR_ITEMS_START, text(tradeService.i18n("gui_your_items")));
         
         // Display their items (3 slots)
-        displayItems(session.getOtherPlayerItems(viewerUuid), THEIR_ITEMS_START, ChatColor.AQUA + "对方物品");
+        displayItems(session.getOtherPlayerItems(viewerUuid), THEIR_ITEMS_START, text(tradeService.i18n("gui_their_items")));
         
         // Money display
         ItemStack yourMoneyItem = createItem(Material.GOLD_INGOT, 
-            ChatColor.GOLD + "你给出的金币",
+            text(tradeService.i18n("confirm_your_money")),
             Arrays.asList(
-                ChatColor.WHITE + "金额: " + ChatColor.YELLOW + String.format("%.2f", yourMoney),
-                taxRate > 0 ? ChatColor.RED + "税后对方收到: " + String.format("%.2f", yourMoney * (1 - taxRate)) : ""
+                filled(tradeService.i18n("confirm_amount"), "{AMOUNT}", String.format("%.2f", yourMoney)),
+                taxRate > 0 ? filled(tradeService.i18n("confirm_other_receives_after_tax"), "{AMOUNT}", String.format("%.2f", yourMoney * (1 - taxRate))) : ""
             ));
         inventory.setItem(YOUR_MONEY_SLOT, yourMoneyItem);
         
         ItemStack theirMoneyItem = createItem(Material.GOLD_INGOT,
-            ChatColor.GOLD + "对方给出的金币",
+            text(tradeService.i18n("confirm_their_money")),
             Arrays.asList(
-                ChatColor.WHITE + "金额: " + ChatColor.YELLOW + String.format("%.2f", theirMoney),
-                taxRate > 0 ? ChatColor.GREEN + "你将收到: " + String.format("%.2f", theirMoney * (1 - taxRate)) : ""
+                filled(tradeService.i18n("confirm_amount"), "{AMOUNT}", String.format("%.2f", theirMoney)),
+                taxRate > 0 ? filled(tradeService.i18n("confirm_you_receive_amount"), "{AMOUNT}", String.format("%.2f", theirMoney * (1 - taxRate))) : ""
             ));
         inventory.setItem(THEIR_MONEY_SLOT, theirMoneyItem);
         
         // Exp display
         ItemStack yourExpItem = createItem(Material.EXPERIENCE_BOTTLE,
-            ChatColor.GREEN + "你给出的经验",
+            text(tradeService.i18n("confirm_your_exp")),
             Arrays.asList(
-                ChatColor.WHITE + "经验: " + ChatColor.GREEN + yourExp,
-                expTaxRate > 0 ? ChatColor.RED + "税后对方收到: " + (int)(yourExp * (1 - expTaxRate)) : ""
+                filled(tradeService.i18n("confirm_exp_amount"), "{AMOUNT}", String.valueOf(yourExp)),
+                expTaxRate > 0 ? filled(tradeService.i18n("confirm_other_receives_after_tax"), "{AMOUNT}", String.valueOf((int) (yourExp * (1 - expTaxRate)))) : ""
             ));
         inventory.setItem(YOUR_EXP_SLOT, yourExpItem);
         
         ItemStack theirExpItem = createItem(Material.EXPERIENCE_BOTTLE,
-            ChatColor.GREEN + "对方给出的经验",
+            text(tradeService.i18n("confirm_their_exp")),
             Arrays.asList(
-                ChatColor.WHITE + "经验: " + ChatColor.GREEN + theirExp,
-                expTaxRate > 0 ? ChatColor.GREEN + "你将收到: " + (int)(theirExp * (1 - expTaxRate)) : ""
+                filled(tradeService.i18n("confirm_exp_amount"), "{AMOUNT}", String.valueOf(theirExp)),
+                expTaxRate > 0 ? filled(tradeService.i18n("confirm_you_receive_amount"), "{AMOUNT}", String.valueOf((int) (theirExp * (1 - expTaxRate)))) : ""
             ));
         inventory.setItem(THEIR_EXP_SLOT, theirExpItem);
         
         // Confirm button
         ItemStack confirmBtn = createItem(Material.LIME_CONCRETE,
-            ChatColor.GREEN + "✔ 确认交易",
+            text(tradeService.i18n("confirm_button")),
             Arrays.asList(
-                ChatColor.GRAY + "点击确认此交易",
+                text(tradeService.i18n("confirm_button_lore")),
                 "",
-                ChatColor.YELLOW + "确认后交易将立即完成！"
+                text(tradeService.i18n("confirm_button_warning"))
             ));
         inventory.setItem(CONFIRM_SLOT, confirmBtn);
         
         // Cancel button
         ItemStack cancelBtn = createItem(Material.RED_CONCRETE,
-            ChatColor.RED + "✖ 取消",
+            text(tradeService.i18n("confirm_back_button")),
             Arrays.asList(
-                ChatColor.GRAY + "点击返回交易界面",
+                text(tradeService.i18n("confirm_back_lore")),
                 "",
-                ChatColor.YELLOW + "不会取消交易"
+                text(tradeService.i18n("confirm_back_note"))
             ));
         inventory.setItem(CANCEL_SLOT, cancelBtn);
     }
@@ -191,7 +192,7 @@ public class TradeConfirmPage implements InventoryHolder {
                 if (meta != null) {
                     List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
                     lore.add("");
-                    lore.add(ChatColor.DARK_GRAY + "---交易物品---");
+                    lore.add(text(tradeService.i18n("confirm_item_marker")));
                     item.setItemMeta(meta);
                 }
                 inventory.setItem(startSlot + i, item);
@@ -204,8 +205,8 @@ public class TradeConfirmPage implements InventoryHolder {
         // If more than 3 items, show count
         if (itemList.size() > displaySlots) {
             ItemStack moreItem = createItem(Material.CHEST,
-                ChatColor.YELLOW + "还有 " + (itemList.size() - displaySlots) + " 个物品...",
-                Arrays.asList(ChatColor.GRAY + "打开交易窗口查看所有物品"));
+                filled(tradeService.i18n("confirm_more_items"), "{COUNT}", String.valueOf(itemList.size() - displaySlots)),
+                Arrays.asList(text(tradeService.i18n("confirm_more_items_lore"))));
             inventory.setItem(startSlot + displaySlots - 1, moreItem);
         }
     }
@@ -276,5 +277,15 @@ public class TradeConfirmPage implements InventoryHolder {
     
     public Player getViewer() {
         return viewer;
+    }
+
+    /** The language file's text, {@code &} colour codes applied. */
+    private static String text(String languageText) {
+        return ChatColor.translateAlternateColorCodes('&', languageText);
+    }
+
+    /** A line from the language file with one placeholder filled, colour codes applied. */
+    private static String filled(String languageText, String placeholder, String value) {
+        return text(languageText.replace(placeholder, value));
     }
 }

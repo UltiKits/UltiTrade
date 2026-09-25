@@ -1,6 +1,7 @@
 package com.ultikits.plugins.trade.config;
 
 import com.ultikits.ultitools.abstracts.AbstractConfigEntity;
+import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.ConfigEntity;
 import com.ultikits.ultitools.annotations.ConfigEntry;
 import com.ultikits.ultitools.annotations.config.NotEmpty;
@@ -96,41 +97,206 @@ public class TradeConfig extends AbstractConfigEntity {
     
     // ==================== GUI Settings ====================
 
-    @NotEmpty
-    @ConfigEntry(path = "gui-title", comment = "交易界面标题")
-    private String guiTitle = "&6与 {PLAYER} 交易";
+    @ConfigEntry(path = "gui-title", comment = "交易界面标题（留空：使用语言文件中的文本）")
+    private String guiTitle = "";
     
     // ==================== Messages ====================
 
-    @NotEmpty
-    @ConfigEntry(path = "messages.request-sent", comment = "发送交易请求")
-    private String requestSentMessage = "&a已向 &f{PLAYER} &a发送交易请求！";
+    @ConfigEntry(path = "messages.request-sent", comment = "发送交易请求（留空：使用语言文件中的文本）")
+    private String requestSentMessage = "";
 
-    @NotEmpty
-    @ConfigEntry(path = "messages.request-received", comment = "收到交易请求")
-    private String requestReceivedMessage = "&e{PLAYER} &f请求与你交易！输入 /trade accept 接受";
+    @ConfigEntry(path = "messages.request-received", comment = "收到交易请求（留空：使用语言文件中的文本）")
+    private String requestReceivedMessage = "";
 
-    @NotEmpty
-    @ConfigEntry(path = "messages.request-timeout", comment = "请求超时")
-    private String requestTimeoutMessage = "&c交易请求已超时！";
+    @ConfigEntry(path = "messages.request-timeout", comment = "请求超时（留空：使用语言文件中的文本）")
+    private String requestTimeoutMessage = "";
 
-    @NotEmpty
-    @ConfigEntry(path = "messages.trade-complete", comment = "交易完成")
-    private String tradeCompleteMessage = "&a交易完成！";
+    @ConfigEntry(path = "messages.trade-complete", comment = "交易完成（留空：使用语言文件中的文本）")
+    private String tradeCompleteMessage = "";
 
-    @NotEmpty
-    @ConfigEntry(path = "messages.trade-cancelled", comment = "交易取消")
-    private String tradeCancelledMessage = "&c交易已取消！";
+    @ConfigEntry(path = "messages.trade-cancelled", comment = "交易取消（留空：使用语言文件中的文本）")
+    private String tradeCancelledMessage = "";
 
-    @NotEmpty
-    @ConfigEntry(path = "messages.trade-disabled", comment = "交易已关闭")
-    private String tradeDisabledMessage = "&c对方已关闭交易功能！";
+    @ConfigEntry(path = "messages.trade-disabled", comment = "交易已关闭（留空：使用语言文件中的文本）")
+    private String tradeDisabledMessage = "";
 
-    @NotEmpty
-    @ConfigEntry(path = "messages.player-blocked", comment = "被拉黑")
-    private String playerBlockedMessage = "&c对方已将你加入黑名单！";
+    @ConfigEntry(path = "messages.player-blocked", comment = "被拉黑（留空：使用语言文件中的文本）")
+    private String playerBlockedMessage = "";
     
+    // ==================== Text defaults an earlier version shipped ====================
+    // The trade-window title and every message below used to ship a fixed Chinese default. Each now
+    // defaults to blank and reads the language file's text, in the server's language, while it stays
+    // blank (maintainer ruling 2026-09-24 (d), UltiKits/UltiTrade#16). These are the old values, one
+    // per setting across this module's history, kept only so migrateLegacyDefaults() can recognise
+    // them in an upgraded operator's file.
+
+    /** The default every earlier version shipped for {@code gui-title}; compared, never shown. */
+    static final String SHIPPED_GUI_TITLE = "&6与 {PLAYER} 交易";
+
+    /** The default every earlier version shipped for {@code messages.request-sent}; compared, never shown. */
+    static final String SHIPPED_REQUEST_SENT_MESSAGE = "&a已向 &f{PLAYER} &a发送交易请求！";
+
+    /** The default every earlier version shipped for {@code messages.request-received}; compared, never shown. */
+    static final String SHIPPED_REQUEST_RECEIVED_MESSAGE = "&e{PLAYER} &f请求与你交易！输入 /trade accept 接受";
+
+    /** The default every earlier version shipped for {@code messages.request-timeout}; compared, never shown. */
+    static final String SHIPPED_REQUEST_TIMEOUT_MESSAGE = "&c交易请求已超时！";
+
+    /** The default every earlier version shipped for {@code messages.trade-complete}; compared, never shown. */
+    static final String SHIPPED_TRADE_COMPLETE_MESSAGE = "&a交易完成！";
+
+    /** The default every earlier version shipped for {@code messages.trade-cancelled}; compared, never shown. */
+    static final String SHIPPED_TRADE_CANCELLED_MESSAGE = "&c交易已取消！";
+
+    /** The default every earlier version shipped for {@code messages.trade-disabled}; compared, never shown. */
+    static final String SHIPPED_TRADE_DISABLED_MESSAGE = "&c对方已关闭交易功能！";
+
+    /** The default every earlier version shipped for {@code messages.player-blocked}; compared, never shown. */
+    static final String SHIPPED_PLAYER_BLOCKED_MESSAGE = "&c对方已将你加入黑名单！";
+
     public TradeConfig() {
         super(CONFIG_FILE);
+    }
+
+    /**
+     * {@code configured}, or {@code languageText} when {@code configured} is null, empty or only
+     * whitespace.
+     *
+     * @param configured   the value in {@code config/trade.yml}
+     * @param languageText the language file's text for the same setting
+     * @return the text to show
+     */
+    static String configuredOr(String configured, String languageText) {
+        return configured == null || configured.trim().isEmpty() ? languageText : configured;
+    }
+
+    /**
+     * The language file's text for {@code key}, in the server's language, read through the plugin
+     * this configuration was bound to at load. Before that binding there is no language to read, so
+     * the key itself is returned, as the framework renders a missing key.
+     *
+     * @param key the language-file key
+     * @return the text for the key
+     */
+    private String i18n(String key) {
+        UltiToolsPlugin plugin = getUltiToolsPlugin();
+        return plugin == null ? key : plugin.i18n(key);
+    }
+
+    /**
+     * {@code gui-title}, or the language file's {@code gui_title} text when left blank.
+     *
+     * @return the text to show
+     */
+    public String getGuiTitle() {
+        return configuredOr(guiTitle, i18n("gui_title"));
+    }
+
+    /**
+     * {@code messages.request-sent}, or the language file's {@code request_sent} text when left blank.
+     *
+     * @return the text to show
+     */
+    public String getRequestSentMessage() {
+        return configuredOr(requestSentMessage, i18n("request_sent"));
+    }
+
+    /**
+     * {@code messages.request-received}, or the language file's {@code request_received} text when left blank.
+     *
+     * @return the text to show
+     */
+    public String getRequestReceivedMessage() {
+        return configuredOr(requestReceivedMessage, i18n("request_received"));
+    }
+
+    /**
+     * {@code messages.request-timeout}, or the language file's {@code request_timeout} text when left blank.
+     *
+     * @return the text to show
+     */
+    public String getRequestTimeoutMessage() {
+        return configuredOr(requestTimeoutMessage, i18n("request_timeout"));
+    }
+
+    /**
+     * {@code messages.trade-complete}, or the language file's {@code trade_complete} text when left blank.
+     *
+     * @return the text to show
+     */
+    public String getTradeCompleteMessage() {
+        return configuredOr(tradeCompleteMessage, i18n("trade_complete"));
+    }
+
+    /**
+     * {@code messages.trade-cancelled}, or the language file's {@code trade_cancelled} text when left blank.
+     *
+     * @return the text to show
+     */
+    public String getTradeCancelledMessage() {
+        return configuredOr(tradeCancelledMessage, i18n("trade_cancelled"));
+    }
+
+    /**
+     * {@code messages.trade-disabled}, or the language file's {@code trade_disabled_target} text when left blank.
+     *
+     * @return the text to show
+     */
+    public String getTradeDisabledMessage() {
+        return configuredOr(tradeDisabledMessage, i18n("trade_disabled_target"));
+    }
+
+    /**
+     * {@code messages.player-blocked}, or the language file's {@code player_blocked} text when left blank.
+     *
+     * @return the text to show
+     */
+    public String getPlayerBlockedMessage() {
+        return configuredOr(playerBlockedMessage, i18n("player_blocked"));
+    }
+
+    /**
+     * Rewrites the trade-window title and every message that still holds the default an earlier
+     * version shipped to blank, so the language file's text takes over; any other value is the
+     * operator's and is kept. Idempotent: a blank value matches no shipped default. The caller saves
+     * the file when this returns true (maintainer ruling 2026-09-24 (d)).
+     *
+     * @return whether any value was rewritten
+     */
+    public boolean migrateLegacyDefaults() {
+        boolean changed = false;
+        if (SHIPPED_GUI_TITLE.equals(guiTitle)) {
+            guiTitle = "";
+            changed = true;
+        }
+        if (SHIPPED_REQUEST_SENT_MESSAGE.equals(requestSentMessage)) {
+            requestSentMessage = "";
+            changed = true;
+        }
+        if (SHIPPED_REQUEST_RECEIVED_MESSAGE.equals(requestReceivedMessage)) {
+            requestReceivedMessage = "";
+            changed = true;
+        }
+        if (SHIPPED_REQUEST_TIMEOUT_MESSAGE.equals(requestTimeoutMessage)) {
+            requestTimeoutMessage = "";
+            changed = true;
+        }
+        if (SHIPPED_TRADE_COMPLETE_MESSAGE.equals(tradeCompleteMessage)) {
+            tradeCompleteMessage = "";
+            changed = true;
+        }
+        if (SHIPPED_TRADE_CANCELLED_MESSAGE.equals(tradeCancelledMessage)) {
+            tradeCancelledMessage = "";
+            changed = true;
+        }
+        if (SHIPPED_TRADE_DISABLED_MESSAGE.equals(tradeDisabledMessage)) {
+            tradeDisabledMessage = "";
+            changed = true;
+        }
+        if (SHIPPED_PLAYER_BLOCKED_MESSAGE.equals(playerBlockedMessage)) {
+            playerBlockedMessage = "";
+            changed = true;
+        }
+        return changed;
     }
 }

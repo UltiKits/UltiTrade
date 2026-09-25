@@ -7,6 +7,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Consumer;
 
+import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
+
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
 
@@ -28,24 +30,23 @@ import org.bukkit.configuration.file.YamlConfiguration;
 public final class RemovedConfigKeys {
 
     /**
-     * Every key removed from {@code config/trade.yml}, mapped to what an operator should be told about
-     * it. Insertion order is the order the warnings are emitted in.
+     * Every key removed from {@code config/trade.yml}, mapped to the language-file entry that now
+     * carries the reply it described, or to {@code null} when nothing replaces it. Insertion order is
+     * the order the warnings are emitted in. The guidance text itself lives in the language file, so it
+     * follows the server's language setting (UltiKits/UltiTrade#16); {@link #reasonFor} is what reads
+     * it.
      */
     private static final Map<String, String> REMOVED;
 
     static {
         Map<String, String> removed = new LinkedHashMap<String, String>();
-        removed.put("trade-timeout",
-                "It never took effect: an open trade window has no time limit, and nothing replaces "
-                        + "the setting. A pending trade request still expires after 'request-timeout', "
-                        + "which is unchanged. A time limit for an open trade window is feature request "
-                        + "UltiKits/UltiTrade#41 (UltiKits/UltiTrade#18).");
-        removed.put("messages.toggle-on", movedToCatalogue("trade_toggle_on"));
-        removed.put("messages.toggle-off", movedToCatalogue("trade_toggle_off"));
-        removed.put("messages.block-success", movedToCatalogue("block_success"));
-        removed.put("messages.unblock-success", movedToCatalogue("unblock_success"));
-        removed.put("messages.already-blocked", movedToCatalogue("already_blocked"));
-        removed.put("messages.not-blocked", movedToCatalogue("not_blocked"));
+        removed.put("trade-timeout", null);
+        removed.put("messages.toggle-on", "trade_toggle_on");
+        removed.put("messages.toggle-off", "trade_toggle_off");
+        removed.put("messages.block-success", "block_success");
+        removed.put("messages.unblock-success", "unblock_success");
+        removed.put("messages.already-blocked", "already_blocked");
+        removed.put("messages.not-blocked", "not_blocked");
         REMOVED = Collections.unmodifiableMap(removed);
     }
 
@@ -53,17 +54,32 @@ public final class RemovedConfigKeys {
         // Utility class
     }
 
-    private static String movedToCatalogue(String catalogueKey) {
-        return "Its value was never shown to players. The reply it described now comes from the '"
-                + catalogueKey + "' entry of this module's language file (lang/<language>.yml, in the "
-                + "same module folder as config/trade.yml), so it follows the server's language "
-                + "setting; edit it there (UltiKits/UltiTrade#17).";
+    /**
+     * The guidance printed for {@code removedKey}, in the server's language. Every removed key has its
+     * own case, so a key added to {@link #REMOVED} without guidance fails loudly rather than printing
+     * someone else's.
+     */
+    private static String reasonFor(String removedKey, UltiToolsPlugin plugin) {
+        switch (removedKey) {
+            case "trade-timeout":
+                return plugin.i18n("removed_key_reason_trade_timeout");
+            case "messages.toggle-on":
+            case "messages.toggle-off":
+            case "messages.block-success":
+            case "messages.unblock-success":
+            case "messages.already-blocked":
+            case "messages.not-blocked":
+                return plugin.i18n("removed_key_reason_moved").replace("{ENTRY}", REMOVED.get(removedKey));
+            default:
+                throw new IllegalStateException("No guidance for removed key " + removedKey);
+        }
     }
 
     /**
      * The keys this class knows about, in the order it reports them.
      *
-     * @return an unmodifiable map of removed key path to the guidance printed for it
+     * @return an unmodifiable map of removed key path to the language-file entry that now carries its
+     *         reply, or {@code null} when nothing replaces it
      */
     public static Map<String, String> removedKeys() {
         return REMOVED;
@@ -84,8 +100,9 @@ public final class RemovedConfigKeys {
      *
      * @param configFile the operator's {@code config/trade.yml}; may be {@code null}
      * @param warn       where to send each warning, normally the module logger's warn method
+     * @param plugin     the module, whose language file supplies the warning's text
      */
-    public static void warnAboutLeftovers(File configFile, Consumer<String> warn) {
+    public static void warnAboutLeftovers(File configFile, Consumer<String> warn, UltiToolsPlugin plugin) {
         if (configFile == null || !configFile.isFile()) {
             return;
         }
@@ -99,10 +116,10 @@ public final class RemovedConfigKeys {
             if (yaml.contains(entry.getKey())) {
                 // No "[UltiTrade]" prefix: the module logger adds that itself, and the module is
                 // still named in the sentence for any consumer that does not.
-                warn.accept(configFile.getPath() + " still contains '"
-                        + entry.getKey() + "', which this version of UltiTrade no longer reads. "
-                        + entry.getValue()
-                        + " Delete the key from the file to silence this warning.");
+                warn.accept(plugin.i18n("removed_key_warning")
+                        .replace("{FILE}", configFile.getPath())
+                        .replace("{KEY}", entry.getKey())
+                        .replace("{REASON}", reasonFor(entry.getKey(), plugin)));
             }
         }
     }
