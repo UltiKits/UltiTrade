@@ -1,5 +1,8 @@
 package com.ultikits.plugins.trade.config;
 
+import com.ultikits.plugins.trade.i18n.CatalogueText;
+import com.ultikits.plugins.trade.i18n.TradeSeams;
+import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.ConfigEntry;
 
 import org.junit.jupiter.api.DisplayName;
@@ -30,6 +33,20 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @DisplayName("RemovedConfigKeys (UltiKits/UltiTrade#17, #18)")
 class RemovedConfigKeysTest {
+
+    /**
+     * The module, answering {@code i18n} from its English catalogue: the assertions below quote the
+     * English guidance an operator reads under {@code language: en} (UltiKits/UltiTrade#16).
+     */
+    private static final UltiToolsPlugin ENGLISH = englishPlugin();
+
+    private static UltiToolsPlugin englishPlugin() {
+        UltiToolsPlugin plugin = org.mockito.Mockito.mock(UltiToolsPlugin.class);
+        org.mockito.Mockito.when(plugin.i18n(org.mockito.ArgumentMatchers.anyString()))
+                .thenAnswer(CatalogueText.answer("en"));
+        return plugin;
+    }
+
 
     /**
      * The shape the framework wrote on the shared UAT server before this change: the seven removed
@@ -72,7 +89,7 @@ class RemovedConfigKeysTest {
         File file = write(dir, FILE_WITH_EVERY_REMOVED_KEY);
         List<String> warnings = new ArrayList<>();
 
-        RemovedConfigKeys.warnAboutLeftovers(file, warnings::add);
+        TradeSeams.warnAboutLeftovers(file, warnings::add, ENGLISH);
 
         assertThat(warnings).hasSize(7);
         List<String> keys = new ArrayList<>(RemovedConfigKeys.removedKeys().keySet());
@@ -104,7 +121,7 @@ class RemovedConfigKeysTest {
         File file = write(dir, body);
         List<String> warnings = new ArrayList<>();
 
-        RemovedConfigKeys.warnAboutLeftovers(file, warnings::add);
+        TradeSeams.warnAboutLeftovers(file, warnings::add, ENGLISH);
 
         assertThat(warnings).hasSize(1);
         assertThat(warnings.get(0))
@@ -125,7 +142,7 @@ class RemovedConfigKeysTest {
         File file = write(dir, "messages:\n  toggle-on: ''\n");
         List<String> warnings = new ArrayList<>();
 
-        RemovedConfigKeys.warnAboutLeftovers(file, warnings::add);
+        TradeSeams.warnAboutLeftovers(file, warnings::add, ENGLISH);
 
         assertThat(warnings).hasSize(1);
     }
@@ -136,7 +153,7 @@ class RemovedConfigKeysTest {
         File file = write(dir, FILE_WITHOUT_ANY_REMOVED_KEY);
         List<String> warnings = new ArrayList<>();
 
-        RemovedConfigKeys.warnAboutLeftovers(file, warnings::add);
+        TradeSeams.warnAboutLeftovers(file, warnings::add, ENGLISH);
 
         assertThat(warnings).isEmpty();
     }
@@ -146,9 +163,9 @@ class RemovedConfigKeysTest {
     void silentWithoutAReadableFile(@TempDir File dir) throws IOException {
         List<String> warnings = new ArrayList<>();
 
-        RemovedConfigKeys.warnAboutLeftovers(new File(dir, "absent.yml"), warnings::add);
-        RemovedConfigKeys.warnAboutLeftovers(null, warnings::add);
-        RemovedConfigKeys.warnAboutLeftovers(write(dir, "trade-timeout: [unclosed\n"), warnings::add);
+        TradeSeams.warnAboutLeftovers(new File(dir, "absent.yml"), warnings::add, ENGLISH);
+        TradeSeams.warnAboutLeftovers(null, warnings::add, ENGLISH);
+        TradeSeams.warnAboutLeftovers(write(dir, "trade-timeout: [unclosed\n"), warnings::add, ENGLISH);
 
         assertThat(warnings).isEmpty();
     }
