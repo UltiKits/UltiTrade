@@ -147,7 +147,10 @@ repository name — calls that module's `unregisterSelf()` on the running server
 the module's jar** from `plugins/UltiTools/plugins/` (the file whose `plugin.yml` `name:` matches),
 even though its own chat reply tells the operator to delete the local file manually
 (`PluginInstallUtils#uninstallPlugin` in the framework repository). The row's cleanup therefore
-restores the jar from a copy taken beforehand.
+restores the jar from a copy taken beforehand. `ultitrade.lifecycle.legacy-text-defaults`,
+`ultitrade.config.trade.materialize-fresh` and `ultitrade.config.trade.materialize-switch` exercise the title
+and messages written into `trade.yml` in the server's language: on an upgraded file, on a fresh file, and across
+a `language` switch (the last two run back to back, the second continuing from the first's state).
 
 `/ul reload <name>` calls that module's `reloadSelf()`, which as of 6.3.0 re-reads the module's
 config files into the running beans before logging the framework's own line `Module '<name>'
