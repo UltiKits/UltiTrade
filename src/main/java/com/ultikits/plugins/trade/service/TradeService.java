@@ -1063,9 +1063,10 @@ public class TradeService {
                 plugin.getLogger().info(i18n("log_pending_return_redeliver")
                         .replace("{PLAYER}", player.getName())
                         .replace("{ID}", String.valueOf(entry.getId())));
-                entry.setDeliveryToken(null);
-                entry.setAfterDelivery(null);
-                pendingReturns.update(entry);
+                PendingStakeReturn unmarked = copyOf(entry);
+                unmarked.setDeliveryToken(null);
+                unmarked.setAfterDelivery(null);
+                write(entry, unmarked);
             }
             return true;
         } catch (RuntimeException | IllegalAccessException e) {
@@ -1108,10 +1109,11 @@ public class TradeService {
         }
         // Step 1: mark. On failure nothing may stay handed over, so the in-memory hand-over is undone.
         String token = UUID.randomUUID().toString();
-        entry.setDeliveryToken(token);
-        entry.setAfterDelivery(remaining.isEmpty() ? "" : serializeStacks(remaining));
+        PendingStakeReturn marked = copyOf(entry);
+        marked.setDeliveryToken(token);
+        marked.setAfterDelivery(remaining.isEmpty() ? "" : serializeStacks(remaining));
         try {
-            pendingReturns.update(entry);
+            write(entry, marked);
         } catch (RuntimeException | IllegalAccessException e) {
             player.getInventory().removeItem(given.toArray(new ItemStack[0]));
             plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
@@ -1176,11 +1178,37 @@ public class TradeService {
             entry.setId(null);
             return;
         }
-        entry.setItems(after);
-        entry.setStackCount(deserializeStacks(after).size());
-        entry.setDeliveryToken(null);
-        entry.setAfterDelivery(null);
-        pendingReturns.update(entry);
+        PendingStakeReturn completed = copyOf(entry);
+        completed.setItems(after);
+        completed.setStackCount(deserializeStacks(after).size());
+        completed.setDeliveryToken(null);
+        completed.setAfterDelivery(null);
+        write(entry, completed);
+    }
+
+    /**
+     * Write {@code next} over the stored entry, and only once that write committed, make {@code entry}
+     * (the in-memory copy the rest of the join reads, marker pruning included) say the same. A failed
+     * write leaves {@code entry} as the table still holds it (Codex review on #45).
+     */
+    private void write(PendingStakeReturn entry, PendingStakeReturn next) throws IllegalAccessException {
+        pendingReturns.update(next);
+        entry.setItems(next.getItems());
+        entry.setStackCount(next.getStackCount());
+        entry.setDeliveryToken(next.getDeliveryToken());
+        entry.setAfterDelivery(next.getAfterDelivery());
+    }
+
+    private static PendingStakeReturn copyOf(PendingStakeReturn entry) {
+        PendingStakeReturn copy = new PendingStakeReturn();
+        copy.setId(entry.getId());
+        copy.setOwnerUuid(entry.getOwnerUuid());
+        copy.setItems(entry.getItems());
+        copy.setStackCount(entry.getStackCount());
+        copy.setCreatedAt(entry.getCreatedAt());
+        copy.setDeliveryToken(entry.getDeliveryToken());
+        copy.setAfterDelivery(entry.getAfterDelivery());
+        return copy;
     }
 
     private static int amount(List<ItemStack> stacks) {
