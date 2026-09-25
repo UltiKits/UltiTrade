@@ -180,6 +180,21 @@ class TradePendingReturnTest {
     }
 
     @Test
+    @DisplayName("The first participant's stake is kept the same way when they are the one the server cannot find")
+    void firstParticipantStakeIsKeptToo() throws Exception {
+        TradeSession session = new TradeSession(away, present);
+        session.setItem(away.getUniqueId(), 0, new ItemStack(Material.DIAMOND, 10));
+        session.setItem(present.getUniqueId(), 0, new ItemStack(Material.EMERALD, 4));
+        Map<UUID, TradeSession> active = UltiTradeTestHelper.getField(service, "activeSessions");
+        active.put(session.getSessionId(), session);
+
+        service.cancelTrade(session, "test");
+
+        assertThat(count(present, Material.EMERALD)).isEqualTo(4);
+        assertThat(savedStacksOf(away)).containsExactly(new ItemStack(Material.DIAMOND, 10));
+    }
+
+    @Test
     @DisplayName("Cancelling moves no money and no experience")
     void cancellingMovesNoMoneyOrExperience() throws Exception {
         present.setTotalExperience(100);
