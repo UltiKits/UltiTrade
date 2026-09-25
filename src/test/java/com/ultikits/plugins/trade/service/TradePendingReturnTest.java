@@ -214,62 +214,6 @@ class TradePendingReturnTest {
     }
 
     @Test
-    @DisplayName("The next join hands the stake over, metadata intact, and empties the list; a second join delivers nothing")
-    void joinDeliversOnceWithMetadata() throws Exception {
-        service.completeTrade(sessionWithStakes());
-        server.addPlayer(away);
-
-        service.deliverPendingReturns(away);
-
-        assertThat(count(away, Material.DIAMOND)).isEqualTo(10);
-        ItemStack sword = away.getInventory().getItem(away.getInventory().first(Material.DIAMOND_SWORD));
-        assertThat(sword).as("name, lore and enchantment survive the round trip").isEqualTo(namedSword());
-        assertThat(store.rowsOf(away.getUniqueId())).as("the list is empty afterwards").isEmpty();
-        assertThat(away.nextMessage()).contains("returned to you");
-
-        service.deliverPendingReturns(away);
-
-        assertThat(count(away, Material.DIAMOND)).as("a second join delivers nothing").isEqualTo(10);
-        assertThat(away.getInventory().all(Material.DIAMOND_SWORD)).hasSize(1);
-    }
-
-    @Test
-    @DisplayName("The join listener hands the stake over")
-    void joinListenerDelivers() throws Exception {
-        service.completeTrade(sessionWithStakes());
-        server.addPlayer(away);
-        TradeListener listener = new TradeListener();
-        UltiTradeTestHelper.setField(listener, "tradeService", service);
-
-        listener.onPlayerJoin(new PlayerJoinEvent(away, "joined"));
-
-        assertThat(count(away, Material.DIAMOND)).isEqualTo(10);
-        assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
-    }
-
-    @Test
-    @DisplayName("A full inventory at join: what does not fit is dropped at the player's feet, not destroyed")
-    void fullInventoryDropsAtFeet() throws Exception {
-        service.completeTrade(sessionWithStakes());
-        server.addPlayer(away);
-        // Every slot, not only the 36 storage slots: MockBukkit's addItem also fills armour slots.
-        for (int i = 0; i < away.getInventory().getSize(); i++) {
-            away.getInventory().setItem(i, new ItemStack(Material.DIRT, 64));
-        }
-
-        service.deliverPendingReturns(away);
-
-        int dropped = 0;
-        for (Item item : away.getWorld().getEntitiesByClass(Item.class)) {
-            if (item.getItemStack().getType() == Material.DIAMOND) {
-                dropped += item.getItemStack().getAmount();
-            }
-        }
-        assertThat(dropped).as("the diamonds lie at the player's feet").isEqualTo(10);
-        assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
-    }
-
-    @Test
     @DisplayName("A failed save drops the stake in the world and logs an error naming player and items")
     void failedSaveDropsAndLogs() throws Exception {
         store.failInsert = true;
@@ -357,46 +301,312 @@ class TradePendingReturnTest {
         assertThat(store.rowsOf(away.getUniqueId())).hasSize(1);
     }
 
-    @Test
-    @DisplayName("After a delivery the player's data is saved at once, holding the stake (Codex P1 on #45)")
-    void deliveryIsMadeDurableAtOnce() throws Exception {
-        service.completeTrade(sessionWithStakes());
-        PlayerMock joined = org.mockito.Mockito.spy(away);
-        List<String> order = new ArrayList<>();
-        store.onDelete = () -> order.add("row removed");
+    // ==================== The join-time hand-over (maintainer answers 2026-09-24, amended 2026-09-25) ====================
+    //
+    // The hand-over touches two stores that cannot be committed together: the pending-returns table
+    // and the player's data file. The tests model the data file the way the server writes it: at
+    // Player#saveData the inventory and the persistent data are written together, and a crash rolls
+    // the player back to the last such write. A crash is a SimulatedCrash (an Error, so no catch in
+    // production code can mistake it for a storage failure) thrown from a store or save hook.
+
+    /** A process death at a chosen point; nothing after it runs. */
+    static final class SimulatedCrash extends Error {
+        private static final long serialVersionUID = 1L;
+    }
+
+    /** The player's data file as the server last wrote it. */
+    private ItemStack[] savedContents;
+    private String savedDeliveries;
+
+    private static final org.bukkit.NamespacedKey DELIVERIES =
+            org.bukkit.NamespacedKey.fromString("ultitrade:pending_return_deliveries");
+
+    private static String deliveriesOf(org.bukkit.entity.Player player) {
+        return player.getPersistentDataContainer().get(DELIVERIES, org.bukkit.persistence.PersistentDataType.STRING);
+    }
+
+    /** {@code player}, whose saveData writes the file above; the hooks run before and after the write. */
+    private PlayerMock saving(PlayerMock player, Runnable beforeSave, Runnable afterSave) {
+        PlayerMock spy = org.mockito.Mockito.spy(player);
         org.mockito.Mockito.doAnswer(inv -> {
-            // What the save writes: the inventory as it is at this moment.
-            order.add("player saved holding " + count(joined, Material.DIAMOND) + " diamonds");
+            beforeSave.run();
+            savedContents = copy(spy.getInventory().getContents());
+            savedDeliveries = deliveriesOf(spy);
+            afterSave.run();
             return null;
-        }).when(joined).saveData();
-        server.addPlayer(away);
+        }).when(spy).saveData();
+        return spy;
+    }
 
-        service.deliverPendingReturns(joined);
+    private PlayerMock saving(PlayerMock player) {
+        return saving(player, () -> { }, () -> { });
+    }
 
-        // The row is removed before anything is handed over (a failure cannot deliver twice), and the
-        // player's data is written straight after, with the stake in it, so a crash no longer rolls
-        // the delivery back to the last autosave after the only durable copy was deleted.
-        assertThat(order).containsExactly("row removed", "player saved holding 10 diamonds");
+    private static ItemStack[] copy(ItemStack[] contents) {
+        ItemStack[] out = new ItemStack[contents.length];
+        for (int i = 0; i < contents.length; i++) {
+            out[i] = contents[i] == null ? null : contents[i].clone();
+        }
+        return out;
+    }
+
+    private int count(ItemStack[] contents, Material material) {
+        int n = 0;
+        for (ItemStack item : contents) {
+            if (item != null && item.getType() == material) {
+                n += item.getAmount();
+            }
+        }
+        return n;
+    }
+
+    private int countListed(Material material, boolean deliveredPerSavedFile) {
+        int n = 0;
+        for (PendingStakeReturn row : store.rowsOf(away.getUniqueId())) {
+            boolean completed = row.getDeliveryToken() != null && savedDeliveries != null
+                    && savedDeliveries.contains(row.getDeliveryToken());
+            String effective = completed && deliveredPerSavedFile ? row.getAfterDelivery() : row.getItems();
+            if (effective == null || effective.isEmpty()) {
+                continue;
+            }
+            for (ItemStack item : TradeService.deserializeStacks(effective)) {
+                if (item.getType() == material) {
+                    n += item.getAmount();
+                }
+            }
+        }
+        return n;
+    }
+
+    /** Fill every slot but {@code free} with dirt (MockBukkit's addItem also fills armour slots). */
+    private void fillAllBut(PlayerMock player, int... free) {
+        java.util.Set<Integer> keep = new java.util.HashSet<>();
+        for (int f : free) {
+            keep.add(f);
+        }
+        for (int i = 0; i < player.getInventory().getSize(); i++) {
+            if (!keep.contains(i)) {
+                player.getInventory().setItem(i, new ItemStack(Material.DIRT, 64));
+            }
+        }
+    }
+
+    private int droppedInWorld(Material material) {
+        int n = 0;
+        for (Item item : world.getEntitiesByClass(Item.class)) {
+            if (item.getItemStack().getType() == material) {
+                n += item.getItemStack().getAmount();
+            }
+        }
+        return n;
     }
 
     @Test
-    @DisplayName("An entry that cannot be removed is not handed over, and is handed over once at the next join")
-    void removeFailureDeliversNothingThenOnce() throws Exception {
+    @DisplayName("The next join hands the stake over, metadata intact, and empties the list; a second join delivers nothing")
+    void joinDeliversOnceWithMetadata() throws Exception {
         service.completeTrade(sessionWithStakes());
         server.addPlayer(away);
-        store.failDelete = true;
+        PlayerMock joined = saving(away);
 
-        service.deliverPendingReturns(away);
+        service.deliverPendingReturns(joined);
 
-        assertThat(count(away, Material.DIAMOND)).as("nothing handed over while the entry stays").isZero();
-        assertThat(store.rowsOf(away.getUniqueId())).hasSize(1);
+        assertThat(count(joined, Material.DIAMOND)).isEqualTo(10);
+        ItemStack sword = joined.getInventory().getItem(joined.getInventory().first(Material.DIAMOND_SWORD));
+        assertThat(sword).as("name, lore and enchantment survive the round trip").isEqualTo(namedSword());
+        assertThat(store.rowsOf(away.getUniqueId())).as("the list is empty afterwards").isEmpty();
+        assertThat(away.nextMessage()).contains("returned to you");
+
+        service.deliverPendingReturns(joined);
+
+        assertThat(count(joined, Material.DIAMOND)).as("a second join delivers nothing").isEqualTo(10);
+        assertThat(joined.getInventory().all(Material.DIAMOND_SWORD)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("The join listener hands the stake over")
+    void joinListenerDelivers() throws Exception {
+        service.completeTrade(sessionWithStakes());
+        server.addPlayer(away);
+        PlayerMock joined = saving(away);
+        TradeListener listener = new TradeListener();
+        UltiTradeTestHelper.setField(listener, "tradeService", service);
+
+        listener.onPlayerJoin(new PlayerJoinEvent(joined, "joined"));
+
+        assertThat(count(joined, Material.DIAMOND)).isEqualTo(10);
+        assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("A full inventory: nothing is dropped, the whole stake stays in the list, the player is told (amended answer 2026-09-25)")
+    void fullInventoryKeepsTheStakeInTheList() throws Exception {
+        service.completeTrade(sessionWithStakes());
+        server.addPlayer(away);
+        fillAllBut(away);
+        PlayerMock joined = saving(away);
+
+        service.deliverPendingReturns(joined);
+
+        assertThat(droppedInWorld(Material.DIAMOND)).as("nothing is dropped").isZero();
+        assertThat(countListed(Material.DIAMOND, false)).as("the diamonds are still listed").isEqualTo(10);
+        assertThat(countListed(Material.DIAMOND_SWORD, false)).isEqualTo(1);
+        assertThat(away.nextMessage()).contains("11").contains("rejoin");
+    }
+
+    @Test
+    @DisplayName("Only what fits is handed over; the rest stays listed and arrives at a later join with space")
+    void partialDeliveryKeepsTheRest() throws Exception {
+        service.completeTrade(sessionWithStakes());
+        server.addPlayer(away);
+        fillAllBut(away, 5);
+        away.getInventory().setItem(5, new ItemStack(Material.DIAMOND, 60));
+        PlayerMock joined = saving(away);
+
+        service.deliverPendingReturns(joined);
+
+        assertThat(count(joined, Material.DIAMOND)).as("4 diamonds topped the stack up to 64").isEqualTo(64);
+        assertThat(droppedInWorld(Material.DIAMOND)).as("nothing is dropped").isZero();
+        assertThat(countListed(Material.DIAMOND, false)).as("6 diamonds stay listed").isEqualTo(6);
+        assertThat(countListed(Material.DIAMOND_SWORD, false)).isEqualTo(1);
+        assertThat(savedContents).as("the player was saved holding what was handed over").isNotNull();
+        assertThat(count(savedContents, Material.DIAMOND)).isEqualTo(64);
+        assertThat(away.nextMessage()).contains("7");
+
+        for (int i = 9; i < 20; i++) {
+            joined.getInventory().setItem(i, null);
+        }
+        service.deliverPendingReturns(joined);
+
+        assertThat(count(joined, Material.DIAMOND)).as("the rest arrived, once").isEqualTo(70);
+        assertThat(joined.getInventory().all(Material.DIAMOND_SWORD)).hasSize(1);
+        assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
+    }
+
+    /**
+     * A crash at each point of a partial hand-over: at the moment of the crash every diamond is either in
+     * the saved player file or in the list as the next join will read it, never both and never neither;
+     * and the join after the restart, with room, ends with exactly the stake.
+     */
+    @org.junit.jupiter.params.ParameterizedTest(name = "crash {0}")
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "before-mark", "after-mark", "before-save", "after-save", "before-complete", "after-complete"})
+    @DisplayName("A crash at any point leaves each item in exactly one place")
+    void crashAtAnyPointLeavesEachItemInExactlyOnePlace(String point) throws Exception {
+        service.completeTrade(sessionWithStakes());
+        server.addPlayer(away);
+        fillAllBut(away, 0);
+        ItemStack[] atJoin = copy(away.getInventory().getContents());
+        savedContents = atJoin;
+        savedDeliveries = null;
+        final int[] updates = {0};
+        Runnable crash = () -> {
+            throw new SimulatedCrash();
+        };
+        store.beforeUpdate = () -> {
+            updates[0]++;
+            if ((updates[0] == 1 && point.equals("before-mark")) || (updates[0] == 2 && point.equals("before-complete"))) {
+                crash.run();
+            }
+        };
+        store.afterUpdate = () -> {
+            if ((updates[0] == 1 && point.equals("after-mark")) || (updates[0] == 2 && point.equals("after-complete"))) {
+                crash.run();
+            }
+        };
+        PlayerMock joined = saving(away,
+                () -> { if (point.equals("before-save")) crash.run(); },
+                () -> { if (point.equals("after-save")) crash.run(); });
+
+        try {
+            service.deliverPendingReturns(joined);
+        } catch (SimulatedCrash expected) {
+            // the process died here
+        }
+
+        // What survives: the table as committed and the player file as last written.
+        assertThat(count(savedContents, Material.DIAMOND) + countListed(Material.DIAMOND, true))
+                .as("every diamond is in the saved file or in the list, exactly once").isEqualTo(10);
+
+        store.beforeUpdate = () -> { };
+        store.afterUpdate = () -> { };
+        PlayerMock restarted = new PlayerMock(server, "Away", away.getUniqueId());
+        restarted.getInventory().setContents(copy(savedContents));
+        if (savedDeliveries != null) {
+            restarted.getPersistentDataContainer().set(DELIVERIES, org.bukkit.persistence.PersistentDataType.STRING, savedDeliveries);
+        }
+        for (int i = 1; i < 20; i++) {
+            restarted.getInventory().setItem(i, null);
+        }
+        PlayerMock rejoined = saving(restarted);
+
+        service.deliverPendingReturns(rejoined);
+
+        assertThat(count(rejoined, Material.DIAMOND)).as("after the restart the stake is handed over exactly once").isEqualTo(10);
+        assertThat(rejoined.getInventory().all(Material.DIAMOND_SWORD)).hasSize(1);
+        assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("A failing save of the player leaves the entry marked, and the next join settles it from the player's data")
+    void failedPlayerSaveIsSettledAtTheNextJoin() throws Exception {
+        service.completeTrade(sessionWithStakes());
+        server.addPlayer(away);
+        PlayerMock joined = org.mockito.Mockito.spy(away);
+        org.mockito.Mockito.doThrow(new IllegalStateException("disk full")).when(joined).saveData();
+
+        service.deliverPendingReturns(joined);
+
+        assertThat(count(joined, Material.DIAMOND)).as("handed over in memory").isEqualTo(10);
+        assertThat(store.rowsOf(away.getUniqueId())).as("the entry stays, marked, until the player file holds the stake")
+                .hasSize(1);
+
+        // The server writes the player's data later (autosave or quit); the next join then completes it.
+        PlayerMock later = saving(away);
+        service.deliverPendingReturns(later);
+
+        assertThat(count(later, Material.DIAMOND)).as("not handed over a second time").isEqualTo(10);
+        assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("An entry that cannot be marked is not handed over, and is handed over once at a later join")
+    void markFailureDeliversNothingThenOnce() throws Exception {
+        service.completeTrade(sessionWithStakes());
+        server.addPlayer(away);
+        PlayerMock joined = saving(away);
+        store.failUpdate = true;
+
+        service.deliverPendingReturns(joined);
+
+        assertThat(count(joined, Material.DIAMOND)).as("nothing handed over while the entry cannot be marked").isZero();
+        assertThat(countListed(Material.DIAMOND, false)).isEqualTo(10);
         verify(logger).error(any(Throwable.class), argThat((String s) -> s.contains("Away")));
 
-        store.failDelete = false;
-        service.deliverPendingReturns(away);
-        service.deliverPendingReturns(away);
+        store.failUpdate = false;
+        service.deliverPendingReturns(joined);
+        service.deliverPendingReturns(joined);
 
-        assertThat(count(away, Material.DIAMOND)).as("delivered exactly once").isEqualTo(10);
+        assertThat(count(joined, Material.DIAMOND)).as("delivered exactly once").isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("An entry that cannot be completed after the player was saved is completed at the next join, not handed over twice")
+    void completeFailureIsSettledWithoutDuplicating() throws Exception {
+        service.completeTrade(sessionWithStakes());
+        server.addPlayer(away);
+        PlayerMock joined = saving(away);
+        store.failDelete = true;
+
+        service.deliverPendingReturns(joined);
+
+        assertThat(count(joined, Material.DIAMOND)).isEqualTo(10);
+        assertThat(store.rowsOf(away.getUniqueId())).hasSize(1);
+
+        store.failDelete = false;
+        service.deliverPendingReturns(joined);
+
+        assertThat(count(joined, Material.DIAMOND)).as("not handed over twice").isEqualTo(10);
+        assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
     }
 
     @Test
@@ -408,10 +618,11 @@ class TradePendingReturnTest {
         broken.setItems("items: [");
         store.insert(broken);
         server.addPlayer(away);
+        PlayerMock joined = saving(away);
 
-        service.deliverPendingReturns(away);
+        service.deliverPendingReturns(joined);
 
-        assertThat(count(away, Material.DIAMOND)).isEqualTo(10);
+        assertThat(count(joined, Material.DIAMOND)).isEqualTo(10);
         assertThat(store.rowsOf(away.getUniqueId())).as("only the unreadable entry remains").containsExactly(broken);
         verify(logger).error(any(Throwable.class), argThat((String s) -> s.contains(broken.getId())));
     }
@@ -428,18 +639,36 @@ class TradePendingReturnTest {
     }
 
     /** Stores exactly what it is given; can be told to fail inserts or deletes. */
+    /**
+     * Stores copies of what it is given (a caller mutating its own object changes nothing stored until
+     * it writes again), like a database; can be told to fail, and runs hooks around updates.
+     */
     static final class InMemoryPendingReturns implements DataOperator<PendingStakeReturn> {
         final List<PendingStakeReturn> rows = new ArrayList<>();
         boolean failInsert;
         boolean failDelete;
-        Runnable onDelete = () -> { };
+        boolean failUpdate;
+        Runnable beforeUpdate = () -> { };
+        Runnable afterUpdate = () -> { };
         private int nextId = 1;
+
+        static PendingStakeReturn copyOf(PendingStakeReturn row) {
+            PendingStakeReturn c = new PendingStakeReturn();
+            c.setId(row.getId());
+            c.setOwnerUuid(row.getOwnerUuid());
+            c.setItems(row.getItems());
+            c.setStackCount(row.getStackCount());
+            c.setCreatedAt(row.getCreatedAt());
+            c.setDeliveryToken(row.getDeliveryToken());
+            c.setAfterDelivery(row.getAfterDelivery());
+            return c;
+        }
 
         List<PendingStakeReturn> rowsOf(UUID owner) {
             List<PendingStakeReturn> out = new ArrayList<>();
             for (PendingStakeReturn row : rows) {
                 if (owner.toString().equals(row.getOwnerUuid())) {
-                    out.add(row);
+                    out.add(copyOf(row));
                 }
             }
             return out;
@@ -451,12 +680,15 @@ class TradePendingReturnTest {
                 throw new IllegalStateException("simulated storage failure");
             }
             entity.setId(String.valueOf(nextId++));
-            rows.add(entity);
+            rows.add(copyOf(entity));
         }
 
         @Override
         public List<PendingStakeReturn> getAll(WhereCondition... conditions) {
-            List<PendingStakeReturn> out = new ArrayList<>(rows);
+            List<PendingStakeReturn> out = new ArrayList<>();
+            for (PendingStakeReturn row : rows) {
+                out.add(copyOf(row));
+            }
             for (WhereCondition c : conditions) {
                 if (!"owner_uuid".equals(c.getColumn())) {
                     throw new UnsupportedOperationException("unexpected column " + c.getColumn());
@@ -468,16 +700,31 @@ class TradePendingReturnTest {
 
         @Override
         public void delById(Object id) {
+            beforeUpdate.run();
             if (failDelete) {
                 throw new IllegalStateException("simulated delete failure");
             }
             rows.removeIf(row -> row.getId().equals(id));
-            onDelete.run();
+            afterUpdate.run();
+        }
+
+        @Override
+        public void update(PendingStakeReturn entity) {
+            beforeUpdate.run();
+            if (failUpdate) {
+                throw new IllegalStateException("simulated update failure");
+            }
+            for (int i = 0; i < rows.size(); i++) {
+                if (rows.get(i).getId().equals(entity.getId())) {
+                    rows.set(i, copyOf(entity));
+                }
+            }
+            afterUpdate.run();
         }
 
         @Override
         public List<PendingStakeReturn> getAll() {
-            return new ArrayList<>(rows);
+            return getAll(new WhereCondition[0]);
         }
 
         @Override
@@ -512,11 +759,6 @@ class TradePendingReturnTest {
 
         @Override
         public void update(String column, Object value, Object id) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public void update(PendingStakeReturn entity) {
             throw new UnsupportedOperationException();
         }
     }
