@@ -182,10 +182,10 @@
                         </goals>
                         <configuration>
                             <excludes>
-                                <!-- D-07: the GUI layer is verified by Phase 10's real-machine UAT
-                                     instead of by this gate. D-09: every class this removes is
-                                     enumerated in the phase-09 GUI exclusion register and must be
-                                     named by a Phase 10 assertion. Placed in the check goal's own
+                                <!-- The GUI layer is verified on a real server through
+                                     UAT-CHECKLIST.md instead of by this gate. Every class this
+                                     removes must be named in the Covers cell of at least one
+                                     UAT-CHECKLIST.md row. Placed in the check goal's own
                                      execution-scoped excludes, not rule/excludes, which is a
                                      structural no-op for a BUNDLE-element rule. -->
                                 <exclude>**/gui/**</exclude>

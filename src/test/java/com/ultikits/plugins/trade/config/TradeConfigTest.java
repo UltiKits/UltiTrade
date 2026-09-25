@@ -46,8 +46,8 @@ class TradeConfigTest {
     /**
      * UltiKits/UltiTrade#18. A pending trade request expires after {@code request-timeout}; an open
      * trade window has no elapsed-time expiry at all, so {@code trade-timeout} described a feature
-     * that does not exist. The maintainer's ruling (2026-09-22) removes the setting (feature request
-     * UltiKits/UltiTrade#41). The only timeout settings left are the request's own.
+     * that does not exist. The setting is therefore removed (feature request UltiKits/UltiTrade#41).
+     * The only timeout settings left are the request's own.
      */
     @Test
     @DisplayName("the only timeout settings declared are the trade request's (UltiKits/UltiTrade#18)")
@@ -65,8 +65,8 @@ class TradeConfigTest {
     /**
      * UltiKits/UltiTrade#17. Seven {@code messages.*} keys are read by the module; six more, for the
      * replies of {@code /trade toggle}, {@code /trade block} and {@code /trade unblock}, never were.
-     * The maintainer's ruling (2026-09-22) moves those replies into the language catalogue and
-     * removes the six keys, and says nothing about the seven that are read, so they stay.
+     * Those replies moved into the language catalogue and the six keys were removed; the seven that
+     * are read are unaffected, so they stay.
      */
     @Test
     @DisplayName("the message settings declared are exactly the seven the module reads (UltiKits/UltiTrade#17)")

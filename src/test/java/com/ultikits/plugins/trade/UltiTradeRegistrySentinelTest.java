@@ -19,8 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * bare registry constant resolve regardless of whether a live server was ever bootstrapped.
  * <p>
  * Every assertion below therefore depends on the <em>live server</em> path, not the
- * ServiceLoader-only path — see {@code 14-RESEARCH.md} Pitfall 2 and {@code 14-VALIDATION.md}'s
- * "Sentinel Design Constraint".
+ * ServiceLoader-only path — a ServiceLoader-only bootstrap would keep this sentinel green even
+ * with the live bootstrap deleted.
  * <p>
  * Deliberately bootstraps through {@link UltiTradeTestHelper#setUp()} — the module's one shared
  * test-time bootstrap entry point, used by every other test class in this suite — rather than

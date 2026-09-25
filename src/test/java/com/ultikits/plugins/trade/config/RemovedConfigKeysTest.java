@@ -84,7 +84,7 @@ class RemovedConfigKeysTest {
     }
 
     @Test
-    @DisplayName("under language: en the trade-timeout warning reads exactly as before the language sweep (gate-1 IN-03)")
+    @DisplayName("under language: en the trade-timeout warning reads exactly as before the language sweep")
     void englishWarningIsByteIdentical(@TempDir File dir) throws IOException {
         File file = write(dir, "trade-timeout: 120\n");
         List<String> warnings = new ArrayList<>();
