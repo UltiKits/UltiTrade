@@ -965,7 +965,9 @@ public class TradeService {
      * Each saved entry is read first, removed from the list second, and only then handed over
      * through {@link #giveOrDrop}, so an entry that cannot be removed is not handed over (it stays
      * for the next join) and nothing can be delivered twice. An entry that cannot be read is left in
-     * the list, untouched, and reported.
+     * the list, untouched, and reported. After a delivery the player's data is saved at once, so the
+     * stake does not depend on the next autosave once its row is gone; what did not fit and was
+     * dropped at the player's feet is kept as the world keeps any dropped item.
      *
      * @param player the player who joined
      */
@@ -1007,6 +1009,17 @@ public class TradeService {
             delivered += stacks.size();
         }
         if (delivered > 0) {
+            // The rows are gone for good the moment they are removed (SQLite and MySQL commit at once),
+            // while the inventory that now holds the stake is written only at the next player save; a
+            // crash in between would lose it. Write the player's data now, so that window is the few
+            // milliseconds of this method rather than the autosave interval (Codex review on #45).
+            try {
+                player.saveData();
+            } catch (RuntimeException e) {
+                plugin.getLogger().warn(e, i18n("log_pending_return_player_save_failed")
+                        .replace("{COUNT}", String.valueOf(delivered))
+                        .replace("{PLAYER}", player.getName()));
+            }
             player.sendMessage(text(i18n("message_pending_return_delivered")));
             plugin.getLogger().info(i18n("log_pending_return_delivered")
                     .replace("{PLAYER}", player.getName())

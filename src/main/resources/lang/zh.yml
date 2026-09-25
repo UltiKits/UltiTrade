@@ -178,6 +178,7 @@ log_pending_return_lookup_failed: "无法读取 {PLAYER} 已保存的交易押�
 log_pending_return_unreadable: "{PLAYER} 已保存的一笔交易押金（条目 {ID}）无法读取；已保留在列表中，未发还其中任何物品"
 log_pending_return_remove_failed: "无法从列表中移除 {PLAYER} 已保存的交易押金 {ID}，因此未发还；将在其下次进服时重试"
 log_pending_return_delivered: "已将已取消交易中押入的 {COUNT} 组物品归还给 {PLAYER}"
+log_pending_return_player_save_failed: "已将 {COUNT} 组押金物品归还给 {PLAYER}，但未能立即保存其玩家数据；服务器下次保存玩家数据后物品即被保留"
 message_pending_return_delivered: "&a你离线期间被取消的交易中押入的物品已归还给你。"
 log_vault_missing: "未找到 Vault！金币交易已禁用。"
 log_no_economy_provider: "没有注册任何 Vault 经济服务！金币交易已禁用。"

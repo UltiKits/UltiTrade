@@ -178,6 +178,7 @@ log_pending_return_lookup_failed: "Could not read the saved trade stakes of {PLA
 log_pending_return_unreadable: "A saved trade stake of {PLAYER} (entry {ID}) cannot be read; it was left in the list and nothing from it was handed over"
 log_pending_return_remove_failed: "Could not remove {PLAYER}'s saved trade stake {ID} from the list, so it was not handed over; it will be tried again at their next join"
 log_pending_return_delivered: "Returned {COUNT} staked stack(s) from cancelled trades to {PLAYER}"
+log_pending_return_player_save_failed: "Returned {COUNT} staked stack(s) to {PLAYER} but could not save their player data at once; the items are kept once the server next saves players"
 message_pending_return_delivered: "&aItems you staked in a trade that was cancelled while you were away have been returned to you."
 log_vault_missing: "Vault not found! Money trading disabled."
 log_no_economy_provider: "No Vault economy provider is registered! Money trading disabled."
