@@ -78,10 +78,11 @@ class UltiTradeLanguageCatalogueTest {
             //         "backup.reason.manual", "backup.reason.auto", "backup.reason.death",
             //         "backup.reason.quit", "backup.reason.admin", "backup.reason.unknown")
             new DynamicSite("src/main/java/com/ultikits/plugins/trade/UltiTrade.java",
-                    "::i18n",
-                    "UltiTrade#writeConfigTextInServerLanguage passes this::i18n to TradeConfig#materializeText, "
-                            + "which asks it for exactly the catalogue key of the window title and each of the seven messages "
-                            + "(maintainer decision 2026-09-25, config text written in the server's language)",
+                    "::getLocalizedText",
+                    "UltiTrade#writeConfigTextInServerLanguage passes the jar catalogue's getLocalizedText "
+                            + "(ConfigTextDefaults#jarLanguage) to TradeConfig#materializeText, which asks it for exactly the "
+                            + "catalogue key of the window title and each of the seven messages (maintainer decision 2026-09-25 and orchestrator "
+                            + "ruling O3: config text written in the server's language, from the module jar's own catalogue)",
                     "gui_title", "message_request_sent", "message_request_received", "request_timeout", "trade_complete", "trade_cancelled", "message_trade_disabled", "message_player_blocked")
     ));
 
