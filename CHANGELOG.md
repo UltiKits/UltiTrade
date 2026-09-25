@@ -76,6 +76,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- If a trade is cancelled while one participant cannot be found on the server, that participant's
+  staked items are kept and handed back when they next join, instead of being destroyed. They are
+  saved in a new table, `trade_pending_returns`; if they cannot be saved they are dropped at the
+  player's last known location, and the console names the player and the items in both cases
+  (UltiKits/UltiTrade#32).
+- 修复：交易取消时若服务器找不到一方，其押入的物品会被保存，并在其下次进服时发还，不再被销毁。物品保存在新表
+  `trade_pending_returns` 中；无法保存时掉落在该玩家最后所在的位置，两种情况下控制台都会写明玩家与物品
+  （UltiKits/UltiTrade#32）。
 - `language: en` now applies to everything this module shows or logs: every `/trade` reply and its
   help, the trade request (clickable buttons, their hover text and the countdown BossBar), the
   request, accept, deny and cancel replies and every cancellation reason, the trade window and the

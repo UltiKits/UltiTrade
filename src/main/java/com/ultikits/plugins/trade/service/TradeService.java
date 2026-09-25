@@ -1,6 +1,7 @@
 package com.ultikits.plugins.trade.service;
 
 import com.ultikits.plugins.trade.config.TradeConfig;
+import com.ultikits.plugins.trade.entity.PendingStakeReturn;
 import com.ultikits.plugins.trade.entity.TradeRequest;
 import com.ultikits.plugins.trade.entity.TradeSession;
 import com.ultikits.plugins.trade.gui.TradeConfirmPage;
@@ -9,6 +10,8 @@ import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.Autowired;
 import com.ultikits.ultitools.annotations.Scheduled;
 import com.ultikits.ultitools.annotations.Service;
+import com.ultikits.ultitools.entities.WhereCondition;
+import com.ultikits.ultitools.interfaces.DataOperator;
 
 import com.cryptomorin.xseries.particles.XParticle;
 import net.md_5.bungee.api.chat.ClickEvent;
@@ -20,6 +23,7 @@ import org.bukkit.*;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.InventoryView;
@@ -66,6 +70,10 @@ public class TradeService {
     // Bukkit plugin instance for scheduler tasks
     private Plugin bukkitPlugin;
 
+    // Stakes of cancelled trades whose owner could not be found, handed over at their next join
+    // (UltiKits/UltiTrade#32). Null until init() has run, which the save path treats as a failed save.
+    private DataOperator<PendingStakeReturn> pendingReturns;
+
     // Economy integration. Volatile: a reload replaces it on the main thread while the async chat
     // handler may read it; callers read it once per operation.
     private volatile Economy economy;
@@ -95,6 +103,9 @@ public class TradeService {
     public void init() {
         // Initialize Bukkit plugin reference for scheduler tasks
         this.bukkitPlugin = Bukkit.getPluginManager().getPlugin("UltiTools");
+
+        // Saved stakes of cancelled trades (UltiKits/UltiTrade#32)
+        this.pendingReturns = plugin.getDataOperator(PendingStakeReturn.class);
 
         // Setup economy
         if (config.isEnableMoneyTrade()) {
@@ -805,6 +816,10 @@ public class TradeService {
             }
             player1.sendMessage(ChatColor.translateAlternateColorCodes('&', msg));
             playFailEffects(player1);
+        } else {
+            // No inventory to hand the stake to: keep it for the owner's next join, before the
+            // session that is its only record is discarded (UltiKits/UltiTrade#32).
+            holdStakeForReturn(session.getPlayer1(), session.getPlayerItems(session.getPlayer1()).values());
         }
         
         if (player2 != null) {
@@ -820,6 +835,8 @@ public class TradeService {
             }
             player2.sendMessage(ChatColor.translateAlternateColorCodes('&', msg));
             playFailEffects(player2);
+        } else {
+            holdStakeForReturn(session.getPlayer2(), session.getPlayerItems(session.getPlayer2()).values());
         }
         
         session.setState(TradeSession.TradeState.CANCELLED);
@@ -872,6 +889,193 @@ public class TradeService {
         for (ItemStack drop : overflow.values()) {
             player.getWorld().dropItemNaturally(player.getLocation(), drop);
         }
+    }
+
+    // ==================== Stakes of an owner the server could not find (UltiKits/UltiTrade#32) ====================
+
+    /**
+     * Keep the stake of a trade participant the server cannot resolve, so it can be handed back when
+     * they next join.
+     * <p>
+     * A cancelled trade returns each side's stake into that side's inventory; a participant
+     * {@code Bukkit#getPlayer} cannot resolve has none, and the session is the stake's only record.
+     * The maintainer's decision of 2026-09-24: save it in a pending-returns list and hand it back at
+     * the owner's next join through {@link #giveOrDrop}; if the list cannot be saved, drop the items
+     * at the owner's last known location and log an error naming the player and the items.
+     * <p>
+     * Every cancel path reaches this through {@link #cancelTrade(TradeSession, String)}: the
+     * completion offline guard, {@link #shutdown()}, and a quit or {@code /trade cancel} whose other
+     * side is gone.
+     *
+     * @param owner the participant whose stake this is
+     * @param stake the stacks they staked; {@code null} and empty stacks are ignored
+     */
+    private void holdStakeForReturn(UUID owner, Collection<ItemStack> stake) {
+        List<ItemStack> stacks = new ArrayList<>();
+        for (ItemStack item : stake) {
+            if (item != null && !item.getType().isAir()) {
+                stacks.add(item.clone());
+            }
+        }
+        if (stacks.isEmpty()) {
+            return;
+        }
+        String ownerLabel = describeOwner(owner);
+        String summary = summarize(stacks);
+        try {
+            if (pendingReturns == null) {
+                throw new IllegalStateException("the pending-returns list is not available");
+            }
+            PendingStakeReturn entry = new PendingStakeReturn();
+            entry.setOwnerUuid(owner.toString());
+            entry.setItems(serializeStacks(stacks));
+            entry.setStackCount(stacks.size());
+            entry.setCreatedAt(System.currentTimeMillis());
+            pendingReturns.insert(entry);
+            if (plugin != null) {
+                plugin.getLogger().warn(i18n("log_pending_return_saved")
+                        .replace("{PLAYER}", ownerLabel)
+                        .replace("{COUNT}", String.valueOf(stacks.size()))
+                        .replace("{ITEMS}", summary));
+            }
+        } catch (RuntimeException e) {
+            Location where = lastKnownLocation(owner);
+            for (ItemStack item : stacks) {
+                where.getWorld().dropItemNaturally(where, item);
+            }
+            if (plugin != null) {
+                plugin.getLogger().error(e, i18n("log_pending_return_save_failed")
+                        .replace("{PLAYER}", ownerLabel)
+                        .replace("{COUNT}", String.valueOf(stacks.size()))
+                        .replace("{LOCATION}", where.getWorld().getName() + " "
+                                + where.getBlockX() + " " + where.getBlockY() + " " + where.getBlockZ())
+                        .replace("{ITEMS}", summary));
+            }
+        }
+    }
+
+    /**
+     * Hand a joining player every stake saved for them by {@link #holdStakeForReturn}.
+     * <p>
+     * Each saved entry is read first, removed from the list second, and only then handed over
+     * through {@link #giveOrDrop}, so an entry that cannot be removed is not handed over (it stays
+     * for the next join) and nothing can be delivered twice. An entry that cannot be read is left in
+     * the list, untouched, and reported.
+     *
+     * @param player the player who joined
+     */
+    public void deliverPendingReturns(Player player) {
+        if (pendingReturns == null) {
+            return;
+        }
+        List<PendingStakeReturn> entries;
+        try {
+            entries = pendingReturns.getAll(WhereCondition.builder()
+                    .column("owner_uuid").value(player.getUniqueId().toString()).build());
+        } catch (RuntimeException e) {
+            plugin.getLogger().error(e, i18n("log_pending_return_lookup_failed")
+                    .replace("{PLAYER}", player.getName()));
+            return;
+        }
+        int delivered = 0;
+        for (PendingStakeReturn entry : entries) {
+            List<ItemStack> stacks;
+            try {
+                stacks = deserializeStacks(entry.getItems());
+            } catch (RuntimeException e) {
+                plugin.getLogger().error(e, i18n("log_pending_return_unreadable")
+                        .replace("{PLAYER}", player.getName())
+                        .replace("{ID}", String.valueOf(entry.getId())));
+                continue;
+            }
+            try {
+                pendingReturns.delById(entry.getId());
+            } catch (RuntimeException e) {
+                plugin.getLogger().error(e, i18n("log_pending_return_remove_failed")
+                        .replace("{PLAYER}", player.getName())
+                        .replace("{ID}", String.valueOf(entry.getId())));
+                continue;
+            }
+            for (ItemStack item : stacks) {
+                giveOrDrop(player, item);
+            }
+            delivered += stacks.size();
+        }
+        if (delivered > 0) {
+            player.sendMessage(text(i18n("message_pending_return_delivered")));
+            plugin.getLogger().info(i18n("log_pending_return_delivered")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{COUNT}", String.valueOf(delivered)));
+        }
+    }
+
+    /** Where to drop a stake that could not be saved: the owner's last position, else the first world's spawn. */
+    private static Location lastKnownLocation(UUID owner) {
+        try {
+            Location last = Bukkit.getOfflinePlayer(owner).getLocation();
+            if (last != null && last.getWorld() != null) {
+                return last;
+            }
+        } catch (RuntimeException | LinkageError ignored) {
+            // A platform without a stored last position for offline players: use the spawn below.
+        }
+        return Bukkit.getWorlds().get(0).getSpawnLocation();
+    }
+
+    /** The owner's last known name and UUID, for an operator reading the log. */
+    private static String describeOwner(UUID owner) {
+        String name = null;
+        try {
+            name = Bukkit.getOfflinePlayer(owner).getName();
+        } catch (RuntimeException ignored) {
+            // The UUID alone still identifies the player.
+        }
+        return name == null ? owner.toString() : name + " (" + owner + ")";
+    }
+
+    /** "DIAMOND x10, GOLD_INGOT x5": the stacks named with their amounts, for the log. */
+    private static String summarize(List<ItemStack> stacks) {
+        StringBuilder out = new StringBuilder();
+        for (ItemStack item : stacks) {
+            if (out.length() > 0) {
+                out.append(", ");
+            }
+            out.append(item.getType().name()).append(" x").append(item.getAmount());
+        }
+        return out.toString();
+    }
+
+    /** Bukkit's own, complete item serialization, as YAML. */
+    static String serializeStacks(List<ItemStack> stacks) {
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("items", stacks);
+        return yaml.saveToString();
+    }
+
+    /**
+     * The inverse of {@link #serializeStacks}.
+     *
+     * @throws IllegalStateException if the text does not read back as a list of item stacks
+     */
+    static List<ItemStack> deserializeStacks(String text) {
+        YamlConfiguration yaml = new YamlConfiguration();
+        try {
+            yaml.loadFromString(text == null ? "" : text);
+        } catch (org.bukkit.configuration.InvalidConfigurationException e) {
+            throw new IllegalStateException("saved stake is not valid YAML", e);
+        }
+        List<?> raw = yaml.getList("items");
+        if (raw == null || raw.isEmpty()) {
+            throw new IllegalStateException("saved stake holds no items");
+        }
+        List<ItemStack> stacks = new ArrayList<>();
+        for (Object element : raw) {
+            if (!(element instanceof ItemStack) || ((ItemStack) element).getType().isAir()) {
+                throw new IllegalStateException("saved stake holds an entry that is not an item");
+            }
+            stacks.add((ItemStack) element);
+        }
+        return stacks;
     }
 
     /**
