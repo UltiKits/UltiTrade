@@ -310,6 +310,8 @@ class TradeTextLanguageTest {
         @Test
         @DisplayName("a player's own cancellation reason is English")
         void playerCancelled() throws Exception {
+            // messages.trade-cancelled as a blank setting reads it under language: en
+            when(config.getTradeCancelledMessage()).thenReturn(CatalogueText.entries("en").get("trade_cancelled"));
             TradeSession session = new TradeSession(alice, bob);
             @SuppressWarnings("unchecked")
             Map<UUID, TradeSession> sessions = (Map<UUID, TradeSession>) read(service, "activeSessions");

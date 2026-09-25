@@ -51,9 +51,7 @@ class TradeServiceTest {
         economy = UltiTradeTestHelper.createMockEconomy();
 
         service = new TradeService();
-
         // The module plugin, whose language file the service reads (UltiKits/UltiTrade#16)
-
         UltiTradeTestHelper.setField(service, "plugin", UltiTradeTestHelper.getMockPlugin());
 
         // Inject dependencies via reflection

@@ -284,7 +284,7 @@ class TradeCommandTest {
 
             command.sendRequest(player, "Offline");
 
-            verify(player).sendMessage(contains("不在线"));
+            verify(player).sendMessage(contains("is not online"));
             verify(tradeService, never()).sendRequest(any(), any());
         }
 
@@ -296,7 +296,7 @@ class TradeCommandTest {
 
             command.sendRequest(player, "Player1");
 
-            verify(player).sendMessage(contains("不能和自己交易"));
+            verify(player).sendMessage(contains("cannot trade with yourself"));
             verify(tradeService, never()).sendRequest(any(), any());
         }
     }
@@ -348,7 +348,7 @@ class TradeCommandTest {
 
             command.cancel(player);
 
-            verify(player).sendMessage(contains("没有在交易"));
+            verify(player).sendMessage(contains("not trading right now"));
             verify(tradeService, never()).cancelTrade(player);
         }
     }
@@ -403,7 +403,7 @@ class TradeCommandTest {
 
             command.blockPlayer(player, "Offline");
 
-            verify(player).sendMessage(contains("不在线"));
+            verify(player).sendMessage(contains("is not online"));
             verify(logService, never()).blockPlayer(any(), any());
         }
 
@@ -415,7 +415,7 @@ class TradeCommandTest {
 
             command.blockPlayer(player, "Player1");
 
-            verify(player).sendMessage(contains("不能将自己添加到黑名单"));
+            verify(player).sendMessage(contains("cannot add yourself to the blacklist"));
             verify(logService, never()).blockPlayer(any(), any());
         }
 
@@ -455,7 +455,7 @@ class TradeCommandTest {
 
             command.unblockPlayer(player, "Offline");
 
-            verify(player).sendMessage(contains("不在线"));
+            verify(player).sendMessage(contains("is not online"));
             verify(logService, never()).unblockPlayer(any(), any());
         }
 
@@ -493,7 +493,7 @@ class TradeCommandTest {
 
             command.help(player);
 
-            verify(player).sendMessage(contains("交易状态"));
+            verify(player).sendMessage(contains("Trade status"));
         }
 
         @Test
@@ -503,7 +503,7 @@ class TradeCommandTest {
 
             command.help(player);
 
-            verify(player).sendMessage(contains("已开启"));
+            verify(player).sendMessage(contains("enabled"));
         }
 
         @Test
@@ -513,7 +513,7 @@ class TradeCommandTest {
 
             command.help(player);
 
-            verify(player).sendMessage(contains("已关闭"));
+            verify(player).sendMessage(contains("disabled"));
         }
 
         @Test

@@ -94,6 +94,11 @@ class TradeReloadReconciliationTest {
         plugin = mock(UltiTrade.class, CALLS_REAL_METHODS);
         setResourceFolderPath(plugin, moduleFolder.toString());
         config = new TradeConfig();
+        // No language is loaded and no framework instance runs in a unit test: answer i18n from the
+        // Chinese file this module ships, and hand the module its own configuration, as the framework
+        // does (UltiKits/UltiTrade#16)
+        doAnswer(com.ultikits.plugins.trade.i18n.CatalogueText.answer("zh")).when(plugin).i18n(anyString());
+        doReturn(config).when(plugin).getConfig(TradeConfig.class);
 
         tradeService = new TradeService();
         UltiTradeTestHelper.setField(tradeService, "plugin", UltiTradeTestHelper.getMockPlugin());
