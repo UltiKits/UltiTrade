@@ -24,6 +24,7 @@ import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.InventoryView;
@@ -959,15 +960,27 @@ public class TradeService {
         }
     }
 
+    /** The player's persistent-data key that lists the hand-overs their saved data already holds. */
+    private static final NamespacedKey DELIVERIES = NamespacedKey.fromString("ultitrade:pending_return_deliveries");
+
     /**
-     * Hand a joining player every stake saved for them by {@link #holdStakeForReturn}.
+     * Hand a joining player what fits of every stake saved for them by {@link #holdStakeForReturn}, and
+     * keep the rest listed for a later join (maintainer answers of 2026-09-24, amended 2026-09-25 for
+     * this step: 「只发装得下的，其余留在列表」).
      * <p>
-     * Each saved entry is read first, removed from the list second, and only then handed over
-     * through {@link #giveOrDrop}, so an entry that cannot be removed is not handed over (it stays
-     * for the next join) and nothing can be delivered twice. An entry that cannot be read is left in
-     * the list, untouched, and reported. After a delivery the player's data is saved at once, so the
-     * stake does not depend on the next autosave once its row is gone; what did not fit and was
-     * dropped at the player's feet is kept as the world keeps any dropped item.
+     * The list and the player's saved data cannot be written together, so each entry is handed over in
+     * three writes, ordered so that a crash at any point leaves every item either in the list (as the
+     * next join reads it) or in the player's saved data, never both and never neither:
+     * <ol>
+     *   <li>the entry is marked with a fresh token and the part that stays listed afterwards; its items
+     *       are unchanged, so until step 2 is on disk it still lists everything;</li>
+     *   <li>the items that fit go into the inventory, the token into the player's persistent data, and
+     *       the player's data is saved: inventory and token reach the disk in one write;</li>
+     *   <li>the entry is completed: it keeps only the part that did not fit, or is removed.</li>
+     * </ol>
+     * At the next join a marked entry is settled first: if the player's data holds its token, step 2
+     * reached the disk and the entry is completed; if not, the hand-over never did and the entry is
+     * unmarked and handed over again. A step that fails is left for that settlement; nothing is dropped.
      *
      * @param player the player who joined
      */
@@ -985,7 +998,14 @@ public class TradeService {
             return;
         }
         int delivered = 0;
+        int kept = 0;
         for (PendingStakeReturn entry : entries) {
+            if (entry.getDeliveryToken() != null && !settle(player, entry)) {
+                continue;
+            }
+            if (entry.getId() == null) {
+                continue; // settled by removal: everything had been handed over
+            }
             List<ItemStack> stacks;
             try {
                 stacks = deserializeStacks(entry.getItems());
@@ -995,35 +1015,168 @@ public class TradeService {
                         .replace("{ID}", String.valueOf(entry.getId())));
                 continue;
             }
-            try {
-                pendingReturns.delById(entry.getId());
-            } catch (RuntimeException e) {
-                plugin.getLogger().error(e, i18n("log_pending_return_remove_failed")
-                        .replace("{PLAYER}", player.getName())
-                        .replace("{ID}", String.valueOf(entry.getId())));
-                continue;
-            }
-            for (ItemStack item : stacks) {
-                giveOrDrop(player, item);
-            }
-            delivered += stacks.size();
+            int[] outcome = handOver(player, entry, stacks);
+            delivered += outcome[0];
+            kept += outcome[1];
+        }
+        if (kept > 0) {
+            player.sendMessage(text(i18n("message_pending_return_partial")
+                    .replace("{COUNT}", String.valueOf(kept))));
+            plugin.getLogger().info(i18n("log_pending_return_kept")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{COUNT}", String.valueOf(kept)));
+        } else if (delivered > 0) {
+            player.sendMessage(text(i18n("message_pending_return_delivered")));
         }
         if (delivered > 0) {
-            // The rows are gone for good the moment they are removed (SQLite and MySQL commit at once),
-            // while the inventory that now holds the stake is written only at the next player save; a
-            // crash in between would lose it. Write the player's data now, so that window is the few
-            // milliseconds of this method rather than the autosave interval (Codex review on #45).
-            try {
-                player.saveData();
-            } catch (RuntimeException e) {
-                plugin.getLogger().warn(e, i18n("log_pending_return_player_save_failed")
-                        .replace("{COUNT}", String.valueOf(delivered))
-                        .replace("{PLAYER}", player.getName()));
-            }
-            player.sendMessage(text(i18n("message_pending_return_delivered")));
             plugin.getLogger().info(i18n("log_pending_return_delivered")
                     .replace("{PLAYER}", player.getName())
                     .replace("{COUNT}", String.valueOf(delivered)));
+        }
+    }
+
+    /**
+     * Settle an entry an earlier hand-over marked. Returns whether the entry may be handed over now; a
+     * removed entry comes back with a {@code null} id.
+     */
+    private boolean settle(Player player, PendingStakeReturn entry) {
+        String token = entry.getDeliveryToken();
+        boolean reachedDisk = savedDeliveries(player).contains(token);
+        try {
+            if (reachedDisk) {
+                complete(entry);
+                forgetDelivery(player, token);
+            } else {
+                plugin.getLogger().info(i18n("log_pending_return_redeliver")
+                        .replace("{PLAYER}", player.getName())
+                        .replace("{ID}", String.valueOf(entry.getId())));
+                entry.setDeliveryToken(null);
+                entry.setAfterDelivery(null);
+                pendingReturns.update(entry);
+            }
+            return true;
+        } catch (RuntimeException | IllegalAccessException e) {
+            plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{ID}", String.valueOf(entry.getId())));
+            return false;
+        }
+    }
+
+    /**
+     * Steps 1-3 for one entry. Returns {items handed over, items kept listed}.
+     */
+    private int[] handOver(Player player, PendingStakeReturn entry, List<ItemStack> stacks) {
+        List<ItemStack> given = new ArrayList<>();
+        List<ItemStack> remaining = new ArrayList<>();
+        for (ItemStack stack : stacks) {
+            int left = 0;
+            for (ItemStack leftover : player.getInventory().addItem(stack.clone()).values()) {
+                left += leftover.getAmount();
+            }
+            int fitted = stack.getAmount() - left;
+            if (fitted > 0) {
+                ItemStack part = stack.clone();
+                part.setAmount(fitted);
+                given.add(part);
+            }
+            if (left > 0) {
+                ItemStack part = stack.clone();
+                part.setAmount(left);
+                remaining.add(part);
+            }
+        }
+        int givenCount = amount(given);
+        int keptCount = amount(remaining);
+        if (given.isEmpty()) {
+            return new int[] {0, keptCount};
+        }
+        // Step 1: mark. On failure nothing may stay handed over, so the in-memory hand-over is undone.
+        String token = UUID.randomUUID().toString();
+        entry.setDeliveryToken(token);
+        entry.setAfterDelivery(remaining.isEmpty() ? "" : serializeStacks(remaining));
+        try {
+            pendingReturns.update(entry);
+        } catch (RuntimeException | IllegalAccessException e) {
+            player.getInventory().removeItem(given.toArray(new ItemStack[0]));
+            plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{ID}", String.valueOf(entry.getId())));
+            return new int[] {0, amount(stacks)};
+        }
+        // Step 2: inventory and token reach the disk together.
+        rememberDelivery(player, token);
+        try {
+            player.saveData();
+        } catch (RuntimeException e) {
+            // The entry stays marked; the next join settles it from whatever the server saved by then.
+            plugin.getLogger().warn(e, i18n("log_pending_return_player_save_failed")
+                    .replace("{COUNT}", String.valueOf(givenCount))
+                    .replace("{PLAYER}", player.getName()));
+            return new int[] {givenCount, keptCount};
+        }
+        // Step 3: complete. On failure the next join completes it from the saved token.
+        try {
+            complete(entry);
+            forgetDelivery(player, token);
+        } catch (RuntimeException | IllegalAccessException e) {
+            plugin.getLogger().error(e, i18n("log_pending_return_remove_failed")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{ID}", String.valueOf(entry.getId())));
+        }
+        return new int[] {givenCount, keptCount};
+    }
+
+    /** Keep only the part that did not fit, or remove the entry (its id is then cleared). */
+    private void complete(PendingStakeReturn entry) throws IllegalAccessException {
+        String after = entry.getAfterDelivery();
+        if (after == null || after.isEmpty()) {
+            pendingReturns.delById(entry.getId());
+            entry.setId(null);
+            return;
+        }
+        entry.setItems(after);
+        entry.setStackCount(deserializeStacks(after).size());
+        entry.setDeliveryToken(null);
+        entry.setAfterDelivery(null);
+        pendingReturns.update(entry);
+    }
+
+    private static int amount(List<ItemStack> stacks) {
+        int n = 0;
+        for (ItemStack stack : stacks) {
+            n += stack.getAmount();
+        }
+        return n;
+    }
+
+    private static Set<String> savedDeliveries(Player player) {
+        String value = player.getPersistentDataContainer().get(DELIVERIES, PersistentDataType.STRING);
+        Set<String> tokens = new LinkedHashSet<>();
+        if (value != null && !value.isEmpty()) {
+            tokens.addAll(Arrays.asList(value.split(",")));
+        }
+        return tokens;
+    }
+
+    private static void writeDeliveries(Player player, Set<String> tokens) {
+        if (tokens.isEmpty()) {
+            player.getPersistentDataContainer().remove(DELIVERIES);
+        } else {
+            player.getPersistentDataContainer().set(DELIVERIES, PersistentDataType.STRING, String.join(",", tokens));
+        }
+    }
+
+    private static void rememberDelivery(Player player, String token) {
+        Set<String> tokens = savedDeliveries(player);
+        tokens.add(token);
+        writeDeliveries(player, tokens);
+    }
+
+    private static void forgetDelivery(Player player, String token) {
+        Set<String> tokens = savedDeliveries(player);
+        if (tokens.remove(token)) {
+            writeDeliveries(player, tokens);
         }
     }
 
