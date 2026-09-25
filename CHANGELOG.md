@@ -41,7 +41,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   shipped. The language entries `request_sent`, `request_received`, `trade_disabled_target` and
   `player_blocked`, which no code reads any more, are removed; the texts written into `trade.yml` come
   from `message_request_sent`, `message_request_received`, `message_trade_disabled` and
-  `message_player_blocked` (UltiKits/UltiTrade#16).
+  `message_player_blocked` (UltiKits/UltiTrade#16). The text written is this module's built-in text: edit these settings in `config/trade.yml`; an edit of the extracted
+  language file does not change them (earlier versions never read them from the language file either).
 - `config/trade.yml` 中的消息与标题设置——交易界面标题（`gui-title`）与七条消息（`messages.request-sent`、
   `request-received`、`request-timeout`、`trade-complete`、`trade-cancelled`、`trade-disabled`、`player-blocked`）——
   在模块启动时按服务器语言写入，文件内容即模块显示的内容；此前它们是写死的中文，`language: en` 对它们不起作用。
@@ -49,7 +50,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   后改写为当前语言的文本。你改过的设置保持不变。若想保留内置文本又不让它跟随语言，请至少改动一个字符。在
   `language: zh` 下它们都与旧版本出厂的中文文本完全相同。不再有代码读取的语言条目 `request_sent`、`request_received`、
   `trade_disabled_target`、`player_blocked` 已删除；写入 `trade.yml` 的文本来自 `message_request_sent`、
-  `message_request_received`、`message_trade_disabled`、`message_player_blocked`（UltiKits/UltiTrade#16）。
+  `message_request_received`、`message_trade_disabled`、`message_player_blocked`（UltiKits/UltiTrade#16）。写入的是本模块的内置文本：请在 `config/trade.yml` 中修改这些设置；修改已解压的语言文件不会改变它们（旧版本同样从不从语言文件读取它们）。
 
 - The replies to `/trade toggle`, `/trade block` and `/trade unblock` — trading turned on or off, a
   player added to or removed from your trade blacklist, and the refusals for a player who already is
