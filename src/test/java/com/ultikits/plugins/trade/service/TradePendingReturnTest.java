@@ -270,7 +270,7 @@ class TradePendingReturnTest {
     }
 
     @Test
-    @DisplayName("A failed save drops the stake at the last known location and logs an error naming player and items")
+    @DisplayName("A failed save drops the stake in the world and logs an error naming player and items")
     void failedSaveDropsAndLogs() throws Exception {
         store.failInsert = true;
 
@@ -291,6 +291,34 @@ class TradePendingReturnTest {
         assertThat(store.rows).as("nothing was saved").isEmpty();
         verify(logger).error(any(Throwable.class), argThat((String s) -> s.contains(away.getUniqueId().toString())
                 && s.contains("DIAMOND x10") && s.contains("DIAMOND_SWORD x1")));
+    }
+
+    @Test
+    @DisplayName("A failed save drops the stake where the player last was, not at the spawn (gate-1 WR-01)")
+    void failedSaveDropsAtTheLastKnownLocation() throws Exception {
+        store.failInsert = true;
+        // The away player was on the server, far from the spawn, and has since left it.
+        server.addPlayer(away);
+        org.bukkit.Location lastSeen = new org.bukkit.Location(world, 500.5, 70, -300.5);
+        away.teleport(lastSeen);
+        away.disconnect();
+        assertThat(org.bukkit.Bukkit.getPlayer(away.getUniqueId()))
+                .as("precondition: the server can no longer resolve the away player").isNull();
+
+        service.completeTrade(sessionWithStakes());
+
+        List<Item> diamonds = new ArrayList<>();
+        for (Item item : world.getEntitiesByClass(Item.class)) {
+            if (item.getItemStack().getType() == Material.DIAMOND) {
+                diamonds.add(item);
+            }
+        }
+        assertThat(diamonds).as("the stake was dropped").isNotEmpty();
+        for (Item item : diamonds) {
+            assertThat(item.getLocation().distance(lastSeen))
+                    .as("dropped where the player was last seen, not at the world spawn %s", world.getSpawnLocation())
+                    .isLessThan(2.0);
+        }
     }
 
     @Test
@@ -328,6 +356,17 @@ class TradePendingReturnTest {
         assertThat(count(away, Material.DIAMOND)).isEqualTo(10);
         assertThat(store.rowsOf(away.getUniqueId())).as("only the unreadable entry remains").containsExactly(broken);
         verify(logger).error(any(Throwable.class), argThat((String s) -> s.contains(broken.getId())));
+    }
+
+    @Test
+    @DisplayName("The stacks column holds more than MySQL's TEXT limit of 65,535 bytes (gate-1 WR-02)")
+    void stacksColumnIsLongText() throws Exception {
+        com.ultikits.ultitools.annotations.Column column = PendingStakeReturn.class.getDeclaredField("items")
+                .getAnnotation(com.ultikits.ultitools.annotations.Column.class);
+        // The framework writes the declared type into CREATE TABLE verbatim; a stake of written books
+        // or filled shulker boxes serialises well past 64 KiB, and on MySQL a TEXT column would refuse
+        // it (strict mode, so the stake falls to the ground) or truncate it (so it can never be read).
+        assertThat(column.type()).isEqualTo("LONGTEXT");
     }
 
     /** Stores exactly what it is given; can be told to fail inserts or deletes. */
