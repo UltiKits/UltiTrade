@@ -16,10 +16,9 @@ import lombok.NoArgsConstructor;
  * over when that player next joins (UltiKits/UltiTrade#32; maintainer decision of 2026-09-24).
  * One row holds one player's stake from one cancelled trade.
  * <p>
- * The stacks are stored with Bukkit's own item serialization (the form a {@code YamlConfiguration}
- * writes for an {@code ItemStack}), which keeps every component of the item — the name, lore and
- * enchantments, and also a shulker box's contents or a book's pages. The trade log's
- * {@code SerializedItemStack} is a display summary and cannot rebuild an item, so it is not used here.
+ * The stacks are stored with Bukkit's own item serialization, the form a {@code YamlConfiguration}
+ * writes for an {@code ItemStack} and reads back into one. The trade log's {@code SerializedItemStack}
+ * is a display summary with no way back to an {@code ItemStack}, so it cannot be used here.
  *
  * @author wisdomme
  */
@@ -33,8 +32,13 @@ public class PendingStakeReturn extends BaseDataEntity<String> {
     @Column("owner_uuid")
     private String ownerUuid;
 
-    /** The staked stacks, as YAML under the key {@code items} (a list of item stacks). */
-    @Column(value = "items", type = "TEXT")
+    /**
+     * The staked stacks, as YAML under the key {@code items} (a list of item stacks). LONGTEXT, not
+     * TEXT: the framework writes the type into {@code CREATE TABLE} verbatim, and MySQL's TEXT holds
+     * 65,535 bytes, less than a stake of written books or filled shulker boxes; SQLite reads LONGTEXT
+     * as text.
+     */
+    @Column(value = "items", type = "LONGTEXT")
     private String items;
 
     /** How many stacks {@link #items} holds, for an operator reading the table directly. */
