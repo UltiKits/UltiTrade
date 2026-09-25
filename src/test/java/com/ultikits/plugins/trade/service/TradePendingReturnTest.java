@@ -413,13 +413,15 @@ class TradePendingReturnTest {
         assertThat(count(joined, Material.DIAMOND)).isEqualTo(10);
         ItemStack sword = joined.getInventory().getItem(joined.getInventory().first(Material.DIAMOND_SWORD));
         assertThat(sword).as("name, lore and enchantment survive the round trip").isEqualTo(namedSword());
-        assertThat(store.rowsOf(away.getUniqueId())).as("the list is empty afterwards").isEmpty();
+        assertThat(countListed(Material.DIAMOND, true) + countListed(Material.DIAMOND_SWORD, true))
+                .as("the list, as the next join reads it, is empty").isZero();
         assertThat(away.nextMessage()).contains("returned to you");
 
         service.deliverPendingReturns(joined);
 
         assertThat(count(joined, Material.DIAMOND)).as("a second join delivers nothing").isEqualTo(10);
         assertThat(joined.getInventory().all(Material.DIAMOND_SWORD)).hasSize(1);
+        assertThat(store.rowsOf(away.getUniqueId())).as("and settles the entry away").isEmpty();
     }
 
     @Test
@@ -434,7 +436,7 @@ class TradePendingReturnTest {
         listener.onPlayerJoin(new PlayerJoinEvent(joined, "joined"));
 
         assertThat(count(joined, Material.DIAMOND)).isEqualTo(10);
-        assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
+        assertThat(countListed(Material.DIAMOND, true)).isZero();
     }
 
     @Test
@@ -466,8 +468,8 @@ class TradePendingReturnTest {
 
         assertThat(count(joined, Material.DIAMOND)).as("4 diamonds topped the stack up to 64").isEqualTo(64);
         assertThat(droppedInWorld(Material.DIAMOND)).as("nothing is dropped").isZero();
-        assertThat(countListed(Material.DIAMOND, false)).as("6 diamonds stay listed").isEqualTo(6);
-        assertThat(countListed(Material.DIAMOND_SWORD, false)).isEqualTo(1);
+        assertThat(countListed(Material.DIAMOND, true)).as("6 diamonds stay listed").isEqualTo(6);
+        assertThat(countListed(Material.DIAMOND_SWORD, true)).isEqualTo(1);
         assertThat(savedContents).as("the player was saved holding what was handed over").isNotNull();
         assertThat(count(savedContents, Material.DIAMOND)).isEqualTo(64);
         assertThat(away.nextMessage()).contains("7");
@@ -483,20 +485,28 @@ class TradePendingReturnTest {
     }
 
     /**
-     * A crash at each point of a partial hand-over: at the moment of the crash every diamond is either in
-     * the saved player file or in the list as the next join will read it, never both and never neither;
-     * and the join after the restart, with room, ends with exactly the stake.
+     * A crash at each point of a hand-over, for a stake that only partly fits and for one that fits
+     * entirely: at the moment of the crash every diamond is either in the saved player file or in the
+     * list as the next join will read it, never both and never neither; and the join after the restart,
+     * with room, ends with exactly the stake. The completion points happen at the join after the one that
+     * handed the items over, where the entry is settled from the player's saved data.
      */
-    @org.junit.jupiter.params.ParameterizedTest(name = "crash {0}")
+    @org.junit.jupiter.params.ParameterizedTest(name = "{0}")
     @org.junit.jupiter.params.provider.ValueSource(strings = {
-            "before-mark", "after-mark", "before-save", "after-save", "before-complete", "after-complete"})
+            "partial/before-mark", "partial/after-mark", "partial/before-save", "partial/after-save",
+            "partial/save-not-on-disk", "partial/before-complete", "partial/after-complete",
+            "full/before-mark", "full/after-mark", "full/before-save", "full/after-save",
+            "full/save-not-on-disk", "full/before-complete", "full/after-complete"})
     @DisplayName("A crash at any point leaves each item in exactly one place")
-    void crashAtAnyPointLeavesEachItemInExactlyOnePlace(String point) throws Exception {
+    void crashAtAnyPointLeavesEachItemInExactlyOnePlace(String scenario) throws Exception {
+        String shape = scenario.substring(0, scenario.indexOf('/'));
+        String point = scenario.substring(scenario.indexOf('/') + 1);
         service.completeTrade(sessionWithStakes());
         server.addPlayer(away);
-        fillAllBut(away, 0);
-        ItemStack[] atJoin = copy(away.getInventory().getContents());
-        savedContents = atJoin;
+        if (shape.equals("partial")) {
+            fillAllBut(away, 0);
+        }
+        savedContents = copy(away.getInventory().getContents());
         savedDeliveries = null;
         final int[] updates = {0};
         Runnable crash = () -> {
@@ -513,11 +523,23 @@ class TradePendingReturnTest {
                 crash.run();
             }
         };
-        PlayerMock joined = saving(away,
-                () -> { if (point.equals("before-save")) crash.run(); },
-                () -> { if (point.equals("after-save")) crash.run(); });
+        PlayerMock joined;
+        if (point.equals("save-not-on-disk")) {
+            // Paper's saveData logs a failed write and returns normally: nothing reaches the disk.
+            joined = org.mockito.Mockito.spy(away);
+            org.mockito.Mockito.doNothing().when(joined).saveData();
+        } else {
+            joined = saving(away,
+                    () -> { if (point.equals("before-save")) crash.run(); },
+                    () -> { if (point.equals("after-save")) crash.run(); });
+        }
 
         try {
+            service.deliverPendingReturns(joined);
+            if (point.equals("save-not-on-disk")) {
+                throw new SimulatedCrash(); // the server dies before any later save of the player
+            }
+            // The player quits (the quit save is the one already taken) and joins again.
             service.deliverPendingReturns(joined);
         } catch (SimulatedCrash expected) {
             // the process died here
@@ -540,6 +562,7 @@ class TradePendingReturnTest {
         PlayerMock rejoined = saving(restarted);
 
         service.deliverPendingReturns(rejoined);
+        service.deliverPendingReturns(rejoined);
 
         assertThat(count(rejoined, Material.DIAMOND)).as("after the restart the stake is handed over exactly once").isEqualTo(10);
         assertThat(rejoined.getInventory().all(Material.DIAMOND_SWORD)).hasSize(1);
@@ -547,25 +570,31 @@ class TradePendingReturnTest {
     }
 
     @Test
-    @DisplayName("A failing save of the player leaves the entry marked, and the next join settles it from the player's data")
-    void failedPlayerSaveIsSettledAtTheNextJoin() throws Exception {
+    @DisplayName("With player-data saving disabled, the entry is completed at once, so the next join does not hand it over again")
+    void savingDisabledCompletesAtOnce() throws Exception {
+        TradeService spied = org.mockito.Mockito.spy(service);
+        org.mockito.Mockito.doReturn(true).when(spied).playerDataSavingDisabled();
         service.completeTrade(sessionWithStakes());
         server.addPlayer(away);
-        PlayerMock joined = org.mockito.Mockito.spy(away);
-        org.mockito.Mockito.doThrow(new IllegalStateException("disk full")).when(joined).saveData();
+        PlayerMock joined = saving(away);
+
+        spied.deliverPendingReturns(joined);
+        spied.deliverPendingReturns(joined);
+
+        assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
+        assertThat(count(joined, Material.DIAMOND)).as("not handed over twice").isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("A delivery marker left behind by a crash is dropped from the player's data")
+    void staleDeliveryMarkersArePruned() throws Exception {
+        server.addPlayer(away);
+        away.getPersistentDataContainer().set(DELIVERIES, org.bukkit.persistence.PersistentDataType.STRING, "stale-token");
+        PlayerMock joined = saving(away);
 
         service.deliverPendingReturns(joined);
 
-        assertThat(count(joined, Material.DIAMOND)).as("handed over in memory").isEqualTo(10);
-        assertThat(store.rowsOf(away.getUniqueId())).as("the entry stays, marked, until the player file holds the stake")
-                .hasSize(1);
-
-        // The server writes the player's data later (autosave or quit); the next join then completes it.
-        PlayerMock later = saving(away);
-        service.deliverPendingReturns(later);
-
-        assertThat(count(later, Material.DIAMOND)).as("not handed over a second time").isEqualTo(10);
-        assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
+        assertThat(deliveriesOf(joined)).as("no row carries the stale token").isNull();
     }
 
     @Test
@@ -573,33 +602,38 @@ class TradePendingReturnTest {
     void markFailureDeliversNothingThenOnce() throws Exception {
         service.completeTrade(sessionWithStakes());
         server.addPlayer(away);
+        away.getInventory().setItem(3, new ItemStack(Material.DIAMOND, 5));
         PlayerMock joined = saving(away);
         store.failUpdate = true;
 
         service.deliverPendingReturns(joined);
 
-        assertThat(count(joined, Material.DIAMOND)).as("nothing handed over while the entry cannot be marked").isZero();
+        assertThat(count(joined, Material.DIAMOND)).as("nothing handed over while the entry cannot be marked; the player's own 5 stay").isEqualTo(5);
         assertThat(countListed(Material.DIAMOND, false)).isEqualTo(10);
         verify(logger).error(any(Throwable.class), argThat((String s) -> s.contains("Away")));
+        assertThat(away.nextMessage()).as("a storage failure is not reported as a full inventory")
+                .contains("could not be handed over right now").doesNotContain("did not fit");
 
         store.failUpdate = false;
         service.deliverPendingReturns(joined);
         service.deliverPendingReturns(joined);
 
-        assertThat(count(joined, Material.DIAMOND)).as("delivered exactly once").isEqualTo(10);
+        assertThat(count(joined, Material.DIAMOND)).as("delivered exactly once").isEqualTo(15);
     }
 
     @Test
-    @DisplayName("An entry that cannot be completed after the player was saved is completed at the next join, not handed over twice")
+    @DisplayName("An entry whose completion fails at the settling join is completed later, not handed over twice")
     void completeFailureIsSettledWithoutDuplicating() throws Exception {
         service.completeTrade(sessionWithStakes());
         server.addPlayer(away);
         PlayerMock joined = saving(away);
+        service.deliverPendingReturns(joined);
+        assertThat(count(joined, Material.DIAMOND)).isEqualTo(10);
         store.failDelete = true;
 
         service.deliverPendingReturns(joined);
 
-        assertThat(count(joined, Material.DIAMOND)).isEqualTo(10);
+        assertThat(count(joined, Material.DIAMOND)).as("not handed over again").isEqualTo(10);
         assertThat(store.rowsOf(away.getUniqueId())).hasSize(1);
 
         store.failDelete = false;
@@ -623,6 +657,7 @@ class TradePendingReturnTest {
         service.deliverPendingReturns(joined);
 
         assertThat(count(joined, Material.DIAMOND)).isEqualTo(10);
+        service.deliverPendingReturns(joined);
         assertThat(store.rowsOf(away.getUniqueId())).as("only the unreadable entry remains").containsExactly(broken);
         verify(logger).error(any(Throwable.class), argThat((String s) -> s.contains(broken.getId())));
     }
