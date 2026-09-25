@@ -570,6 +570,30 @@ class TradePendingReturnTest {
     }
 
     @Test
+    @DisplayName("A partial completion whose write fails keeps its marker, so the next join does not hand the delivered part over again (Codex P1 on #45)")
+    void failedPartialCompletionKeepsTheMarker() throws Exception {
+        service.completeTrade(sessionWithStakes());
+        server.addPlayer(away);
+        fillAllBut(away, 0);
+        PlayerMock joined = saving(away);
+        service.deliverPendingReturns(joined); // 10 diamonds handed over, the sword stays listed
+        assertThat(count(joined, Material.DIAMOND)).isEqualTo(10);
+        store.failUpdate = true;
+
+        service.deliverPendingReturns(joined); // settling join: the completion write fails
+
+        assertThat(deliveriesOf(joined)).as("the marker must survive a failed completion").isNotNull();
+        store.failUpdate = false;
+        joined.getInventory().remove(Material.DIRT);
+        service.deliverPendingReturns(joined);
+        service.deliverPendingReturns(joined);
+
+        assertThat(count(joined, Material.DIAMOND)).as("the delivered diamonds are not handed over again").isEqualTo(10);
+        assertThat(joined.getInventory().all(Material.DIAMOND_SWORD)).hasSize(1);
+        assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
+    }
+
+    @Test
     @DisplayName("With player-data saving disabled, the entry is completed at once, so the next join does not hand it over again")
     void savingDisabledCompletesAtOnce() throws Exception {
         TradeService spied = org.mockito.Mockito.spy(service);
