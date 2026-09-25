@@ -253,7 +253,7 @@ class TradePendingReturnTest {
     }
 
     @Test
-    @DisplayName("A failed save drops the stake where the player last was, not at the spawn (gate-1 WR-01)")
+    @DisplayName("A failed save drops the stake where the player last was, not at the spawn")
     void failedSaveDropsAtTheLastKnownLocation() throws Exception {
         store.failInsert = true;
         // The away player was on the server, far from the spawn, and has since left it.
@@ -702,7 +702,7 @@ class TradePendingReturnTest {
     }
 
     @Test
-    @DisplayName("The stacks column holds more than MySQL's TEXT limit of 65,535 bytes (gate-1 WR-02)")
+    @DisplayName("The stacks column holds more than MySQL's TEXT limit of 65,535 bytes")
     void stacksColumnIsLongText() throws Exception {
         com.ultikits.ultitools.annotations.Column column = PendingStakeReturn.class.getDeclaredField("items")
                 .getAnnotation(com.ultikits.ultitools.annotations.Column.class);

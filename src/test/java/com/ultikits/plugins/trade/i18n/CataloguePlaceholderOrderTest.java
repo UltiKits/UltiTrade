@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * The module fills placeholders by name, so a different order renders correctly today; the order is
  * held equal so that a translator reading one catalogue against the other can match the sentences,
  * and so that no later change to positional formatting can swap two values silently. Found on two
- * entries added for UltiKits/UltiTrade#32 by that fix's gate-1 review (WR-03).
+ * entries added for UltiKits/UltiTrade#32 while reviewing that fix.
  */
 @DisplayName("Placeholders appear in the same order in lang/en.yml and lang/zh.yml")
 class CataloguePlaceholderOrderTest {
