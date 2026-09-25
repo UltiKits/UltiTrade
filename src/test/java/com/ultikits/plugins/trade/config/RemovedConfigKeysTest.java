@@ -84,6 +84,22 @@ class RemovedConfigKeysTest {
     }
 
     @Test
+    @DisplayName("under language: en the trade-timeout warning reads exactly as before the language sweep (gate-1 IN-03)")
+    void englishWarningIsByteIdentical(@TempDir File dir) throws IOException {
+        File file = write(dir, "trade-timeout: 120\n");
+        List<String> warnings = new ArrayList<>();
+
+        TradeSeams.warnAboutLeftovers(file, warnings::add, ENGLISH);
+
+        assertThat(warnings).containsExactly(file.getPath() + " still contains 'trade-timeout', which this version of"
+                + " UltiTrade no longer reads. It never took effect: an open trade window has no time limit, and"
+                + " nothing replaces the setting. A pending trade request still expires after 'request-timeout',"
+                + " which is unchanged. A time limit for an open trade window is feature request"
+                + " UltiKits/UltiTrade#41 (UltiKits/UltiTrade#18). Delete the key from the file to silence this"
+                + " warning.");
+    }
+
+    @Test
     @DisplayName("POSITIVE CONTROL: all seven leftover keys produce seven warnings, in the check's order, each naming the module, the file and its key")
     void warnsAboutEveryLeftoverKey(@TempDir File dir) throws IOException {
         File file = write(dir, FILE_WITH_EVERY_REMOVED_KEY);
