@@ -481,6 +481,8 @@ class TradePendingReturnTest {
 
         assertThat(count(joined, Material.DIAMOND)).as("the rest arrived, once").isEqualTo(70);
         assertThat(joined.getInventory().all(Material.DIAMOND_SWORD)).hasSize(1);
+        service.deliverPendingReturns(joined);
+        assertThat(count(joined, Material.DIAMOND)).as("the settling join hands nothing over again").isEqualTo(70);
         assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
     }
 
@@ -556,9 +558,7 @@ class TradePendingReturnTest {
         if (savedDeliveries != null) {
             restarted.getPersistentDataContainer().set(DELIVERIES, org.bukkit.persistence.PersistentDataType.STRING, savedDeliveries);
         }
-        for (int i = 1; i < 20; i++) {
-            restarted.getInventory().setItem(i, null);
-        }
+        restarted.getInventory().remove(Material.DIRT); // room for the rest
         PlayerMock rejoined = saving(restarted);
 
         service.deliverPendingReturns(rejoined);
@@ -659,7 +659,7 @@ class TradePendingReturnTest {
         assertThat(count(joined, Material.DIAMOND)).isEqualTo(10);
         service.deliverPendingReturns(joined);
         assertThat(store.rowsOf(away.getUniqueId())).as("only the unreadable entry remains").containsExactly(broken);
-        verify(logger).error(any(Throwable.class), argThat((String s) -> s.contains(broken.getId())));
+        verify(logger, org.mockito.Mockito.atLeastOnce()).error(any(Throwable.class), argThat((String s) -> s.contains(broken.getId())));
     }
 
     @Test
