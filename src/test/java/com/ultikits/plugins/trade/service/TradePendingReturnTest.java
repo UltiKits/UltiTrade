@@ -344,6 +344,20 @@ class TradePendingReturnTest {
     }
 
     @Test
+    @DisplayName("A failing log line never leaves the cancelled session open, so a later cancel cannot save or drop the stake again")
+    void aFailingLogDoesNotLeaveTheSessionOpen() throws Exception {
+        org.mockito.Mockito.doThrow(new IllegalStateException("logger unavailable"))
+                .when(logger).warn(anyString());
+        TradeSession session = sessionWithStakes();
+
+        service.completeTrade(session);
+
+        assertThat(service.getSession(present.getUniqueId()))
+                .as("the session is closed, so no later cancel reaches the same stake").isNull();
+        assertThat(store.rowsOf(away.getUniqueId())).hasSize(1);
+    }
+
+    @Test
     @DisplayName("An entry that cannot be removed is not handed over, and is handed over once at the next join")
     void removeFailureDeliversNothingThenOnce() throws Exception {
         service.completeTrade(sessionWithStakes());
