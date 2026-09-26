@@ -84,21 +84,21 @@ rather than an error:
    counts are identical for every annotation kind measured below.
 
 **Positive control:** the line-start form returns `@CmdExecutor` = 1, `@CmdMapping` = 8,
-`@EventListener` = 1 (class), `@EventHandler` = 6 (handler methods), `@Scheduled` = 1,
+`@EventListener` = 1 (class), `@EventHandler` = 7 (handler methods), `@Scheduled` = 1,
 `@ConditionalOnConfig` = 0, `@ConfigEntity` = 1 (class), `@ConfigEntry` = 24 (31 before
 `UltiKits/UltiTrade#18` removed `trade-timeout` and `UltiKits/UltiTrade#17` removed six
 `messages.*` keys) — confirmed by
 reading `TradeCommand.java` directly (8 `@CmdMapping` sites: `<player>`, `accept`, `deny`,
 `cancel`, `toggle`, `block <player>`, `unblock <player>`, bare `""`) and `TradeListener.java`
-directly (6 `@EventHandler` sites: `onPlayerInteractEntity`, `onInventoryClick`, `onPlayerChat`,
-`onInventoryDrag`, `onInventoryClose`, `onPlayerQuit`). `onPlayerChat` (line 261,
+directly (7 `@EventHandler` sites: `onPlayerInteractEntity`, `onInventoryClick`, `onPlayerChat`,
+`onInventoryDrag`, `onInventoryClose`, `onPlayerJoin`, `onPlayerQuit`). `onPlayerChat` (line 261,
 `AsyncPlayerChatEvent`, fully-qualified inline rather than imported) is this module's standing
 positive control — its fully-qualified event type makes it easy for a naive scan keyed on the
 `import` list alone to miss; it is checked by name, not merely by count, below. This document's
 command-row count matches the `@CmdMapping` annotation-site count exactly (8 against 8).
 
 **A second annotation-site line, not in the canonical eight, is worth stating explicitly: `@Table`
-entities = 2** (`PlayerTradeSettings`, `TradeLogData`), both folded into this document's `## Data
+entities = 3** (`PendingStakeReturn`, `PlayerTradeSettings`, `TradeLogData`), all folded into this document's `## Data
 persistence` section rather than given a Kind of their own — see that section's note.
 
 ## Trade Requests
@@ -136,7 +136,7 @@ imperative GUI base classes.
 
 | ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
 |---|---|---|---|---|---|---|---|---|
-| ultitrade.session.cancel | Cancel the sender's own currently active trade (session or pending confirmation), returning both sides' placed items to their original owners (overflow drops on the ground rather than being discarded) and logging the cancellation | command | `/trade cancel` | ultitrade.use | player | player | detailed | TradeCommand#cancel, TradeService#cancelTrade(Player), TradeService#cancelTrade(TradeSession,String) |
+| ultitrade.session.cancel | Cancel the sender's own currently active trade (session or pending confirmation), returning both sides' placed items to their original owners (overflow drops on the ground rather than being discarded) and logging the cancellation. Every path that cancels a trade does the same; the stake of a participant the server cannot find at that moment is kept for them (`ultitrade.persistence.pending-stake-return`) | command | `/trade cancel` | ultitrade.use | player | player | detailed | TradeCommand#cancel, TradeService#cancelTrade(Player), TradeService#cancelTrade(TradeSession,String) |
 | ultitrade.session.chat-input | Capture the next chat line from a player who clicked the money or experience slot, applying it as the new offer amount (or cancelling on the literal text `cancel`), with balance/experience sufficiency checks; the chat message itself is always cancelled (never broadcast) while an input is pending | event | click the money or experience slot in `TradeGUI`, then send any chat message | n/a | n/a | player | detailed | TradeListener#onPlayerChat |
 | ultitrade.session.close-cancels | Closing the trade GUI (any means: Escape, another inventory, `/trade cancel` uses its own path) while a trade is still in the `TRADING` state cancels the trade one tick later, UNLESS the close was itself caused by opening the money/experience chat-input prompt | event | close the `TradeGUI` inventory while a trade is active and no chat input is pending | n/a | n/a | player | detailed | TradeListener#onInventoryClose |
 | ultitrade.session.confirm-large | For a trade whose total money OR total experience meets `confirm-threshold`, clicking Confirm the first time is INTENDED to open `TradeConfirmPage` instead of confirming immediately. What actually happens: `TradeService#confirmTrade` calls `player.closeInventory()` to close `TradeGUI` BEFORE scheduling the page's construction; that synchronous close fires `TradeListener#onInventoryClose`, which — seeing the session still `TRADING` and no `waitingForInput` exemption — schedules `cancelTrade` for the same 1-tick delay `confirmTrade` uses to open the page. Because the cancel task was registered first (synchronously, before `confirmTrade` reaches its own scheduling call), it runs first: the trade is silently auto-cancelled (items returned to both sides, both GUIs closed, cancellation message shown) before `TradeConfirmPage` ever opens. The page then opens anyway, showing the same items that were just returned (the session's own item map is never cleared by cancellation), operating on a session `TradeService` no longer tracks. Known product defect, `UltiKits/UltiTrade#23` | event | click the Confirm slot in `TradeGUI` when the trade's total money or experience is at least `confirm-threshold` | n/a | n/a | player | detailed | TradeService#confirmTrade, TradeListener#onInventoryClose |
@@ -217,15 +217,18 @@ container injected into `TradeService`, and `TradeService` reads its getters at 
 
 ## Data persistence
 
-Two `@Table` entities back this module's persistence: `PlayerTradeSettings` (`trade_player_settings`
-— trade-toggle flag, JSON blocklist, running trade statistics) and `TradeLogData` (`trade_logs` —
-one row per completed OR cancelled trade, full item/money/experience detail). Neither is given its
-own `gui`/`command`/`event` row; both are folded into the two persistence guarantees below, which
-is what an operator actually observes.
+Three `@Table` entities back this module's persistence: `PlayerTradeSettings` (`trade_player_settings`
+— trade-toggle flag, JSON blocklist, running trade statistics), `TradeLogData` (`trade_logs` —
+one row per completed OR cancelled trade, full item/money/experience detail) and `PendingStakeReturn`
+(`trade_pending_returns` — the stake of a cancelled trade's participant the server could not find,
+kept until that player's next join, `UltiKits/UltiTrade#32`). None is given its own
+`gui`/`command`/`event` row; each is folded into the persistence guarantees below, which is what an
+operator actually observes.
 
 | ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
 |---|---|---|---|---|---|---|---|---|
 | ultitrade.persistence.log-retention | A `trade_logs` row older than `log-retention-days` is deleted by a background task; this task itself is scheduled manually via `Bukkit.getScheduler().runTaskTimerAsynchronously` at `cleanup-interval-hours`, NOT via the framework's `@Scheduled` annotation — the reconciliation table's `@Scheduled` line therefore reads 1 site against 2 `scheduled`-Kind rows in this document (see this row and `ultitrade.request.timeout-cleanup`), with this row as the stated reason | scheduled | runs automatically every `cleanup-interval-hours` hours (default 24) while `enable-trade-log` is true | n/a | n/a | internal | detailed | TradeLogService#cleanupOldLogs, TradeLogService#init |
+| ultitrade.persistence.pending-stake-return | When a trade is cancelled while the server cannot find one participant (`Bukkit#getPlayer` answers nothing for them), that participant's staked items are saved in `trade_pending_returns`, one row per cancelled trade, stored with Bukkit's own item serialization (the form a `YamlConfiguration` writes for an item and reads back), and a console WARN names the player and the items; at that player's next join what fits in their inventory is handed over and the rest stays in the table for a later join (maintainer decision of 2026-09-25): nothing is dropped. When everything was handed over the player is told `Items you staked in a trade that was cancelled while you were away have been returned to you.`; when something did not fit, `<n> item(s) from a cancelled trade did not fit in your inventory and are still kept for you. Free some space and rejoin to receive them.` A console INFO line counts the items. The hand-over is written in three steps — the row is marked, the items and a marker go into the player's data and the player is saved, and at the next join the row keeps only what did not fit or is removed if the saved data holds the marker (and is handed over again if it does not) — so on SQLite and MySQL a crash at any point leaves every item either in the table or in the player's saved data, never both and never neither, including when a player save silently fails to reach the disk. With player-data saving disabled (`players.disable-saving` in `spigot.yml`) the row is completed at once. A row that cannot be marked is not handed over, the player is told the items are kept and to rejoin, and it is tried again at the next join; a row that cannot be read is left in the table and reported. On the JSON storage backend a save or a removal reaches the disk only at the framework's next flush (every `datasource.flushRate` seconds, and at shutdown), so a server crash in that window can lose a save or hand a stake over a second time; SQLite and MySQL write at once. If the row cannot be saved, the items are dropped at the player's last known location (or the first world's spawn when the platform keeps none) and a console ERROR names the player and the items. Money and experience are never taken before a trade completes, so a cancel has none to keep (`UltiKits/UltiTrade#32`; maintainer decision of 2026-09-24) | persistence | a trade cancelled by the completion check, a server shutdown, a quit or `/trade cancel` while the other participant cannot be found; then that participant joins | n/a | n/a | player | brief | TradeService#cancelTrade(TradeSession,String), TradeService#deliverPendingReturns, TradeListener#onPlayerJoin |
 | ultitrade.persistence.settings-survive-restart | A player's trade-toggle flag and blocklist, once changed via `.toggle`/`.block`/`.unblock`, survive a full server restart — `TradeLogService#saveSettings` writes the `trade_player_settings` row asynchronously on every change, and `TradeLogService#getSettings`/`getOrCreateSettings` re-query it by `player_uuid` on first access after restart | persistence | change trade-toggle or blocklist state, then restart the server and re-check the state | n/a | n/a | player | detailed | TradeLogService#saveSettings, TradeLogService#getSettings |
 | ultitrade.persistence.trade-log | A completed or cancelled trade is written to `trade_logs` asynchronously, capturing both players' items (as JSON), money, experience, tax collected, and outcome status — this is the module's audit trail, not player-visible through any command in this module | persistence | complete or cancel a trade with `enable-trade-log: true` (shipped default) | n/a | n/a | admin | detailed | TradeLogService#logCompletedTrade, TradeLogService#logCancelledTrade |
 
