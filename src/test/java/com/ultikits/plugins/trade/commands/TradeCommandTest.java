@@ -38,6 +38,7 @@ class TradeCommandTest {
         UltiTradeTestHelper.setUp();
 
         tradeService = mock(TradeService.class);
+        com.ultikits.plugins.trade.i18n.TradeSeams.speak(tradeService, "zh");
         logService = mock(TradeLogService.class);
         answerI18nFrom("en");
         command = constructLikeTheContainer(
@@ -129,11 +130,11 @@ class TradeCommandTest {
 
     /**
      * UltiKits/UltiTrade#17. The six replies below used to be Chinese literals in the command, and
-     * {@code config/trade.yml} carried six {@code messages.*} keys for them that nothing read. The
-     * maintainer's ruling (2026-09-22): the keys are removed and the text comes from the language
-     * catalogue, so an English server answers in English and a Chinese one in Chinese. Each test
-     * therefore requires the exact rendered catalogue entry, for both shipped languages -- a
-     * substring of the old literal would pass against it and prove nothing.
+     * {@code config/trade.yml} carried six {@code messages.*} keys for them that nothing read. By
+     * design the keys are removed and the text comes from the language catalogue, so an English
+     * server answers in English and a Chinese one in Chinese. Each test therefore requires the
+     * exact rendered catalogue entry, for both shipped languages -- a substring of the old
+     * literal would pass against it and prove nothing.
      */
     @Nested
     @DisplayName("replies come from the language catalogue (UltiKits/UltiTrade#17)")
@@ -283,7 +284,7 @@ class TradeCommandTest {
 
             command.sendRequest(player, "Offline");
 
-            verify(player).sendMessage(contains("不在线"));
+            verify(player).sendMessage(contains("is not online"));
             verify(tradeService, never()).sendRequest(any(), any());
         }
 
@@ -295,7 +296,7 @@ class TradeCommandTest {
 
             command.sendRequest(player, "Player1");
 
-            verify(player).sendMessage(contains("不能和自己交易"));
+            verify(player).sendMessage(contains("cannot trade with yourself"));
             verify(tradeService, never()).sendRequest(any(), any());
         }
     }
@@ -347,7 +348,7 @@ class TradeCommandTest {
 
             command.cancel(player);
 
-            verify(player).sendMessage(contains("没有在交易"));
+            verify(player).sendMessage(contains("not trading right now"));
             verify(tradeService, never()).cancelTrade(player);
         }
     }
@@ -402,7 +403,7 @@ class TradeCommandTest {
 
             command.blockPlayer(player, "Offline");
 
-            verify(player).sendMessage(contains("不在线"));
+            verify(player).sendMessage(contains("is not online"));
             verify(logService, never()).blockPlayer(any(), any());
         }
 
@@ -414,7 +415,7 @@ class TradeCommandTest {
 
             command.blockPlayer(player, "Player1");
 
-            verify(player).sendMessage(contains("不能将自己添加到黑名单"));
+            verify(player).sendMessage(contains("cannot add yourself to the blacklist"));
             verify(logService, never()).blockPlayer(any(), any());
         }
 
@@ -454,7 +455,7 @@ class TradeCommandTest {
 
             command.unblockPlayer(player, "Offline");
 
-            verify(player).sendMessage(contains("不在线"));
+            verify(player).sendMessage(contains("is not online"));
             verify(logService, never()).unblockPlayer(any(), any());
         }
 
@@ -492,7 +493,7 @@ class TradeCommandTest {
 
             command.help(player);
 
-            verify(player).sendMessage(contains("交易状态"));
+            verify(player).sendMessage(contains("Trade status"));
         }
 
         @Test
@@ -502,7 +503,7 @@ class TradeCommandTest {
 
             command.help(player);
 
-            verify(player).sendMessage(contains("已开启"));
+            verify(player).sendMessage(contains("enabled"));
         }
 
         @Test
@@ -512,7 +513,7 @@ class TradeCommandTest {
 
             command.help(player);
 
-            verify(player).sendMessage(contains("已关闭"));
+            verify(player).sendMessage(contains("disabled"));
         }
 
         @Test

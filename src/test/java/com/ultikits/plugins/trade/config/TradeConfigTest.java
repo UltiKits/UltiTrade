@@ -18,7 +18,15 @@ class TradeConfigTest {
     @BeforeEach
     void setUp() {
         config = new TradeConfig();
+        // Bound to a plugin answering from the Chinese language file, as the framework's init() binds
+        // it: a blank text setting reads its text from there (UltiKits/UltiTrade#16).
+        com.ultikits.ultitools.abstracts.UltiToolsPlugin plugin =
+                org.mockito.Mockito.mock(com.ultikits.ultitools.abstracts.UltiToolsPlugin.class);
+        org.mockito.Mockito.when(plugin.i18n(org.mockito.ArgumentMatchers.anyString()))
+                .thenAnswer(com.ultikits.plugins.trade.i18n.CatalogueText.answer("zh"));
+        com.ultikits.plugins.trade.i18n.TradeSeams.bind(config, plugin);
     }
+
 
     /** Every key TradeConfig declares, read from its {@code @ConfigEntry} annotations. */
     private static List<String> declaredKeys() {
@@ -38,8 +46,8 @@ class TradeConfigTest {
     /**
      * UltiKits/UltiTrade#18. A pending trade request expires after {@code request-timeout}; an open
      * trade window has no elapsed-time expiry at all, so {@code trade-timeout} described a feature
-     * that does not exist. The maintainer's ruling (2026-09-22) removes the setting (feature request
-     * UltiKits/UltiTrade#41). The only timeout settings left are the request's own.
+     * that does not exist. The setting is therefore removed (feature request UltiKits/UltiTrade#41).
+     * The only timeout settings left are the request's own.
      */
     @Test
     @DisplayName("the only timeout settings declared are the trade request's (UltiKits/UltiTrade#18)")
@@ -57,8 +65,8 @@ class TradeConfigTest {
     /**
      * UltiKits/UltiTrade#17. Seven {@code messages.*} keys are read by the module; six more, for the
      * replies of {@code /trade toggle}, {@code /trade block} and {@code /trade unblock}, never were.
-     * The maintainer's ruling (2026-09-22) moves those replies into the language catalogue and
-     * removes the six keys, and says nothing about the seven that are read, so they stay.
+     * Those replies moved into the language catalogue and the six keys were removed; the seven that
+     * are read are unaffected, so they stay.
      */
     @Test
     @DisplayName("the message settings declared are exactly the seven the module reads (UltiKits/UltiTrade#17)")

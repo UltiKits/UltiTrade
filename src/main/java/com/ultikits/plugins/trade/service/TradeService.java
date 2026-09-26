@@ -66,22 +66,29 @@ public class TradeService {
     // Bukkit plugin instance for scheduler tasks
     private Plugin bukkitPlugin;
 
-    /**
-     * Cancellation reason shown to both players when a trade that carries money reaches
-     * completion while money trading is unavailable (UltiKits/UltiTrade#26).
-     */
-    static final String MONEY_UNAVAILABLE_REASON = "金币交易当前不可用";
-
-    /** Cancellation reason when a trade that carries experience completes while experience trading is off. */
-    static final String EXP_UNAVAILABLE_REASON = "经验交易当前不可用";
-
-    /** Sent to both players of a trade whose confirmations a configuration reload voided. */
-    static final String RECONFIRM_AFTER_RELOAD_MESSAGE = "交易配置已重载，请重新确认交易。";
-
     // Economy integration. Volatile: a reload replaces it on the main thread while the async chat
     // handler may read it; callers read it once per operation.
     private volatile Economy economy;
     
+    /**
+     * This module's language-file text for {@code key}, in the server's language. The GUIs, the
+     * listener and the placeholder expansion reach the language file through this service
+     * (UltiKits/UltiTrade#16). Without an injected plugin there is no language to read, and the key
+     * itself is returned, as the framework renders a missing key: a trade cancelled during shutdown
+     * must still hand its items back when this service never received a plugin (UltiKits/UltiTrade#34).
+     *
+     * @param key the language-file key
+     * @return the text for the key
+     */
+    public String i18n(String key) {
+        return plugin == null ? key : plugin.i18n(key);
+    }
+
+    /** {@link #i18n} with {@code &} colour codes applied. */
+    private String text(String languageText) {
+        return ChatColor.translateAlternateColorCodes('&', languageText);
+    }
+
     /**
      * Initialize the trade service.
      */
@@ -104,7 +111,7 @@ public class TradeService {
         // staked item on the server (UltiKits/UltiTrade#34).
         for (TradeSession session : activeSessions.values()) {
             try {
-                cancelTrade(session, "插件关闭");
+                cancelTrade(session, i18n("cancel_reason_shutdown"));
             } catch (RuntimeException e) {
                 // A handler whose only job is to stop one failure costing the other trades their items
                 // must not be able to throw itself. The injected plugin is the only thing it needs, and
@@ -112,7 +119,7 @@ public class TradeService {
                 // abort it exists to prevent (measured: this line raised a NullPointerException from
                 // inside the catch).
                 if (plugin != null) {
-                    plugin.getLogger().warn(e, "Failed to cancel a trade during shutdown; continuing with the remaining trades.");
+                    plugin.getLogger().warn(e, i18n("log_shutdown_cancel_failed"));
                 }
             }
         }
@@ -141,13 +148,13 @@ public class TradeService {
         // stays in place.
         Economy found = null;
         if (Bukkit.getPluginManager().getPlugin("Vault") == null) {
-            plugin.getLogger().warn("Vault not found! Money trading disabled.");
+            plugin.getLogger().warn(i18n("log_vault_missing"));
         } else {
             RegisteredServiceProvider<Economy> rsp = Bukkit.getServicesManager().getRegistration(Economy.class);
             if (rsp != null) {
                 found = rsp.getProvider();
             } else {
-                plugin.getLogger().warn("No Vault economy provider is registered! Money trading disabled.");
+                plugin.getLogger().warn(i18n("log_no_economy_provider"));
             }
         }
         economy = found;
@@ -188,7 +195,7 @@ public class TradeService {
             for (UUID participant : new UUID[] {first, second}) {
                 Player player = Bukkit.getPlayer(participant);
                 if (player != null) {
-                    player.sendMessage(ChatColor.YELLOW + RECONFIRM_AFTER_RELOAD_MESSAGE);
+                    player.sendMessage(text(i18n("reconfirm_after_reload")));
                 }
             }
         }
@@ -218,8 +225,7 @@ public class TradeService {
                 try {
                     refreshOpenTradeWindow(session, player);
                 } catch (RuntimeException | LinkageError e) {
-                    plugin.getLogger().error(e, "Could not redraw the open trade window of " + player.getName()
-                        + " after the reload; that window shows the previous terms until it is reopened");
+                    plugin.getLogger().error(e, i18n("log_window_redraw_failed").replace("{PLAYER}", player.getName()));
                 }
             }
         }
@@ -280,7 +286,7 @@ public class TradeService {
     public boolean sendRequest(Player sender, Player target) {
         // Check if sender has trade enabled
         if (!logService.isTradeEnabled(sender.getUniqueId())) {
-            sender.sendMessage(ChatColor.RED + "你已关闭交易功能！使用 /trade toggle 开启");
+            sender.sendMessage(text(i18n("sender_trade_disabled")));
             return false;
         }
         
@@ -300,32 +306,32 @@ public class TradeService {
         
         // Check if target is blocked by sender
         if (logService.isBlocked(sender.getUniqueId(), target.getUniqueId())) {
-            sender.sendMessage(ChatColor.RED + "你已将 " + target.getName() + " 加入黑名单！");
+            sender.sendMessage(text(i18n("you_blocked_target").replace("{PLAYER}", target.getName())));
             return false;
         }
         
         // Check if sender is already trading
         if (isTrading(sender.getUniqueId())) {
-            sender.sendMessage(ChatColor.RED + "你已经在交易中！");
+            sender.sendMessage(text(i18n("already_trading")));
             return false;
         }
         
         // Check if target is already trading
         if (isTrading(target.getUniqueId())) {
-            sender.sendMessage(ChatColor.RED + target.getName() + " 正在交易中！");
+            sender.sendMessage(text(i18n("target_trading").replace("{PLAYER}", target.getName())));
             return false;
         }
         
         // Check distance
         if (config.getMaxDistance() > 0) {
             if (!config.isAllowCrossWorld() && !sender.getWorld().equals(target.getWorld())) {
-                sender.sendMessage(ChatColor.RED + "不能跨世界交易！");
+                sender.sendMessage(text(i18n("cross_world_disabled")));
                 return false;
             }
             
             if (sender.getWorld().equals(target.getWorld()) && 
                 sender.getLocation().distance(target.getLocation()) > config.getMaxDistance()) {
-                sender.sendMessage(ChatColor.RED + "距离太远，无法交易！");
+                sender.sendMessage(text(i18n("too_far_away")));
                 return false;
             }
         }
@@ -333,7 +339,7 @@ public class TradeService {
         // Check if there's already a pending request from sender
         TradeRequest existingRequest = pendingRequests.get(target.getUniqueId());
         if (existingRequest != null && existingRequest.getSender().equals(sender.getUniqueId())) {
-            sender.sendMessage(ChatColor.RED + "你已经向该玩家发送过交易请求了！");
+            sender.sendMessage(text(i18n("request_already_sent")));
             return false;
         }
         
@@ -373,20 +379,20 @@ public class TradeService {
     private void notifyTradeRequest(Player target, Player sender) {
         if (config.isEnableClickableButtons()) {
             // Create clickable message
-            TextComponent message = new TextComponent(ChatColor.YELLOW + sender.getName() + 
-                ChatColor.WHITE + " 请求与你交易！ ");
+            TextComponent message = new TextComponent(
+                text(i18n("request_received_clickable").replace("{PLAYER}", sender.getName())));
             
             // Accept button
-            TextComponent acceptBtn = new TextComponent(ChatColor.GREEN + "[接受]");
+            TextComponent acceptBtn = new TextComponent(text(i18n("request_accept_button")));
             acceptBtn.setClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/trade accept"));
             acceptBtn.setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, 
-                new Text(ChatColor.GREEN + "点击接受交易请求")));
+                new Text(text(i18n("request_accept_hover")))));
             
             // Deny button
-            TextComponent denyBtn = new TextComponent(ChatColor.RED + " [拒绝]");
+            TextComponent denyBtn = new TextComponent(text(i18n("request_deny_button")));
             denyBtn.setClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/trade deny"));
             denyBtn.setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, 
-                new Text(ChatColor.RED + "点击拒绝交易请求")));
+                new Text(text(i18n("request_deny_hover")))));
             
             message.addExtra(acceptBtn);
             message.addExtra(denyBtn);
@@ -408,7 +414,7 @@ public class TradeService {
         removeBossBar(target.getUniqueId());
         
         BossBar bar = Bukkit.createBossBar(
-            ChatColor.YELLOW + senderName + " 请求与你交易 (剩余 " + timeoutSeconds + "秒)",
+            bossBarTitle(senderName, timeoutSeconds),
             BarColor.YELLOW,
             BarStyle.SOLID
         );
@@ -427,7 +433,7 @@ public class TradeService {
             
             double progress = (double) remaining[0] / timeoutSeconds;
             bar.setProgress(Math.max(0, progress));
-            bar.setTitle(ChatColor.YELLOW + senderName + " 请求与你交易 (剩余 " + remaining[0] + "秒)");
+            bar.setTitle(bossBarTitle(senderName, remaining[0]));
             
             // Change color when time is running out
             if (remaining[0] <= 5) {
@@ -440,6 +446,13 @@ public class TradeService {
         bossBarTasks.put(target.getUniqueId(), task);
     }
     
+    /** The request countdown's title, in the server's language. */
+    private String bossBarTitle(String senderName, int secondsLeft) {
+        return text(i18n("bossbar_request")
+            .replace("{PLAYER}", senderName)
+            .replace("{SECONDS}", String.valueOf(secondsLeft)));
+    }
+
     /**
      * Remove BossBar for player.
      */
@@ -466,13 +479,13 @@ public class TradeService {
         
         TradeRequest request = pendingRequests.remove(player.getUniqueId());
         if (request == null || request.isExpired()) {
-            player.sendMessage(ChatColor.RED + "没有待处理的交易请求！");
+            player.sendMessage(text(i18n("no_pending_request")));
             return false;
         }
         
         Player sender = Bukkit.getPlayer(request.getSender());
         if (sender == null || !sender.isOnline()) {
-            player.sendMessage(ChatColor.RED + "对方已离线！");
+            player.sendMessage(text(i18n("player_offline")));
             return false;
         }
         
@@ -491,17 +504,17 @@ public class TradeService {
         
         TradeRequest request = pendingRequests.remove(player.getUniqueId());
         if (request == null) {
-            player.sendMessage(ChatColor.RED + "没有待处理的交易请求！");
+            player.sendMessage(text(i18n("no_pending_request")));
             return false;
         }
         
         Player sender = Bukkit.getPlayer(request.getSender());
         if (sender != null && sender.isOnline()) {
-            sender.sendMessage(ChatColor.RED + player.getName() + " 拒绝了你的交易请求！");
+            sender.sendMessage(text(i18n("request_denied").replace("{PLAYER}", player.getName())));
             playSound(sender, Sound.ENTITY_VILLAGER_NO);
         }
         
-        player.sendMessage(ChatColor.YELLOW + "已拒绝交易请求！");
+        player.sendMessage(text(i18n("request_denied_self")));
         return true;
     }
     
@@ -613,7 +626,7 @@ public class TradeService {
     private void notifyConfirmation(TradeSession session, Player confirmer) {
         Player other = Bukkit.getPlayer(session.getOtherPlayer(confirmer.getUniqueId()));
         if (other != null) {
-            other.sendMessage(ChatColor.GREEN + confirmer.getName() + " 已确认交易！");
+            other.sendMessage(text(i18n("other_confirmed").replace("{PLAYER}", confirmer.getName())));
             playSound(other, Sound.BLOCK_NOTE_BLOCK_PLING);
         }
     }
@@ -638,7 +651,7 @@ public class TradeService {
         Player player2 = Bukkit.getPlayer(session.getPlayer2());
         
         if (player1 == null || player2 == null) {
-            cancelTrade(session, "玩家离线");
+            cancelTrade(session, i18n("cancel_reason_player_offline"));
             return;
         }
         
@@ -654,7 +667,7 @@ public class TradeService {
         // Never move items or experience while silently dropping offered money (UltiKits/UltiTrade#26):
         // money is only withdrawn here, so cancelling leaves every balance untouched and returns items.
         if ((money1 > 0 || money2 > 0) && !moneyAvailable) {
-            cancelTrade(session, MONEY_UNAVAILABLE_REASON);
+            cancelTrade(session, i18n("cancel_reason_money_unavailable"));
             return;
         }
 
@@ -663,7 +676,7 @@ public class TradeService {
         int exp2 = session.getPlayerExp(session.getPlayer2());
         boolean expAvailable = config.isEnableExpTrade();
         if ((exp1 > 0 || exp2 > 0) && !expAvailable) {
-            cancelTrade(session, EXP_UNAVAILABLE_REASON);
+            cancelTrade(session, i18n("cancel_reason_exp_unavailable"));
             return;
         }
 
@@ -678,11 +691,11 @@ public class TradeService {
             
             // Check balances
             if (money1 > 0 && currentEconomy.getBalance(player1) < money1) {
-                cancelTrade(session, player1.getName() + " 余额不足");
+                cancelTrade(session, i18n("cancel_reason_insufficient_money").replace("{PLAYER}", player1.getName()));
                 return;
             }
             if (money2 > 0 && currentEconomy.getBalance(player2) < money2) {
-                cancelTrade(session, player2.getName() + " 余额不足");
+                cancelTrade(session, i18n("cancel_reason_insufficient_money").replace("{PLAYER}", player2.getName()));
                 return;
             }
             
@@ -708,11 +721,11 @@ public class TradeService {
             
             // Check experience
             if (exp1 > 0 && getTotalExperience(player1) < exp1) {
-                cancelTrade(session, player1.getName() + " 经验不足");
+                cancelTrade(session, i18n("cancel_reason_insufficient_exp").replace("{PLAYER}", player1.getName()));
                 return;
             }
             if (exp2 > 0 && getTotalExperience(player2) < exp2) {
-                cancelTrade(session, player2.getName() + " 经验不足");
+                cancelTrade(session, i18n("cancel_reason_insufficient_exp").replace("{PLAYER}", player2.getName()));
                 return;
             }
             
@@ -822,7 +835,7 @@ public class TradeService {
     public void cancelTrade(Player player) {
         TradeSession session = getSession(player.getUniqueId());
         if (session != null) {
-            cancelTrade(session, player.getName() + " 取消了交易");
+            cancelTrade(session, i18n("cancel_reason_player_cancelled").replace("{PLAYER}", player.getName()));
         }
     }
     
@@ -918,7 +931,7 @@ public class TradeService {
             if (happyVillager != null) {
                 player.getWorld().spawnParticle(happyVillager, loc, 30, 0.5, 0.5, 0.5, 0.1);
             } else {
-                plugin.getLogger().warn("XParticle.HAPPY_VILLAGER resolved to null on this server version; skipping success particle effect.");
+                plugin.getLogger().warn(i18n("log_success_particle_missing"));
             }
             player.getWorld().spawnParticle(Particle.END_ROD, loc, 15, 0.3, 0.5, 0.3, 0.05);
         }
@@ -938,7 +951,7 @@ public class TradeService {
             if (smoke != null) {
                 player.getWorld().spawnParticle(smoke, loc, 20, 0.3, 0.3, 0.3, 0.05);
             } else {
-                plugin.getLogger().warn("XParticle.SMOKE resolved to null on this server version; skipping fail particle effect.");
+                plugin.getLogger().warn(i18n("log_fail_particle_missing"));
             }
         }
     }

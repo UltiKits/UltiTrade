@@ -94,6 +94,14 @@ class TradeReloadReconciliationTest {
         plugin = mock(UltiTrade.class, CALLS_REAL_METHODS);
         setResourceFolderPath(plugin, moduleFolder.toString());
         config = new TradeConfig();
+        // No language is loaded and no framework instance runs in a unit test: answer i18n from the
+        // Chinese file this module ships, and hand the module its own configuration, as the framework
+        // does (UltiKits/UltiTrade#16)
+        doAnswer(com.ultikits.plugins.trade.i18n.CatalogueText.answer("zh")).when(plugin).i18n(anyString());
+        doReturn(config).when(plugin).getConfig(TradeConfig.class);
+        // The framework's language setting (UltiTools' config.yml), which the config-text pass reads;
+        // no framework instance runs here.
+        doReturn("zh").when(plugin).getLanguageCode();
 
         tradeService = new TradeService();
         UltiTradeTestHelper.setField(tradeService, "plugin", UltiTradeTestHelper.getMockPlugin());
@@ -225,7 +233,7 @@ class TradeReloadReconciliationTest {
             reload("enable-money-trade: true\n");
 
             assertThat(tradeService.getEconomy()).isNull();
-            verify(UltiTradeTestHelper.getMockLogger()).warn("Vault not found! Money trading disabled.");
+            verify(UltiTradeTestHelper.getMockLogger()).warn(zhLine("log_vault_missing"));
         }
 
         @Test
@@ -238,7 +246,7 @@ class TradeReloadReconciliationTest {
             reload("enable-money-trade: true\n");
 
             verify(UltiTradeTestHelper.getMockLogger(), times(2))
-                    .warn("No Vault economy provider is registered! Money trading disabled.");
+                    .warn(zhLine("log_no_economy_provider"));
         }
 
         @Test
@@ -893,5 +901,11 @@ class TradeReloadReconciliationTest {
         Field field = UltiToolsPlugin.class.getDeclaredField("resourceFolderPath");
         field.setAccessible(true);
         field.set(plugin, path);
+    }
+
+    /** The Chinese catalogue's console line for {@code key}, or a marker naming the missing key (UltiKits/UltiTrade#16). */
+    private static String zhLine(String key) {
+        return com.ultikits.plugins.trade.i18n.CatalogueText.entries("zh")
+                .getOrDefault(key, "<lang/zh has no " + key + ">");
     }
 }

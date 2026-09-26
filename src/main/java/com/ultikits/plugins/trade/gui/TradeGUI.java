@@ -94,8 +94,8 @@ public class TradeGUI implements InventoryHolder {
         }
         
         // Fill empty slots with glass
-        ItemStack yourGlass = createItem(Material.LIME_STAINED_GLASS_PANE, ChatColor.GREEN + "你的物品");
-        ItemStack theirGlass = createItem(Material.CYAN_STAINED_GLASS_PANE, ChatColor.AQUA + "对方物品");
+        ItemStack yourGlass = createItem(Material.LIME_STAINED_GLASS_PANE, text(tradeService.i18n("gui_your_items")));
+        ItemStack theirGlass = createItem(Material.CYAN_STAINED_GLASS_PANE, text(tradeService.i18n("gui_their_items")));
         
         for (int slot : YOUR_SLOTS) {
             inventory.setItem(slot, yourGlass);
@@ -114,7 +114,7 @@ public class TradeGUI implements InventoryHolder {
         updateConfirmButton();
         
         // Cancel button
-        ItemStack cancelBtn = createItem(Material.BARRIER, ChatColor.RED + "取消交易");
+        ItemStack cancelBtn = createItem(Material.BARRIER, text(tradeService.i18n("gui_cancel")));
         inventory.setItem(CANCEL_SLOT, cancelBtn);
         
         // Money display
@@ -140,7 +140,7 @@ public class TradeGUI implements InventoryHolder {
             if (item != null) {
                 inventory.setItem(YOUR_SLOTS[i], item);
             } else {
-                inventory.setItem(YOUR_SLOTS[i], createItem(Material.LIME_STAINED_GLASS_PANE, ChatColor.GREEN + "你的物品"));
+                inventory.setItem(YOUR_SLOTS[i], createItem(Material.LIME_STAINED_GLASS_PANE, text(tradeService.i18n("gui_your_items"))));
             }
         }
         
@@ -151,7 +151,7 @@ public class TradeGUI implements InventoryHolder {
             if (item != null) {
                 inventory.setItem(THEIR_SLOTS[i], createItemWithDetails(item));
             } else {
-                inventory.setItem(THEIR_SLOTS[i], createItem(Material.CYAN_STAINED_GLASS_PANE, ChatColor.AQUA + "对方物品"));
+                inventory.setItem(THEIR_SLOTS[i], createItem(Material.CYAN_STAINED_GLASS_PANE, text(tradeService.i18n("gui_their_items"))));
             }
         }
         
@@ -174,11 +174,11 @@ public class TradeGUI implements InventoryHolder {
         // Add separator
         lore.add("");
         lore.add(ChatColor.DARK_GRAY + "───────────────");
-        lore.add(ChatColor.GRAY + "物品详情:");
+        lore.add(text(tradeService.i18n("item_details")));
         
         // Add enchantments
         if (!item.getEnchantments().isEmpty()) {
-            lore.add(ChatColor.LIGHT_PURPLE + "附魔:");
+            lore.add(text(tradeService.i18n("item_enchantments")));
             for (Map.Entry<Enchantment, Integer> ench : item.getEnchantments().entrySet()) {
                 lore.add(ChatColor.GRAY + "  • " + getEnchantmentName(ench.getKey()) + " " + toRoman(ench.getValue()));
             }
@@ -192,24 +192,26 @@ public class TradeGUI implements InventoryHolder {
                 int currentDurability = maxDurability - damageable.getDamage();
                 double percent = (double) currentDurability / maxDurability * 100;
                 ChatColor color = percent > 50 ? ChatColor.GREEN : (percent > 25 ? ChatColor.YELLOW : ChatColor.RED);
-                lore.add(ChatColor.GRAY + "耐久度: " + color + currentDurability + "/" + maxDurability + 
-                         ChatColor.GRAY + " (" + String.format("%.1f", percent) + "%)");
+                lore.add(text(tradeService.i18n("item_durability"))
+                         .replace("{CURRENT}", color.toString() + currentDurability)
+                         .replace("{MAX}", maxDurability + ChatColor.GRAY.toString())
+                         + " (" + String.format("%.1f", percent) + "%)");
             }
         }
         
         // Add item flags info
         if (!meta.getItemFlags().isEmpty()) {
-            lore.add(ChatColor.GRAY + "物品标志: " + ChatColor.WHITE + meta.getItemFlags().size() + " 个");
+            lore.add(text(tradeService.i18n("item_flags").replace("{COUNT}", String.valueOf(meta.getItemFlags().size()))));
         }
         
         // Add unbreakable info
         if (meta.isUnbreakable()) {
-            lore.add(ChatColor.BLUE + "无法破坏");
+            lore.add(text(tradeService.i18n("item_unbreakable")));
         }
         
         // Add custom model data
         if (meta.hasCustomModelData()) {
-            lore.add(ChatColor.GRAY + "自定义模型: " + ChatColor.WHITE + meta.getCustomModelData());
+            lore.add(text(tradeService.i18n("item_custom_model")).replace("{ID}", ChatColor.WHITE.toString() + meta.getCustomModelData()));
         }
         
         meta.setLore(lore);
@@ -261,23 +263,23 @@ public class TradeGUI implements InventoryHolder {
             double theirReceive = yourMoney - yourTax;
             
             List<String> yourLore = new ArrayList<>();
-            yourLore.add(ChatColor.GRAY + "点击修改金额");
+            yourLore.add(text(tradeService.i18n("gui_money_click")));
             if (taxRate > 0 && yourMoney > 0) {
-                yourLore.add(ChatColor.YELLOW + "税率: " + String.format("%.1f%%", taxRate * 100));
-                yourLore.add(ChatColor.RED + "税金: " + String.format("%.2f", yourTax));
-                yourLore.add(ChatColor.GREEN + "对方实收: " + String.format("%.2f", theirReceive));
+                yourLore.add(taxLine(tradeService.i18n("gui_tax_rate"), "{RATE}", String.format("%.1f%%", taxRate * 100)));
+                yourLore.add(taxLine(tradeService.i18n("gui_tax"), "{AMOUNT}", String.format("%.2f", yourTax)));
+                yourLore.add(taxLine(tradeService.i18n("gui_other_receives"), "{AMOUNT}", String.format("%.2f", theirReceive)));
             }
             
             ItemStack yourMoneyItem = createItem(Material.GOLD_NUGGET, 
-                ChatColor.GOLD + "你的金币: " + ChatColor.WHITE + String.format("%.2f", yourMoney),
+                text(tradeService.i18n("gui_your_money")) + ": " + ChatColor.WHITE + String.format("%.2f", yourMoney),
                 yourLore.toArray(new String[0]));
             inventory.setItem(YOUR_MONEY_SLOT, yourMoneyItem);
             
             ItemStack theirMoneyItem = createItem(Material.GOLD_NUGGET,
-                ChatColor.GOLD + "对方金币: " + ChatColor.WHITE + String.format("%.2f", theirMoney));
+                text(tradeService.i18n("gui_their_money")) + ": " + ChatColor.WHITE + String.format("%.2f", theirMoney));
             inventory.setItem(THEIR_MONEY_SLOT, theirMoneyItem);
         } else {
-            ItemStack disabled = createItem(Material.BARRIER, ChatColor.RED + "金币交易未启用");
+            ItemStack disabled = createItem(Material.BARRIER, text(tradeService.i18n("gui_money_disabled")));
             inventory.setItem(YOUR_MONEY_SLOT, disabled);
             inventory.setItem(THEIR_MONEY_SLOT, disabled);
         }
@@ -300,24 +302,24 @@ public class TradeGUI implements InventoryHolder {
             int theirReceive = yourExp - yourTax;
             
             List<String> yourLore = new ArrayList<>();
-            yourLore.add(ChatColor.GRAY + "点击修改经验值");
-            yourLore.add(ChatColor.AQUA + "你的总经验: " + totalExp);
+            yourLore.add(text(tradeService.i18n("gui_exp_click")));
+            yourLore.add(taxLine(tradeService.i18n("gui_your_total_exp"), "{AMOUNT}", String.valueOf(totalExp)));
             if (taxRate > 0 && yourExp > 0) {
-                yourLore.add(ChatColor.YELLOW + "税率: " + String.format("%.1f%%", taxRate * 100));
-                yourLore.add(ChatColor.RED + "税金: " + yourTax);
-                yourLore.add(ChatColor.GREEN + "对方实收: " + theirReceive);
+                yourLore.add(taxLine(tradeService.i18n("gui_tax_rate"), "{RATE}", String.format("%.1f%%", taxRate * 100)));
+                yourLore.add(taxLine(tradeService.i18n("gui_tax"), "{AMOUNT}", String.valueOf(yourTax)));
+                yourLore.add(taxLine(tradeService.i18n("gui_other_receives"), "{AMOUNT}", String.valueOf(theirReceive)));
             }
             
             ItemStack yourExpItem = createItem(Material.EXPERIENCE_BOTTLE, 
-                ChatColor.GREEN + "你的经验: " + ChatColor.WHITE + yourExp,
+                text(tradeService.i18n("gui_your_exp")) + ": " + ChatColor.WHITE + yourExp,
                 yourLore.toArray(new String[0]));
             inventory.setItem(YOUR_EXP_SLOT, yourExpItem);
             
             ItemStack theirExpItem = createItem(Material.EXPERIENCE_BOTTLE,
-                ChatColor.GREEN + "对方经验: " + ChatColor.WHITE + theirExp);
+                text(tradeService.i18n("gui_their_exp")) + ": " + ChatColor.WHITE + theirExp);
             inventory.setItem(THEIR_EXP_SLOT, theirExpItem);
         } else {
-            ItemStack disabled = createItem(Material.BARRIER, ChatColor.RED + "经验交易未启用");
+            ItemStack disabled = createItem(Material.BARRIER, text(tradeService.i18n("gui_exp_disabled")));
             inventory.setItem(YOUR_EXP_SLOT, disabled);
             inventory.setItem(THEIR_EXP_SLOT, disabled);
         }
@@ -334,13 +336,17 @@ public class TradeGUI implements InventoryHolder {
         
         ItemStack yourStatus = createItem(
             yourConfirmed ? Material.LIME_WOOL : Material.RED_WOOL,
-            yourConfirmed ? ChatColor.GREEN + "你已确认" : ChatColor.RED + "你未确认"
+            yourConfirmed
+                ? text(tradeService.i18n("gui_status_self_confirmed"))
+                : text(tradeService.i18n("gui_status_self_pending"))
         );
         inventory.setItem(YOUR_STATUS_SLOT, yourStatus);
         
         ItemStack theirStatus = createItem(
             theirConfirmed ? Material.LIME_WOOL : Material.RED_WOOL,
-            theirConfirmed ? ChatColor.GREEN + "对方已确认" : ChatColor.RED + "对方未确认"
+            theirConfirmed
+                ? text(tradeService.i18n("gui_status_other_confirmed"))
+                : text(tradeService.i18n("gui_status_other_pending"))
         );
         inventory.setItem(THEIR_STATUS_SLOT, theirStatus);
     }
@@ -353,12 +359,22 @@ public class TradeGUI implements InventoryHolder {
         
         ItemStack confirmBtn = createItem(
             confirmed ? Material.LIME_CONCRETE : Material.GREEN_CONCRETE,
-            confirmed ? ChatColor.YELLOW + "点击取消确认" : ChatColor.GREEN + "确认交易",
-            confirmed ? ChatColor.GRAY + "已锁定，等待对方确认" : ChatColor.GRAY + "确认后交易将进行"
+            confirmed ? text(tradeService.i18n("gui_unconfirm")) : text(tradeService.i18n("gui_confirm")),
+            confirmed ? text(tradeService.i18n("gui_confirm_locked")) : text(tradeService.i18n("gui_confirm_hint"))
         );
         inventory.setItem(CONFIRM_SLOT, confirmBtn);
     }
     
+    /** The language file's text, {@code &} colour codes applied. */
+    private static String text(String languageText) {
+        return ChatColor.translateAlternateColorCodes('&', languageText);
+    }
+
+    /** A lore line from the language file with one placeholder filled, colour codes applied. */
+    private static String taxLine(String languageText, String placeholder, String value) {
+        return text(languageText.replace(placeholder, value));
+    }
+
     /**
      * Create an item with name and lore.
      */

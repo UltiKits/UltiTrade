@@ -78,7 +78,9 @@ public class TradePlaceholderExpansion extends PlaceholderExpansion {
             // Whether trade is enabled (localized)
             case "trade_enabled_display":
             case "enabled_display":
-                return stats.isTradeEnabled() ? "开启" : "关闭";
+                return stats.isTradeEnabled()
+                    ? tradeService.i18n("placeholder_enabled")
+                    : tradeService.i18n("placeholder_disabled");
             
             // Whether player is currently in a trade
             case "is_trading":
@@ -89,7 +91,7 @@ public class TradePlaceholderExpansion extends PlaceholderExpansion {
             case "last_trade_time":
                 long lastTime = stats.getLastTradeTime();
                 if (lastTime == 0) {
-                    return "从未交易";
+                    return tradeService.i18n("placeholder_never_traded");
                 }
                 return formatTimestamp(lastTime);
             
@@ -97,7 +99,7 @@ public class TradePlaceholderExpansion extends PlaceholderExpansion {
             case "last_trade_ago":
                 long last = stats.getLastTradeTime();
                 if (last == 0) {
-                    return "从未";
+                    return tradeService.i18n("placeholder_never");
                 }
                 return formatTimeAgo(System.currentTimeMillis() - last);
             
@@ -128,13 +130,13 @@ public class TradePlaceholderExpansion extends PlaceholderExpansion {
         long days = hours / 24;
         
         if (days > 0) {
-            return days + "天前";
+            return tradeService.i18n("placeholder_days_ago").replace("{COUNT}", String.valueOf(days));
         } else if (hours > 0) {
-            return hours + "小时前";
+            return tradeService.i18n("placeholder_hours_ago").replace("{COUNT}", String.valueOf(hours));
         } else if (minutes > 0) {
-            return minutes + "分钟前";
+            return tradeService.i18n("placeholder_minutes_ago").replace("{COUNT}", String.valueOf(minutes));
         } else {
-            return "刚刚";
+            return tradeService.i18n("placeholder_just_now");
         }
     }
 }

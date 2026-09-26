@@ -24,6 +24,7 @@ class TradePlaceholderExpansionTest {
     @BeforeEach
     void setUp() {
         tradeService = mock(TradeService.class);
+        com.ultikits.plugins.trade.i18n.TradeSeams.speak(tradeService, "zh");
         logService = mock(TradeLogService.class);
         expansion = new TradePlaceholderExpansion(tradeService, logService);
 
