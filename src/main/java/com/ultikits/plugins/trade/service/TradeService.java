@@ -1,6 +1,7 @@
 package com.ultikits.plugins.trade.service;
 
 import com.ultikits.plugins.trade.config.TradeConfig;
+import com.ultikits.plugins.trade.entity.PendingStakeReturn;
 import com.ultikits.plugins.trade.entity.TradeRequest;
 import com.ultikits.plugins.trade.entity.TradeSession;
 import com.ultikits.plugins.trade.gui.TradeConfirmPage;
@@ -9,6 +10,8 @@ import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.Autowired;
 import com.ultikits.ultitools.annotations.Scheduled;
 import com.ultikits.ultitools.annotations.Service;
+import com.ultikits.ultitools.entities.WhereCondition;
+import com.ultikits.ultitools.interfaces.DataOperator;
 
 import com.cryptomorin.xseries.particles.XParticle;
 import net.md_5.bungee.api.chat.ClickEvent;
@@ -20,6 +23,8 @@ import org.bukkit.*;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.InventoryView;
@@ -66,6 +71,10 @@ public class TradeService {
     // Bukkit plugin instance for scheduler tasks
     private Plugin bukkitPlugin;
 
+    // Stakes of cancelled trades whose owner could not be found, handed over at their next join
+    // (UltiKits/UltiTrade#32). Null until init() has run, which the save path treats as a failed save.
+    private DataOperator<PendingStakeReturn> pendingReturns;
+
     // Economy integration. Volatile: a reload replaces it on the main thread while the async chat
     // handler may read it; callers read it once per operation.
     private volatile Economy economy;
@@ -95,6 +104,9 @@ public class TradeService {
     public void init() {
         // Initialize Bukkit plugin reference for scheduler tasks
         this.bukkitPlugin = Bukkit.getPluginManager().getPlugin("UltiTools");
+
+        // Saved stakes of cancelled trades (UltiKits/UltiTrade#32)
+        this.pendingReturns = plugin.getDataOperator(PendingStakeReturn.class);
 
         // Setup economy
         if (config.isEnableMoneyTrade()) {
@@ -805,6 +817,10 @@ public class TradeService {
             }
             player1.sendMessage(ChatColor.translateAlternateColorCodes('&', msg));
             playFailEffects(player1);
+        } else {
+            // No inventory to hand the stake to: keep it for the owner's next join, before the
+            // session that is its only record is discarded (UltiKits/UltiTrade#32).
+            holdStakeForReturn(session.getPlayer1(), session.getPlayerItems(session.getPlayer1()).values());
         }
         
         if (player2 != null) {
@@ -820,6 +836,8 @@ public class TradeService {
             }
             player2.sendMessage(ChatColor.translateAlternateColorCodes('&', msg));
             playFailEffects(player2);
+        } else {
+            holdStakeForReturn(session.getPlayer2(), session.getPlayerItems(session.getPlayer2()).values());
         }
         
         session.setState(TradeSession.TradeState.CANCELLED);
@@ -872,6 +890,448 @@ public class TradeService {
         for (ItemStack drop : overflow.values()) {
             player.getWorld().dropItemNaturally(player.getLocation(), drop);
         }
+    }
+
+    // ==================== Stakes of an owner the server could not find (UltiKits/UltiTrade#32) ====================
+
+    /**
+     * Keep the stake of a trade participant the server cannot resolve, so it can be handed back when
+     * they next join.
+     * <p>
+     * A cancelled trade returns each side's stake into that side's inventory; a participant
+     * {@code Bukkit#getPlayer} cannot resolve has none, and the session is the stake's only record.
+     * The maintainer's decision of 2026-09-24: save it in a pending-returns list and hand it back at
+     * the owner's next join through {@link #giveOrDrop}; if the list cannot be saved, drop the items
+     * at the owner's last known location and log an error naming the player and the items.
+     * <p>
+     * Every cancel path reaches this through {@link #cancelTrade(TradeSession, String)}: the
+     * completion offline guard, {@link #shutdown()}, and a quit or {@code /trade cancel} whose other
+     * side is gone.
+     *
+     * @param owner the participant whose stake this is
+     * @param stake the stacks they staked; {@code null} and empty stacks are ignored
+     */
+    private void holdStakeForReturn(UUID owner, Collection<ItemStack> stake) {
+        List<ItemStack> stacks = new ArrayList<>();
+        for (ItemStack item : stake) {
+            if (item != null && !item.getType().isAir()) {
+                stacks.add(item.clone());
+            }
+        }
+        if (stacks.isEmpty()) {
+            return;
+        }
+        String ownerLabel = describeOwner(owner);
+        String summary = summarize(stacks);
+        RuntimeException saveFailure = null;
+        // Only building and inserting the row may lead to the drop below. What runs after a successful
+        // insert (the log line) stays outside this block: a failure there must not drop a stake the
+        // list already holds, or it would be handed out twice.
+        try {
+            if (pendingReturns == null) {
+                throw new IllegalStateException("the pending-returns list is not available");
+            }
+            PendingStakeReturn entry = new PendingStakeReturn();
+            entry.setOwnerUuid(owner.toString());
+            entry.setItems(serializeStacks(stacks));
+            entry.setStackCount(stacks.size());
+            entry.setCreatedAt(System.currentTimeMillis());
+            pendingReturns.insert(entry);
+        } catch (RuntimeException e) {
+            saveFailure = e;
+        }
+        if (saveFailure == null) {
+            logQuietly(() -> plugin.getLogger().warn(i18n("log_pending_return_saved")
+                    .replace("{PLAYER}", ownerLabel)
+                    .replace("{COUNT}", String.valueOf(stacks.size()))
+                    .replace("{ITEMS}", summary)));
+        } else {
+            RuntimeException e = saveFailure;
+            Location where = lastKnownLocation(owner);
+            for (ItemStack item : stacks) {
+                where.getWorld().dropItemNaturally(where, item);
+            }
+            logQuietly(() -> plugin.getLogger().error(e, i18n("log_pending_return_save_failed")
+                    .replace("{PLAYER}", ownerLabel)
+                    .replace("{COUNT}", String.valueOf(stacks.size()))
+                    .replace("{LOCATION}", where.getWorld().getName() + " "
+                            + where.getBlockX() + " " + where.getBlockY() + " " + where.getBlockZ())
+                    .replace("{ITEMS}", summary)));
+        }
+    }
+
+    /** The player's persistent-data key that lists the hand-overs their saved data already holds. */
+    private static final NamespacedKey DELIVERIES = NamespacedKey.fromString("ultitrade:pending_return_deliveries");
+
+    /**
+     * Hand a joining player what fits of every stake saved for them by {@link #holdStakeForReturn}, and
+     * keep the rest listed for a later join (maintainer answers of 2026-09-24, amended 2026-09-25 for
+     * this step: 「只发装得下的，其余留在列表」).
+     * <p>
+     * The list and the player's saved data cannot be written together, so each entry is handed over in
+     * three writes, ordered so that a crash at any point leaves every item either in the list (as the
+     * next join reads it) or in the player's saved data, never both and never neither:
+     * <ol>
+     *   <li>the entry is marked with a fresh token and the part that stays listed afterwards; its items
+     *       are unchanged, so until step 2 is on disk it still lists everything;</li>
+     *   <li>the items that fit go into the inventory, the token into the player's persistent data, and
+     *       the player's data is saved: inventory and token reach the disk in one write;</li>
+     *   <li>at the player's next join, the entry is completed: it keeps only the part that did not fit,
+     *       or is removed.</li>
+     * </ol>
+     * Step 3 is taken from what the disk says, not from what this session did: at a join the player's
+     * persistent data has just been read from their saved file, so a marked entry whose token is in it
+     * reached the disk and is completed, and one whose token is not never did and is unmarked and handed
+     * over again. Completing in the same session would trust that {@code saveData} wrote the file, and
+     * Paper's {@code saveData} logs a failed write and returns normally. The one exception is a server
+     * with player-data saving disabled ({@code players.disable-saving} in {@code spigot.yml}), where no
+     * token can ever reach the disk: there the entry is completed at once, as the player's inventory
+     * itself is never kept either. Nothing is dropped at the join.
+     *
+     * @param player the player who joined
+     */
+    public void deliverPendingReturns(Player player) {
+        if (pendingReturns == null) {
+            return;
+        }
+        List<PendingStakeReturn> entries;
+        try {
+            entries = pendingReturns.getAll(WhereCondition.builder()
+                    .column("owner_uuid").value(player.getUniqueId().toString()).build());
+        } catch (RuntimeException e) {
+            plugin.getLogger().error(e, i18n("log_pending_return_lookup_failed")
+                    .replace("{PLAYER}", player.getName()));
+            return;
+        }
+        int delivered = 0;
+        int kept = 0;
+        boolean retry = false;
+        for (PendingStakeReturn entry : entries) {
+            if (entry.getDeliveryToken() != null && !settle(player, entry)) {
+                retry = true;
+                continue;
+            }
+            if (entry.getId() == null) {
+                continue; // settled by removal: everything had been handed over
+            }
+            List<ItemStack> stacks;
+            try {
+                stacks = deserializeStacks(entry.getItems());
+            } catch (RuntimeException e) {
+                plugin.getLogger().error(e, i18n("log_pending_return_unreadable")
+                        .replace("{PLAYER}", player.getName())
+                        .replace("{ID}", String.valueOf(entry.getId())));
+                continue;
+            }
+            int[] outcome = handOver(player, entry, stacks);
+            delivered += outcome[0];
+            kept += outcome[1];
+            retry |= outcome[2] > 0;
+        }
+        pruneDeliveries(player, entries);
+        if (retry) {
+            player.sendMessage(text(i18n("message_pending_return_retry")));
+        }
+        if (kept > 0) {
+            player.sendMessage(text(i18n("message_pending_return_partial")
+                    .replace("{COUNT}", String.valueOf(kept))));
+            plugin.getLogger().info(i18n("log_pending_return_kept")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{COUNT}", String.valueOf(kept)));
+        } else if (delivered > 0) {
+            player.sendMessage(text(i18n("message_pending_return_delivered")));
+        }
+        if (delivered > 0) {
+            plugin.getLogger().info(i18n("log_pending_return_delivered")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{COUNT}", String.valueOf(delivered)));
+        }
+    }
+
+    /**
+     * Settle an entry an earlier hand-over marked. Returns whether the entry may be handed over now; a
+     * removed entry comes back with a {@code null} id.
+     */
+    private boolean settle(Player player, PendingStakeReturn entry) {
+        String token = entry.getDeliveryToken();
+        boolean reachedDisk = savedDeliveries(player).contains(token);
+        try {
+            if (reachedDisk) {
+                complete(entry);
+                forgetDelivery(player, token);
+            } else {
+                plugin.getLogger().info(i18n("log_pending_return_redeliver")
+                        .replace("{PLAYER}", player.getName())
+                        .replace("{ID}", String.valueOf(entry.getId())));
+                PendingStakeReturn unmarked = copyOf(entry);
+                unmarked.setDeliveryToken(null);
+                unmarked.setAfterDelivery(null);
+                write(entry, unmarked);
+            }
+            return true;
+        } catch (RuntimeException | IllegalAccessException e) {
+            plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{ID}", String.valueOf(entry.getId())));
+            return false;
+        }
+    }
+
+    /**
+     * Steps 1 and 2 for one entry (step 3 follows at the next join, or at once when player-data saving is
+     * disabled). Returns {items handed over, items kept listed because they did not fit, 1 if the entry
+     * could not be handed over for a storage failure and waits for a later join}.
+     */
+    private int[] handOver(Player player, PendingStakeReturn entry, List<ItemStack> stacks) {
+        List<ItemStack> given = new ArrayList<>();
+        List<ItemStack> remaining = new ArrayList<>();
+        for (ItemStack stack : stacks) {
+            int left = 0;
+            for (ItemStack leftover : player.getInventory().addItem(stack.clone()).values()) {
+                left += leftover.getAmount();
+            }
+            int fitted = stack.getAmount() - left;
+            if (fitted > 0) {
+                ItemStack part = stack.clone();
+                part.setAmount(fitted);
+                given.add(part);
+            }
+            if (left > 0) {
+                ItemStack part = stack.clone();
+                part.setAmount(left);
+                remaining.add(part);
+            }
+        }
+        int givenCount = amount(given);
+        int keptCount = amount(remaining);
+        if (given.isEmpty()) {
+            return new int[] {0, keptCount, 0};
+        }
+        // Step 1: mark. On failure nothing may stay handed over, so the in-memory hand-over is undone.
+        String token = UUID.randomUUID().toString();
+        PendingStakeReturn marked = copyOf(entry);
+        marked.setDeliveryToken(token);
+        marked.setAfterDelivery(remaining.isEmpty() ? "" : serializeStacks(remaining));
+        try {
+            write(entry, marked);
+        } catch (RuntimeException | IllegalAccessException e) {
+            player.getInventory().removeItem(given.toArray(new ItemStack[0]));
+            plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{ID}", String.valueOf(entry.getId())));
+            return new int[] {0, 0, 1};
+        }
+        // Step 2: inventory and token reach the disk together. Saved now so that the window before the
+        // next autosave closes; whether the write landed is read back at the next join (step 3).
+        rememberDelivery(player, token);
+        try {
+            player.saveData();
+        } catch (RuntimeException e) {
+            plugin.getLogger().warn(e, i18n("log_pending_return_player_save_failed")
+                    .replace("{COUNT}", String.valueOf(givenCount))
+                    .replace("{PLAYER}", player.getName()));
+        }
+        if (playerDataSavingDisabled()) {
+            try {
+                complete(entry);
+                forgetDelivery(player, token);
+            } catch (RuntimeException | IllegalAccessException e) {
+                plugin.getLogger().error(e, i18n("log_pending_return_remove_failed")
+                        .replace("{PLAYER}", player.getName())
+                        .replace("{ID}", String.valueOf(entry.getId())));
+            }
+        }
+        return new int[] {givenCount, keptCount, 0};
+    }
+
+    /**
+     * Whether the server never writes player data ({@code players.disable-saving} in {@code spigot.yml}).
+     * Read on each hand-over, so a changed setting applies at the next join.
+     */
+    boolean playerDataSavingDisabled() {
+        try {
+            return Bukkit.spigot().getSpigotConfig().getBoolean("players.disable-saving", false);
+        } catch (RuntimeException | LinkageError e) {
+            return false;
+        }
+    }
+
+    /** Drop every saved marker that no entry of this player carries any more. */
+    private static void pruneDeliveries(Player player, List<PendingStakeReturn> entries) {
+        Set<String> live = new HashSet<>();
+        for (PendingStakeReturn entry : entries) {
+            if (entry.getId() != null && entry.getDeliveryToken() != null) {
+                live.add(entry.getDeliveryToken());
+            }
+        }
+        Set<String> tokens = savedDeliveries(player);
+        if (tokens.retainAll(live)) {
+            writeDeliveries(player, tokens);
+        }
+    }
+
+    /** Keep only the part that did not fit, or remove the entry (its id is then cleared). */
+    private void complete(PendingStakeReturn entry) throws IllegalAccessException {
+        String after = entry.getAfterDelivery();
+        if (after == null || after.isEmpty()) {
+            pendingReturns.delById(entry.getId());
+            entry.setId(null);
+            return;
+        }
+        PendingStakeReturn completed = copyOf(entry);
+        completed.setItems(after);
+        completed.setStackCount(deserializeStacks(after).size());
+        completed.setDeliveryToken(null);
+        completed.setAfterDelivery(null);
+        write(entry, completed);
+    }
+
+    /**
+     * Write {@code next} over the stored entry, and only once that write committed, make {@code entry}
+     * (the in-memory copy the rest of the join reads, marker pruning included) say the same. A failed
+     * write leaves {@code entry} as the table still holds it.
+     */
+    private void write(PendingStakeReturn entry, PendingStakeReturn next) throws IllegalAccessException {
+        pendingReturns.update(next);
+        entry.setItems(next.getItems());
+        entry.setStackCount(next.getStackCount());
+        entry.setDeliveryToken(next.getDeliveryToken());
+        entry.setAfterDelivery(next.getAfterDelivery());
+    }
+
+    private static PendingStakeReturn copyOf(PendingStakeReturn entry) {
+        PendingStakeReturn copy = new PendingStakeReturn();
+        copy.setId(entry.getId());
+        copy.setOwnerUuid(entry.getOwnerUuid());
+        copy.setItems(entry.getItems());
+        copy.setStackCount(entry.getStackCount());
+        copy.setCreatedAt(entry.getCreatedAt());
+        copy.setDeliveryToken(entry.getDeliveryToken());
+        copy.setAfterDelivery(entry.getAfterDelivery());
+        return copy;
+    }
+
+    private static int amount(List<ItemStack> stacks) {
+        int n = 0;
+        for (ItemStack stack : stacks) {
+            n += stack.getAmount();
+        }
+        return n;
+    }
+
+    private static Set<String> savedDeliveries(Player player) {
+        String value = player.getPersistentDataContainer().get(DELIVERIES, PersistentDataType.STRING);
+        Set<String> tokens = new LinkedHashSet<>();
+        if (value != null && !value.isEmpty()) {
+            tokens.addAll(Arrays.asList(value.split(",")));
+        }
+        return tokens;
+    }
+
+    private static void writeDeliveries(Player player, Set<String> tokens) {
+        if (tokens.isEmpty()) {
+            player.getPersistentDataContainer().remove(DELIVERIES);
+        } else {
+            player.getPersistentDataContainer().set(DELIVERIES, PersistentDataType.STRING, String.join(",", tokens));
+        }
+    }
+
+    private static void rememberDelivery(Player player, String token) {
+        Set<String> tokens = savedDeliveries(player);
+        tokens.add(token);
+        writeDeliveries(player, tokens);
+    }
+
+    private static void forgetDelivery(Player player, String token) {
+        Set<String> tokens = savedDeliveries(player);
+        if (tokens.remove(token)) {
+            writeDeliveries(player, tokens);
+        }
+    }
+
+    /**
+     * Write a log line after the stake's fate is settled, without letting a logging failure escape:
+     * {@link #cancelTrade(TradeSession, String)} must still reach {@code cleanupSession}, or a later
+     * cancel of the same session would save or drop the stake a second time.
+     */
+    private void logQuietly(Runnable line) {
+        if (plugin == null) {
+            return;
+        }
+        try {
+            line.run();
+        } catch (RuntimeException ignored) {
+            // The stake is already saved or dropped; the log line is a courtesy.
+        }
+    }
+
+    /** Where to drop a stake that could not be saved: the owner's last position, else the first world's spawn. */
+    private static Location lastKnownLocation(UUID owner) {
+        try {
+            Location last = Bukkit.getOfflinePlayer(owner).getLocation();
+            if (last != null && last.getWorld() != null) {
+                return last;
+            }
+        } catch (RuntimeException | LinkageError ignored) {
+            // A platform without a stored last position for offline players: use the spawn below.
+        }
+        return Bukkit.getWorlds().get(0).getSpawnLocation();
+    }
+
+    /** The owner's last known name and UUID, for an operator reading the log. */
+    private static String describeOwner(UUID owner) {
+        String name = null;
+        try {
+            name = Bukkit.getOfflinePlayer(owner).getName();
+        } catch (RuntimeException ignored) {
+            // The UUID alone still identifies the player.
+        }
+        return name == null ? owner.toString() : name + " (" + owner + ")";
+    }
+
+    /** "DIAMOND x10, GOLD_INGOT x5": the stacks named with their amounts, for the log. */
+    private static String summarize(List<ItemStack> stacks) {
+        StringBuilder out = new StringBuilder();
+        for (ItemStack item : stacks) {
+            if (out.length() > 0) {
+                out.append(", ");
+            }
+            out.append(item.getType().name()).append(" x").append(item.getAmount());
+        }
+        return out.toString();
+    }
+
+    /** Bukkit's own, complete item serialization, as YAML. */
+    static String serializeStacks(List<ItemStack> stacks) {
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("items", stacks);
+        return yaml.saveToString();
+    }
+
+    /**
+     * The inverse of {@link #serializeStacks}.
+     *
+     * @throws IllegalStateException if the text does not read back as a list of item stacks
+     */
+    static List<ItemStack> deserializeStacks(String text) {
+        YamlConfiguration yaml = new YamlConfiguration();
+        try {
+            yaml.loadFromString(text == null ? "" : text);
+        } catch (org.bukkit.configuration.InvalidConfigurationException e) {
+            throw new IllegalStateException("saved stake is not valid YAML", e);
+        }
+        List<?> raw = yaml.getList("items");
+        if (raw == null || raw.isEmpty()) {
+            throw new IllegalStateException("saved stake holds no items");
+        }
+        List<ItemStack> stacks = new ArrayList<>();
+        for (Object element : raw) {
+            if (!(element instanceof ItemStack) || ((ItemStack) element).getType().isAir()) {
+                throw new IllegalStateException("saved stake holds an entry that is not an item");
+            }
+            stacks.add((ItemStack) element);
+        }
+        return stacks;
     }
 
     /**

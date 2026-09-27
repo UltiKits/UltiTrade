@@ -76,6 +76,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- If a trade is cancelled while one participant cannot be found on the server, that participant's
+  staked items are kept and handed back when they next join, instead of being destroyed. They are
+  saved in a new table, `trade_pending_returns`; if they cannot be saved they are dropped at the
+  player's last known location, and the console names the player and the items in both cases.
+  At the join only what fits in the inventory is handed over; the rest stays saved, the player is
+  told how many items are still kept and to free some space and rejoin, and nothing is dropped. With
+  SQLite or MySQL storage a server crash during the hand-over neither loses nor duplicates an item;
+  with JSON storage the list reaches the disk only at the next flush (`datasource.flushRate`), so a
+  crash within that window can hand a stake over a second time (UltiKits/UltiTrade#32).
+- 修复：交易取消时若服务器找不到一方，其押入的物品会被保存，并在其下次进服时发还，不再被销毁。物品保存在新表
+  `trade_pending_returns` 中；无法保存时掉落在该玩家最后所在的位置，两种情况下控制台都会写明玩家与物品。
+  进服发还时只发背包装得下的部分，其余继续保存，并告知玩家还有多少物品保留、腾出空间后重新进服领取，不会掉落在地。
+  使用 SQLite 或 MySQL 存储时，发还过程中服务器崩溃既不会丢失也不会重复物品；使用 JSON 存储时列表要到下次写盘
+  （`datasource.flushRate`）才落盘，在此窗口内崩溃可能导致重复发还（UltiKits/UltiTrade#32）。
 - `language: en` now applies to everything this module shows or logs: every `/trade` reply and its
   help, the trade request (clickable buttons, their hover text and the countdown BossBar), the
   request, accept, deny and cancel replies and every cancellation reason, the trade window and the

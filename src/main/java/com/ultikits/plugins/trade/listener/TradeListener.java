@@ -24,6 +24,7 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
@@ -528,6 +529,15 @@ public class TradeListener implements Listener {
         }
     }
     
+    /**
+     * Hand a joining player the stake of any trade that was cancelled while the server could not
+     * find them (UltiKits/UltiTrade#32). Runs on the main thread, where the join event is fired.
+     */
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        tradeService.deliverPendingReturns(event.getPlayer());
+    }
+
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
