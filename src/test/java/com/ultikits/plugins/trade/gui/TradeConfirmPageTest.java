@@ -116,14 +116,19 @@ class TradeConfirmPageTest {
         @Test
         @DisplayName("each preview carries the trade-item marker in its lore (UltiKits/UltiTrade#43)")
         void previewsCarryTheMarker() {
-            org.bukkit.inventory.meta.ItemMeta meta = Bukkit.getItemFactory().getItemMeta(Material.DIAMOND);
             String marker = org.bukkit.ChatColor.translateAlternateColorCodes('&',
                     tradeService.i18n("confirm_item_marker"));
-            clearInvocations(meta);
+            // The shared fixture stubs the item factory, under which an item carries no meta at all;
+            // the live server's own factory gives each preview a real meta whose lore can be read.
+            doCallRealMethod().when(Bukkit.getServer()).getItemFactory();
 
-            openPage(uuid1, 1);
+            org.bukkit.inventory.Inventory inventory = openPage(uuid1, 1);
 
-            verify(meta, atLeastOnce()).setLore(argThat(lore -> lore != null && lore.contains(marker)));
+            verify(inventory).setItem(eq(TradeConfirmPage.YOUR_ITEMS_START), argThat(item -> item != null
+                    && item.getType() == Material.DIAMOND
+                    && item.getItemMeta() != null
+                    && item.getItemMeta().getLore() != null
+                    && item.getItemMeta().getLore().contains(marker)));
         }
     }
 
