@@ -462,6 +462,22 @@ class TradeListenerTest {
         }
 
         @Test
+        @DisplayName("an invalid answer to the old prompt does not reopen a window over the newer trade")
+        void invalidAnswerToTheOldPromptReopensNothing() {
+            openMoneyPrompt(oldTrade);
+            when(tradeService.getSession(uuid1)).thenReturn(newTrade);
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler, player1);
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, "abc", new HashSet<>()));
+            org.mockito.ArgumentCaptor<Runnable> reopen = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTask(any(), reopen.capture());
+            reopen.getValue().run();
+
+            verify(player1, never()).openInventory(any(Inventory.class));
+        }
+
+        @Test
         @DisplayName("POSITIVE CONTROL: the prompt's own timeout reopens its own trade's window")
         void ownTimeoutReopensItsOwnWindow() {
             Runnable timeout = openMoneyPrompt(oldTrade);
