@@ -33,6 +33,9 @@ public class TradeConfirmPage implements InventoryHolder {
     private final Inventory inventory;
     private final Runnable onConfirm;
     private final Runnable onCancel;
+
+    /** Set once the page has been answered by a button or by being closed, so it answers only once. */
+    private boolean answered;
     
     // GUI layout
     public static final int ROWS = 5;
@@ -232,16 +235,36 @@ public class TradeConfirmPage implements InventoryHolder {
         
         int slot = event.getRawSlot();
         
+        if (answered) {
+            return;
+        }
         if (slot == CONFIRM_SLOT) {
+            answered = true;
             viewer.closeInventory();
             if (onConfirm != null) {
                 onConfirm.run();
             }
         } else if (slot == CANCEL_SLOT) {
+            answered = true;
             viewer.closeInventory();
             if (onCancel != null) {
                 onCancel.run();
             }
+        }
+    }
+
+    /**
+     * Handles the page being closed. A close that is not a button's own counts as the Cancel ("back")
+     * button, so the player returns to the trade window rather than being left with no window while
+     * the trade keeps running.
+     */
+    public void handleClose() {
+        if (answered) {
+            return;
+        }
+        answered = true;
+        if (onCancel != null) {
+            onCancel.run();
         }
     }
     

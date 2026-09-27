@@ -38,6 +38,10 @@ public class TradeSession {
     
     // Trade state
     private TradeState state = TradeState.TRADING;
+
+    // Bumped by every change to either player's offer, so a view built from the offer can tell
+    // whether it is still what the session holds.
+    private int revision = 0;
     
     public TradeSession(Player p1, Player p2) {
         this.sessionId = UUID.randomUUID();
@@ -73,6 +77,7 @@ public class TradeSession {
     // Items management
     public void setItem(UUID player, int slot, ItemStack item) {
         resetConfirmation();
+        revision++;
         if (player.equals(player1)) {
             if (item == null) {
                 player1Items.remove(slot);
@@ -99,6 +104,7 @@ public class TradeSession {
     // Money management
     public void setMoney(UUID player, double amount) {
         resetConfirmation();
+        revision++;
         if (player.equals(player1)) {
             player1Money = amount;
         } else {
@@ -117,6 +123,7 @@ public class TradeSession {
     // Experience management
     public void setExp(UUID player, int amount) {
         resetConfirmation();
+        revision++;
         if (player.equals(player1)) {
             player1Exp = amount;
         } else {
@@ -149,6 +156,16 @@ public class TradeSession {
         return player1Confirmed && player2Confirmed;
     }
     
+    /**
+     * How many times either player's offer has changed. The large-trade confirmation page records it
+     * when it is built and refuses to confirm an offer that changed while it was open.
+     *
+     * @return the offer's revision
+     */
+    public int getRevision() {
+        return revision;
+    }
+
     public void resetConfirmation() {
         player1Confirmed = false;
         player2Confirmed = false;

@@ -76,6 +76,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Clicking Confirm on a trade whose money or experience meets `confirm-threshold` now opens the
+  confirmation page and leaves the trade running. Before, closing the trade window to open the page
+  cancelled the trade first, returning every item, and the page then opened on a trade that no longer
+  existed (UltiKits/UltiTrade#23). The page's Cancel button, or closing the page with Esc, returns to the
+  trade window; its Confirm button confirms only the offer the page showed — if either player changed an
+  offer while it was open, nothing is confirmed and the player is told to check the trade again.
+- 当交易的金币或经验达到 `confirm-threshold` 时，点击确认现在会打开确认页面，交易继续进行。此前为打开该页面而关闭交易窗口时会先取消交易并退回全部物品，
+  页面随后打开的是已不存在的交易（UltiKits/UltiTrade#23）。确认页面的取消按钮或按 Esc 关闭页面会回到交易窗口；确认按钮只确认页面所显示的出价——
+  页面打开期间任一方改动了出价，则不会确认，并提示玩家重新检查交易。
+
 - In the trade window, clicking one of your own empty slots with nothing in hand, or opening the money or
   experience prompt, no longer clears both players' confirmations. Confirmations are cleared only when an
   offer actually changes, and both windows are then redrawn. Before, such a click cleared them without

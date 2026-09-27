@@ -504,7 +504,9 @@ public class TradeListener implements Listener {
     @EventHandler
     public void onInventoryClose(InventoryCloseEvent event) {
         if (event.getInventory().getHolder() instanceof TradeConfirmPage) {
-            // Don't cancel trade when closing confirm page
+            // Closing the confirmation page never cancels the trade; a close that is not one of the
+            // page's own buttons goes back to the trade window.
+            ((TradeConfirmPage) event.getInventory().getHolder()).handleClose();
             return;
         }
         
@@ -516,6 +518,12 @@ public class TradeListener implements Listener {
         
         // Don't cancel if waiting for input
         if (waitingForInput.containsKey(player.getUniqueId())) {
+            return;
+        }
+
+        // Nor when the window was closed to open the large-trade confirmation page
+        // (UltiKits/UltiTrade#23).
+        if (tradeService.isOpeningConfirmPage(player.getUniqueId())) {
             return;
         }
         

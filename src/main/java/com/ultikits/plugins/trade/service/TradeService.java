@@ -69,6 +69,9 @@ public class TradeService {
     private final Map<UUID, BukkitTask> bossBarTasks = new ConcurrentHashMap<>();
     
     // Bukkit plugin instance for scheduler tasks
+    /** Players between closing their trade window and seeing the confirmation page (UltiKits/UltiTrade#23). */
+    private final Set<UUID> confirmPageTransitions = ConcurrentHashMap.newKeySet();
+
     private Plugin bukkitPlugin;
 
     // Stakes of cancelled trades whose owner could not be found, handed over at their next join
@@ -590,36 +593,7 @@ public class TradeService {
         // If already confirmed once (in session), proceed
         if (!session.isConfirmed(player.getUniqueId()) && 
             (totalMoney >= threshold || totalExp >= threshold)) {
-            // Show confirmation page
-            player.closeInventory();
-            Bukkit.getScheduler().runTaskLater(bukkitPlugin, () -> {
-                TradeConfirmPage confirmPage = new TradeConfirmPage(
-                    this, session, player,
-                    () -> {
-                        // On confirm - mark as confirmed and reopen trade GUI
-                        session.setConfirmed(player.getUniqueId(), true);
-                        notifyConfirmation(session, player);
-                        
-                        // Reopen trade GUI
-                        Bukkit.getScheduler().runTaskLater(bukkitPlugin, () -> {
-                            if (isTrading(player.getUniqueId())) {
-                                TradeGUI gui = new TradeGUI(this, session, player);
-                                player.openInventory(gui.getInventory());
-                            }
-                        }, 1L);
-                    },
-                    () -> {
-                        // On cancel - reopen trade GUI
-                        Bukkit.getScheduler().runTaskLater(bukkitPlugin, () -> {
-                            if (isTrading(player.getUniqueId())) {
-                                TradeGUI gui = new TradeGUI(this, session, player);
-                                player.openInventory(gui.getInventory());
-                            }
-                        }, 1L);
-                    }
-                );
-                confirmPage.open();
-            }, 1L);
+            openConfirmPage(session, player);
             return;
         }
         
@@ -632,6 +606,101 @@ public class TradeService {
         }
     }
     
+    /**
+     * Whether {@code playerUuid} is between closing their trade window and seeing the large-trade
+     * confirmation page. Closing the trade window is what cancels a trade, so the listener skips that
+     * for this one close (UltiKits/UltiTrade#23).
+     *
+     * @param playerUuid the player
+     * @return true while the confirmation page is being opened for them
+     */
+    public boolean isOpeningConfirmPage(UUID playerUuid) {
+        return confirmPageTransitions.contains(playerUuid);
+    }
+
+    /**
+     * Replaces {@code player}'s trade window with the large-trade confirmation page.
+     * <p>
+     * The window has to be closed first, and closing a trade window cancels the trade; the close used
+     * to schedule that cancellation ahead of the page, so every large trade was cancelled the moment
+     * its player clicked Confirm (UltiKits/UltiTrade#23). The player is marked as opening the page
+     * before the close, and the mark is removed when the scheduled open runs -- whatever it then
+     * finds, so it never outlives this transition. The page opens only if the player is still in this
+     * same, running trade.
+     */
+    private void openConfirmPage(TradeSession session, Player player) {
+        UUID uuid = player.getUniqueId();
+        confirmPageTransitions.add(uuid);
+        player.closeInventory();
+        Bukkit.getScheduler().runTaskLater(bukkitPlugin, () -> {
+            confirmPageTransitions.remove(uuid);
+            if (!isCurrentSession(uuid, session)) {
+                return;
+            }
+            int shownRevision = session.getRevision();
+            new TradeConfirmPage(
+                this, session, player,
+                () -> confirmFromPage(session, player, shownRevision),
+                () -> reopenTradeWindow(session, player)
+            ).open();
+        }, 1L);
+    }
+
+    /**
+     * The confirmation page's Confirm button: marks {@code player} confirmed on the offer the page
+     * showed. If either offer changed while the page was open, nothing is confirmed and the player is
+     * sent back to the trade window to look again, because the page's figures are no longer the trade.
+     */
+    private void confirmFromPage(TradeSession session, Player player, int shownRevision) {
+        UUID uuid = player.getUniqueId();
+        if (!isCurrentSession(uuid, session)) {
+            return;
+        }
+        if (session.getRevision() != shownRevision) {
+            player.sendMessage(text(i18n("confirm_page_offer_changed")));
+            reopenTradeWindow(session, player);
+            return;
+        }
+        session.setConfirmed(uuid, true);
+        notifyConfirmation(session, player);
+        reopenTradeWindow(session, player);
+        repaintOpenTradeWindows(session);
+    }
+
+    /** Opens a fresh trade window for {@code player} on the next tick, if they are still in this trade. */
+    private void reopenTradeWindow(TradeSession session, Player player) {
+        Bukkit.getScheduler().runTaskLater(bukkitPlugin, () -> {
+            if (isCurrentSession(player.getUniqueId(), session)) {
+                TradeGUI gui = new TradeGUI(this, session, player);
+                player.openInventory(gui.getInventory());
+            }
+        }, 1L);
+    }
+
+    /** Redraws every trade window of this trade that is currently open. */
+    private void repaintOpenTradeWindows(TradeSession session) {
+        for (UUID participant : new UUID[] {session.getPlayer1(), session.getPlayer2()}) {
+            Player participantPlayer = Bukkit.getPlayer(participant);
+            if (participantPlayer == null) {
+                continue;
+            }
+            InventoryView view = participantPlayer.getOpenInventory();
+            if (view != null && view.getTopInventory() != null
+                    && view.getTopInventory().getHolder() instanceof TradeGUI) {
+                ((TradeGUI) view.getTopInventory().getHolder()).update();
+            }
+        }
+    }
+
+    /**
+     * Whether {@code session} is still {@code playerUuid}'s running trade. A delayed task decides from
+     * this, never from whether the player is trading at all: by the time it runs the player may be in
+     * a different, newer trade.
+     */
+    private boolean isCurrentSession(UUID playerUuid, TradeSession session) {
+        return getSession(playerUuid) == session && session.getState() == TradeSession.TradeState.TRADING;
+    }
+
     /**
      * Notify other player of confirmation.
      */
@@ -1341,6 +1410,8 @@ public class TradeService {
         activeSessions.remove(session.getSessionId());
         playerSessionMap.remove(session.getPlayer1());
         playerSessionMap.remove(session.getPlayer2());
+        confirmPageTransitions.remove(session.getPlayer1());
+        confirmPageTransitions.remove(session.getPlayer2());
     }
     
     /**
