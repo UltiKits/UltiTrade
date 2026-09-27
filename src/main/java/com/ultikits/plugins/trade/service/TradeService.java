@@ -6,6 +6,7 @@ import com.ultikits.plugins.trade.entity.TradeRequest;
 import com.ultikits.plugins.trade.entity.TradeSession;
 import com.ultikits.plugins.trade.gui.TradeConfirmPage;
 import com.ultikits.plugins.trade.gui.TradeGUI;
+import com.ultikits.plugins.trade.util.Placeholders;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.Autowired;
 import com.ultikits.ultitools.annotations.Scheduled;
@@ -1073,12 +1074,14 @@ public class TradeService {
             for (ItemStack item : stacks) {
                 where.getWorld().dropItemNaturally(where, item);
             }
-            logQuietly(() -> plugin.getLogger().error(e, i18n("log_pending_return_save_failed")
-                    .replace("{PLAYER}", ownerLabel)
-                    .replace("{COUNT}", String.valueOf(stacks.size()))
-                    .replace("{LOCATION}", where.getWorld().getName() + " "
-                            + where.getBlockX() + " " + where.getBlockY() + " " + where.getBlockZ())
-                    .replace("{ITEMS}", summary)));
+            // One pass: a world name is inserted exactly as it is, even when it contains a placeholder
+            // token (the class of UltiKits/UltiMail#37).
+            logQuietly(() -> plugin.getLogger().error(e, Placeholders.fill(i18n("log_pending_return_save_failed"),
+                    "{PLAYER}", ownerLabel,
+                    "{COUNT}", String.valueOf(stacks.size()),
+                    "{LOCATION}", where.getWorld().getName() + " "
+                            + where.getBlockX() + " " + where.getBlockY() + " " + where.getBlockZ(),
+                    "{ITEMS}", summary)));
         }
     }
 

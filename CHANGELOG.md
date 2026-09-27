@@ -76,6 +76,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Two console lines name a file path or a world exactly as they are: the warning about a setting this
+  version no longer reads, and the error for staked items that could not be saved and were dropped. A path
+  or world name containing `{KEY}`, `{REASON}` or `{ITEMS}` used to be rewritten, because it was inserted
+  before those placeholders were filled. Every placeholder of the line is now filled in one pass (the same
+  fix as UltiKits/UltiMail#37).
+- 两条控制台日志现在按原样给出文件路径或世界名：已不再读取的配置项警告，以及无法保存而掉落的交易物品的错误。此前路径或世界名先于
+  `{KEY}`、`{REASON}`、`{ITEMS}` 占位符插入，含这些占位符时会被改写。现在同一行的所有占位符一次性替换（与 UltiKits/UltiMail#37 相同的修复）。
+
 - When `/ul reload UltiTrade` makes money trading unavailable (money trading turned off, or no economy
   provider found), the money offered in every open trade is withdrawn and both players are told, so the
   rest of the trade can still complete; experience offers are withdrawn the same way when experience trading
