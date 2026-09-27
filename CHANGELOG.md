@@ -76,6 +76,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The money and experience chat prompts refuse `NaN` and `Infinity` with `Invalid amount!`. Before,
+  `NaN` was accepted as the money offer; the money transfer was then skipped while the items still moved,
+  and the other player saw `NaN` (UltiKits/UltiTrade#29).
+- 金币和经验的聊天输入提示会以「无效的数额」拒绝 `NaN` 和 `Infinity`。此前 `NaN` 会被接受为金币出价，完成交易时金币转账被跳过而物品照常交换，
+  对方看到的是 `NaN`（UltiKits/UltiTrade#29）。
+
 - On the large-trade confirmation page, a side offering four or more items shows three item previews
   and the "N more items" count in a slot of its own; the count used to cover the third preview, so only
   two items were visible (UltiKits/UltiTrade#22).

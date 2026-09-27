@@ -391,6 +391,14 @@ public class TradeListener implements Listener {
         // Parse number
         try {
             double value = Double.parseDouble(message);
+            // NaN and the infinities parse, and NaN passes both the negative and the balance check,
+            // after which every "money > 0" test at completion is false: the money transfer was
+            // skipped while the items still moved (UltiKits/UltiTrade#29).
+            if (!Double.isFinite(value)) {
+                player.sendMessage(text(tradeService.i18n("invalid_amount")));
+                reopenGUI(player);
+                return;
+            }
             if (value < 0) {
                 player.sendMessage(text(tradeService.i18n("amount_negative")));
                 reopenGUI(player);
