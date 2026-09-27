@@ -663,6 +663,12 @@ public class TradeService {
         }
         session.setConfirmed(uuid, true);
         notifyConfirmation(session, player);
+        // The same completion the below-threshold path performs: a large trade used to stop here with
+        // both players confirmed and never complete (UltiKits/UltiTrade#21).
+        if (session.isBothConfirmed()) {
+            completeTrade(session);
+            return;
+        }
         reopenTradeWindow(session, player);
         repaintOpenTradeWindows(session);
     }

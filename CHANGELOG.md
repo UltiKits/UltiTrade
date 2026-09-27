@@ -76,6 +76,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A trade whose money or experience meets `confirm-threshold` completes once both players have confirmed
+  through the confirmation page, exactly as a smaller trade does. Before, the page only recorded the
+  confirmation, so such a trade could never complete (UltiKits/UltiTrade#21).
+- 金币或经验达到 `confirm-threshold` 的交易，在双方都通过确认页面确认后即完成，与较小的交易一致。此前确认页面只记录确认，这样的交易永远无法完成（UltiKits/UltiTrade#21）。
+
 - Clicking Confirm on a trade whose money or experience meets `confirm-threshold` now opens the
   confirmation page and leaves the trade running. Before, closing the trade window to open the page
   cancelled the trade first, returning every item, and the page then opened on a trade that no longer
