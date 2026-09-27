@@ -221,13 +221,8 @@ class TradeListenerTest {
         @Test
         @DisplayName("Should remove from waiting for input on quit")
         void removeFromWaitingOnQuit() throws Exception {
-            Map<UUID, ?> waitingForInput = UltiTradeTestHelper.getField(listener, "waitingForInput");
-            // Add player to waiting list - we need to use the enum via reflection
-            Class<?> inputTypeClass = Class.forName("com.ultikits.plugins.trade.listener.TradeListener$InputType");
-            Object moneyType = inputTypeClass.getEnumConstants()[0]; // MONEY
-            @SuppressWarnings("unchecked")
-            Map<UUID, Object> typedMap = (Map<UUID, Object>) waitingForInput;
-            typedMap.put(uuid1, moneyType);
+            Map<UUID, TradeListener.PendingPrompt> waitingForInput = UltiTradeTestHelper.getField(listener, "waitingForInput");
+            waitingForInput.put(uuid1, new TradeListener.PendingPrompt(TradeListener.InputType.MONEY, null));
 
             when(tradeService.isTrading(uuid1)).thenReturn(false);
 
@@ -1129,12 +1124,8 @@ class TradeListenerTest {
         @Test
         @DisplayName("Should not cancel trade when waiting for input")
         void dontCancelWhenWaitingForInput() throws Exception {
-            Map<UUID, ?> waitingForInput = UltiTradeTestHelper.getField(listener, "waitingForInput");
-            Class<?> inputTypeClass = Class.forName("com.ultikits.plugins.trade.listener.TradeListener$InputType");
-            Object moneyType = inputTypeClass.getEnumConstants()[0];
-            @SuppressWarnings("unchecked")
-            Map<UUID, Object> typedMap = (Map<UUID, Object>) waitingForInput;
-            typedMap.put(uuid1, moneyType);
+            Map<UUID, TradeListener.PendingPrompt> waitingForInput = UltiTradeTestHelper.getField(listener, "waitingForInput");
+            waitingForInput.put(uuid1, new TradeListener.PendingPrompt(TradeListener.InputType.MONEY, null));
 
             TradeGUI gui = mock(TradeGUI.class);
             TradeSession session = new TradeSession(player1, player2);
@@ -1297,10 +1288,10 @@ class TradeListenerTest {
         @Test
         @DisplayName("Should handle valid money input")
         void handleValidMoneyInput() throws Exception {
-            addToWaitingForInput(uuid1, 0); // MONEY
 
             TradeSession session = new TradeSession(player1, player2);
             when(tradeService.getSession(uuid1)).thenReturn(session);
+            addToWaitingForInput(uuid1, 0); // MONEY
             when(tradeService.hasEconomy()).thenReturn(true);
             net.milkbowl.vault.economy.Economy mockEconomy = UltiTradeTestHelper.createMockEconomy();
             when(tradeService.getEconomy()).thenReturn(mockEconomy);
@@ -1317,10 +1308,10 @@ class TradeListenerTest {
         @Test
         @DisplayName("Should handle valid experience input")
         void handleValidExpInput() throws Exception {
-            addToWaitingForInput(uuid1, 1); // EXPERIENCE
 
             TradeSession session = new TradeSession(player1, player2);
             when(tradeService.getSession(uuid1)).thenReturn(session);
+            addToWaitingForInput(uuid1, 1); // EXPERIENCE
             when(tradeService.getTotalExperience(player1)).thenReturn(1000);
 
             AsyncPlayerChatEvent event = new AsyncPlayerChatEvent(false, player1, "500", new HashSet<>());
@@ -1335,10 +1326,10 @@ class TradeListenerTest {
         @Test
         @DisplayName("Should reject money input exceeding balance")
         void rejectInsufficientBalance() throws Exception {
-            addToWaitingForInput(uuid1, 0); // MONEY
 
             TradeSession session = new TradeSession(player1, player2);
             when(tradeService.getSession(uuid1)).thenReturn(session);
+            addToWaitingForInput(uuid1, 0); // MONEY
             when(tradeService.hasEconomy()).thenReturn(true);
             net.milkbowl.vault.economy.Economy mockEconomy = mock(net.milkbowl.vault.economy.Economy.class);
             when(mockEconomy.getBalance(player1)).thenReturn(100.0);
@@ -1355,10 +1346,10 @@ class TradeListenerTest {
         @Test
         @DisplayName("a reload that drops the provider while the money prompt is answered does not throw, keeps the amount and reopens the GUI (UltiKits/UltiTrade#26)")
         void moneyInputAfterProviderDroppedMidRead() throws Exception {
-            addToWaitingForInput(uuid1, 0); // MONEY
 
             TradeSession session = new TradeSession(player1, player2);
             when(tradeService.getSession(uuid1)).thenReturn(session);
+            addToWaitingForInput(uuid1, 0); // MONEY
             when(tradeService.isTrading(uuid1)).thenReturn(true);
             // The race: the availability check still sees the provider, the second read does not.
             when(tradeService.hasEconomy()).thenReturn(true);
@@ -1377,10 +1368,10 @@ class TradeListenerTest {
         @Test
         @DisplayName("provider still held but enable-money-trade already false in memory: the money amount is refused (UltiKits/UltiTrade#26)")
         void moneyInputRefusedWhenMoneyTradeOffButProviderHeld() throws Exception {
-            addToWaitingForInput(uuid1, 0); // MONEY
 
             TradeSession session = new TradeSession(player1, player2);
             when(tradeService.getSession(uuid1)).thenReturn(session);
+            addToWaitingForInput(uuid1, 0); // MONEY
             net.milkbowl.vault.economy.Economy heldEconomy = UltiTradeTestHelper.createMockEconomy();
             when(tradeService.getEconomy()).thenReturn(heldEconomy);
             when(config.isEnableMoneyTrade()).thenReturn(false);
@@ -1396,10 +1387,10 @@ class TradeListenerTest {
         @Test
         @DisplayName("experience prompt answered after a reload turned enable-exp-trade off: the amount is refused and the GUI reopens (UltiKits/UltiTrade#26)")
         void expInputRefusedWhenExpTradeOff() throws Exception {
-            addToWaitingForInput(uuid1, 1); // EXPERIENCE
 
             TradeSession session = new TradeSession(player1, player2);
             when(tradeService.getSession(uuid1)).thenReturn(session);
+            addToWaitingForInput(uuid1, 1); // EXPERIENCE
             when(tradeService.getTotalExperience(player1)).thenReturn(1000);
             when(config.isEnableExpTrade()).thenReturn(false);
 
@@ -1416,10 +1407,10 @@ class TradeListenerTest {
         @Test
         @DisplayName("Should reject exp input exceeding available exp")
         void rejectInsufficientExp() throws Exception {
-            addToWaitingForInput(uuid1, 1); // EXPERIENCE
 
             TradeSession session = new TradeSession(player1, player2);
             when(tradeService.getSession(uuid1)).thenReturn(session);
+            addToWaitingForInput(uuid1, 1); // EXPERIENCE
             when(tradeService.getTotalExperience(player1)).thenReturn(100);
 
             AsyncPlayerChatEvent event = new AsyncPlayerChatEvent(false, player1, "500", new HashSet<>());
@@ -1433,9 +1424,9 @@ class TradeListenerTest {
         @Test
         @DisplayName("Should handle trade ended during input")
         void tradeEndedDuringInput() throws Exception {
-            addToWaitingForInput(uuid1, 0); // MONEY
 
             when(tradeService.getSession(uuid1)).thenReturn(null);
+            addToWaitingForInput(uuid1, 0); // MONEY
 
             AsyncPlayerChatEvent event = new AsyncPlayerChatEvent(false, player1, "500", new HashSet<>());
 
@@ -1448,13 +1439,14 @@ class TradeListenerTest {
         /**
          * Helper to add a player to the waiting for input map.
          */
+        /**
+         * Opens a prompt for {@code uuid} in the trade the service currently reports for them, as the
+         * money and experience slot clicks do; call it after stubbing {@code getSession}.
+         */
         private void addToWaitingForInput(UUID uuid, int typeOrdinal) throws Exception {
-            Map<UUID, ?> waitingForInput = UltiTradeTestHelper.getField(listener, "waitingForInput");
-            Class<?> inputTypeClass = Class.forName("com.ultikits.plugins.trade.listener.TradeListener$InputType");
-            Object inputType = inputTypeClass.getEnumConstants()[typeOrdinal];
-            @SuppressWarnings("unchecked")
-            Map<UUID, Object> typedMap = (Map<UUID, Object>) waitingForInput;
-            typedMap.put(uuid, inputType);
+            Map<UUID, TradeListener.PendingPrompt> waitingForInput = UltiTradeTestHelper.getField(listener, "waitingForInput");
+            waitingForInput.put(uuid, new TradeListener.PendingPrompt(
+                    TradeListener.InputType.values()[typeOrdinal], tradeService.getSession(uuid)));
         }
     }
 

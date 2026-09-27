@@ -57,10 +57,21 @@ public class TradeListener implements Listener {
     private static final int MAPPED_PLAYER_SLOTS = 36;
 
     // Track players waiting for input (money/exp)
-    private final Map<UUID, InputType> waitingForInput = new HashMap<>();
-    
-    private enum InputType {
+    private final Map<UUID, PendingPrompt> waitingForInput = new HashMap<>();
+
+    enum InputType {
         MONEY, EXPERIENCE
+    }
+
+    /** A chat prompt a player has open: what it asks for, and the trade it was opened in. */
+    static final class PendingPrompt {
+        final InputType type;
+        final TradeSession session;
+
+        PendingPrompt(InputType type, TradeSession session) {
+            this.type = type;
+            this.session = session;
+        }
     }
 
     /**
@@ -192,7 +203,7 @@ public class TradeListener implements Listener {
             player.closeInventory();
             player.sendMessage(text(tradeService.i18n("input_money_prompt")));
             player.sendMessage(text(tradeService.i18n("input_cancel")));
-            waitingForInput.put(player.getUniqueId(), InputType.MONEY);
+            waitingForInput.put(player.getUniqueId(), new PendingPrompt(InputType.MONEY, session));
             
             // Reopen GUI after a delay if no input
             Bukkit.getScheduler().runTaskLater(getBukkitPlugin(), () -> {
@@ -217,7 +228,7 @@ public class TradeListener implements Listener {
             player.sendMessage(text(tradeService.i18n("input_exp_current")
                 .replace("{AMOUNT}", String.valueOf(tradeService.getTotalExperience(player)))));
             player.sendMessage(text(tradeService.i18n("input_cancel")));
-            waitingForInput.put(player.getUniqueId(), InputType.EXPERIENCE);
+            waitingForInput.put(player.getUniqueId(), new PendingPrompt(InputType.EXPERIENCE, session));
             
             // Reopen GUI after a delay if no input
             Bukkit.getScheduler().runTaskLater(getBukkitPlugin(), () -> {
@@ -365,11 +376,12 @@ public class TradeListener implements Listener {
     @EventHandler
     public void onPlayerChat(org.bukkit.event.player.AsyncPlayerChatEvent event) {
         Player player = event.getPlayer();
-        InputType inputType = waitingForInput.remove(player.getUniqueId());
-        
-        if (inputType == null) {
+        PendingPrompt prompt = waitingForInput.remove(player.getUniqueId());
+
+        if (prompt == null) {
             return;
         }
+        InputType inputType = prompt.type;
         
         event.setCancelled(true);
         String message = event.getMessage().trim();
