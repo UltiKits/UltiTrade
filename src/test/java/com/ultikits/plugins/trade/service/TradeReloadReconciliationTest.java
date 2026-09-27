@@ -464,6 +464,17 @@ class TradeReloadReconciliationTest {
             return plain;
         }
 
+        private String plainDisplayName(ItemStack item) {
+            ItemMeta meta = item == null ? null : item.getItemMeta();
+            return meta == null ? null : ChatColor.stripColor(meta.getDisplayName());
+        }
+
+        /** {@code key}'s text in {@code code}'s catalogue, colour codes translated then stripped. */
+        private String plainCatalogueText(String code, String key) {
+            return ChatColor.stripColor(ChatColor.translateAlternateColorCodes('&',
+                    com.ultikits.plugins.trade.i18n.CatalogueText.text(code, key)));
+        }
+
         private TradeGUI openWindow(Player viewer, Inventory top) {
             TradeGUI gui = new TradeGUI(tradeService, session, viewer);
             gui.update();
@@ -493,6 +504,28 @@ class TradeReloadReconciliationTest {
             tradeService.confirmTrade(counterparty);
             verify(vaultEconomy).withdrawPlayer(offerer, 1000.0);
             verify(vaultEconomy).depositPlayer(counterparty, 0.0);
+        }
+
+        @Test
+        @DisplayName("a reload that switches the language re-renders the cancel button too, not just the controls a tax change touches (UltiKits/UltiTrade#44)")
+        void reloadRerendersCancelButtonInNewLanguage() throws Exception {
+            TradeGUI offererWindow = openWindow(offerer, offererTop);
+            openWindow(counterparty, counterpartyTop);
+            Inventory windowContents = offererWindow.getInventory();
+            clearInvocations(windowContents, offererView, counterpartyView);
+
+            // TradeGUI reads text through tradeService#i18n, which forwards to the plugin
+            // UltiTradeTestHelper bound into tradeService's own "plugin" field (UltiTradeTestHelper#setUp),
+            // not the local "plugin" mock reload() drives -- restub that one to switch languages.
+            lenient().when(UltiTradeTestHelper.getMockPlugin().i18n(anyString()))
+                    .thenAnswer(com.ultikits.plugins.trade.i18n.CatalogueText.answer("en"));
+            reload("enable-money-trade: true\ntrade-tax: 0.0\n");
+
+            ArgumentCaptor<ItemStack> cancelSlot = ArgumentCaptor.forClass(ItemStack.class);
+            verify(windowContents, atLeastOnce()).setItem(eq(TradeGUI.CANCEL_SLOT), cancelSlot.capture());
+            assertThat(cancelSlot.getAllValues())
+                    .extracting(this::plainDisplayName)
+                    .contains(plainCatalogueText("en", "gui_cancel"));
         }
 
         @Test
