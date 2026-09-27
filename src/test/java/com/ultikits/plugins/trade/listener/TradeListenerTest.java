@@ -1127,6 +1127,32 @@ class TradeListenerTest {
             verify(player1).sendMessage(contains("\u53D6\u6D88\u8F93\u5165")); // "取消输入"
         }
 
+        /**
+         * UltiKits/UltiTrade#35: the window reopened after a {@code cancel} reply shows the staked
+         * items, not an empty trade.
+         */
+        @Test
+        @DisplayName("The window reopened after a cancel reply shows the stakes (UltiKits/UltiTrade#35)")
+        void cancelReplyReopensAWindowShowingTheStakes() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            ItemStack mine = new ItemStack(org.bukkit.Material.DIAMOND, 3);
+            session.setItem(uuid1, 0, mine);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            when(tradeService.isTrading(uuid1)).thenReturn(true);
+            when(tradeService.getConfig()).thenReturn(config);
+            addToWaitingForInput(uuid1, 0); // MONEY
+            org.bukkit.inventory.Inventory inventory = org.bukkit.Bukkit.createInventory(null, 54, "x");
+            clearInvocations(inventory);
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, "cancel", new HashSet<>()));
+            org.mockito.ArgumentCaptor<Runnable> reopen = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(org.bukkit.Bukkit.getServer().getScheduler()).runTask(any(), reopen.capture());
+            reopen.getValue().run();
+
+            verify(player1).openInventory(inventory);
+            verify(inventory).setItem(TradeGUI.YOUR_SLOTS[0], mine);
+        }
+
         @Test
         @DisplayName("Should handle negative value input")
         void handleNegativeValue() throws Exception {
