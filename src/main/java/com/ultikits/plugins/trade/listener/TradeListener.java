@@ -29,9 +29,9 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Listener for trade GUI interactions and shift+right-click trading.
@@ -56,8 +56,9 @@ public class TradeListener implements Listener {
      */
     private static final int MAPPED_PLAYER_SLOTS = 36;
 
-    // Track players waiting for input (money/exp)
-    private final Map<UUID, PendingPrompt> waitingForInput = new HashMap<>();
+    // Track players waiting for input (money/exp). Read and removed on the chat thread as well as the
+    // server thread, so it has to be a concurrent map: the timeout's remove(key, value) is atomic only there.
+    private final Map<UUID, PendingPrompt> waitingForInput = new ConcurrentHashMap<>();
 
     enum InputType {
         MONEY, EXPERIENCE
@@ -379,6 +380,12 @@ public class TradeListener implements Listener {
 
     /**
      * Handle chat input for money/exp.
+     * <p>
+     * The chat event normally arrives on the chat thread. There the answer is only claimed (the
+     * prompt removed, the message hidden); it is applied on the server thread, where every other
+     * change to a trade happens. Applied from the chat thread, an amount could land between a
+     * confirmation page's check that the offer is unchanged and its confirmation, leaving a player
+     * confirmed against an amount their page never showed.
      */
     @EventHandler
     public void onPlayerChat(org.bukkit.event.player.AsyncPlayerChatEvent event) {
@@ -388,11 +395,19 @@ public class TradeListener implements Listener {
         if (prompt == null) {
             return;
         }
-        InputType inputType = prompt.type;
-        
         event.setCancelled(true);
         String message = event.getMessage().trim();
-        
+        if (event.isAsynchronous()) {
+            Bukkit.getScheduler().runTask(getBukkitPlugin(), () -> answerPrompt(player, prompt, message));
+        } else {
+            answerPrompt(player, prompt, message);
+        }
+    }
+
+    /** Applies {@code message} as the answer to {@code prompt}. Runs on the server thread. */
+    private void answerPrompt(Player player, PendingPrompt prompt, String message) {
+        InputType inputType = prompt.type;
+
         // Check for cancel
         if (message.equalsIgnoreCase("cancel")) {
             player.sendMessage(text(tradeService.i18n("input_cancelled")));
@@ -433,8 +448,8 @@ public class TradeListener implements Listener {
             }
             
             if (inputType == InputType.MONEY) {
-                // Read the provider once: a reload on the main thread may drop it while this async
-                // handler runs (UltiKits/UltiTrade#26). Without a provider the amount stays unchanged.
+                // Read the provider once (UltiKits/UltiTrade#26). Without a provider the amount stays
+                // unchanged.
                 Economy currentEconomy = tradeService.getEconomy();
                 if (currentEconomy == null || !config.isEnableMoneyTrade()) {
                     // 0 withdraws an offer made while money trading was available; nothing is taken

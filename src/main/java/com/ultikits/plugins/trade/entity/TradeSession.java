@@ -102,7 +102,16 @@ public class TradeSession {
     }
     
     // Money management
+    /**
+     * Sets {@code player}'s money offer. Only a different amount is a change of offer: it voids both
+     * confirmations and advances the revision. Re-entering the amount already offered changes nothing,
+     * so it neither clears the other player's confirmation nor invalidates a confirmation page showing
+     * that same amount.
+     */
     public void setMoney(UUID player, double amount) {
+        if (Double.compare(getPlayerMoney(player), amount) == 0) {
+            return;
+        }
         resetConfirmation();
         revision++;
         if (player.equals(player1)) {
@@ -121,7 +130,11 @@ public class TradeSession {
     }
     
     // Experience management
+    /** Sets {@code player}'s experience offer; as {@link #setMoney}, re-entering the same amount changes nothing. */
     public void setExp(UUID player, int amount) {
+        if (getPlayerExp(player) == amount) {
+            return;
+        }
         resetConfirmation();
         revision++;
         if (player.equals(player1)) {

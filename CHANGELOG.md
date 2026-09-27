@@ -109,17 +109,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   cancelled the trade first, returning every item, and the page then opened on a trade that no longer
   existed (UltiKits/UltiTrade#23). The page's Cancel button, or closing the page with Esc, returns to the
   trade window; its Confirm button confirms only the offer the page showed — if either player changed an
-  offer while it was open, nothing is confirmed and the player is told to check the trade again.
+  offer while it was open, nothing is confirmed and the player is told to check the trade again. An amount
+  typed at the money or experience prompt is applied on the server thread, so it cannot land between
+  that check and the confirmation.
 - 当交易的金币或经验达到 `confirm-threshold` 时，点击确认现在会打开确认页面，交易继续进行。此前为打开该页面而关闭交易窗口时会先取消交易并退回全部物品，
   页面随后打开的是已不存在的交易（UltiKits/UltiTrade#23）。确认页面的取消按钮或按 Esc 关闭页面会回到交易窗口；确认按钮只确认页面所显示的出价——
-  页面打开期间任一方改动了出价，则不会确认，并提示玩家重新检查交易。
+  页面打开期间任一方改动了出价，则不会确认，并提示玩家重新检查交易。金币、经验输入提示中输入的数额在服务器主线程上生效，
+  不会插进这一检查与确认之间。
 
 - In the trade window, clicking one of your own empty slots with nothing in hand, or opening the money or
   experience prompt, no longer clears both players' confirmations. Confirmations are cleared only when an
-  offer actually changes, and both windows are then redrawn. Before, such a click cleared them without
-  redrawing, so a player still looked confirmed while the trade could not complete (UltiKits/UltiTrade#36).
-- 在交易窗口中，空手点击自己的空格子，或打开金币、经验输入提示，不再清除双方的确认。只有出价真正变化时才清除确认，并同时刷新双方窗口。
-  此前这样的点击会清除确认却不刷新，玩家看起来仍已确认，交易却无法完成（UltiKits/UltiTrade#36）。
+  offer actually changes, and both windows are then redrawn; re-entering the amount already offered at
+  a prompt is not a change. Before, such a click cleared them without redrawing, so a player still looked
+  confirmed while the trade could not complete (UltiKits/UltiTrade#36).
+- 在交易窗口中，空手点击自己的空格子，或打开金币、经验输入提示，不再清除双方的确认。只有出价真正变化时才清除确认，并同时刷新双方窗口；
+  在输入提示中再次输入已出价的数额不算变化。此前这样的点击会清除确认却不刷新，玩家看起来仍已确认，交易却无法完成（UltiKits/UltiTrade#36）。
 
 - The money and experience chat prompts refuse `NaN` and `Infinity` with `Invalid amount!`. Before,
   `NaN` was accepted as the money offer; the money transfer was then skipped while the items still moved,
