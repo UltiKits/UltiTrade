@@ -94,6 +94,14 @@ class TradeReloadReconciliationTest {
         plugin = mock(UltiTrade.class, CALLS_REAL_METHODS);
         setResourceFolderPath(plugin, moduleFolder.toString());
         config = new TradeConfig();
+        // No language is loaded and no framework instance runs in a unit test: answer i18n from the
+        // Chinese file this module ships, and hand the module its own configuration, as the framework
+        // does (UltiKits/UltiTrade#16)
+        doAnswer(com.ultikits.plugins.trade.i18n.CatalogueText.answer("zh")).when(plugin).i18n(anyString());
+        doReturn(config).when(plugin).getConfig(TradeConfig.class);
+        // The framework's language setting (UltiTools' config.yml), which the config-text pass reads;
+        // no framework instance runs here.
+        doReturn("zh").when(plugin).getLanguageCode();
 
         tradeService = new TradeService();
         UltiTradeTestHelper.setField(tradeService, "plugin", UltiTradeTestHelper.getMockPlugin());
@@ -225,7 +233,7 @@ class TradeReloadReconciliationTest {
             reload("enable-money-trade: true\n");
 
             assertThat(tradeService.getEconomy()).isNull();
-            verify(UltiTradeTestHelper.getMockLogger()).warn("Vault not found! Money trading disabled.");
+            verify(UltiTradeTestHelper.getMockLogger()).warn(zhLine("log_vault_missing"));
         }
 
         @Test
@@ -238,7 +246,7 @@ class TradeReloadReconciliationTest {
             reload("enable-money-trade: true\n");
 
             verify(UltiTradeTestHelper.getMockLogger(), times(2))
-                    .warn("No Vault economy provider is registered! Money trading disabled.");
+                    .warn(zhLine("log_no_economy_provider"));
         }
 
         @Test
@@ -456,6 +464,17 @@ class TradeReloadReconciliationTest {
             return plain;
         }
 
+        private String plainDisplayName(ItemStack item) {
+            ItemMeta meta = item == null ? null : item.getItemMeta();
+            return meta == null ? null : ChatColor.stripColor(meta.getDisplayName());
+        }
+
+        /** {@code key}'s text in {@code code}'s catalogue, colour codes translated then stripped. */
+        private String plainCatalogueText(String code, String key) {
+            return ChatColor.stripColor(ChatColor.translateAlternateColorCodes('&',
+                    com.ultikits.plugins.trade.i18n.CatalogueText.text(code, key)));
+        }
+
         private TradeGUI openWindow(Player viewer, Inventory top) {
             TradeGUI gui = new TradeGUI(tradeService, session, viewer);
             gui.update();
@@ -485,6 +504,28 @@ class TradeReloadReconciliationTest {
             tradeService.confirmTrade(counterparty);
             verify(vaultEconomy).withdrawPlayer(offerer, 1000.0);
             verify(vaultEconomy).depositPlayer(counterparty, 0.0);
+        }
+
+        @Test
+        @DisplayName("a reload that switches the language re-renders the cancel button too, not just the controls a tax change touches (UltiKits/UltiTrade#44)")
+        void reloadRerendersCancelButtonInNewLanguage() throws Exception {
+            TradeGUI offererWindow = openWindow(offerer, offererTop);
+            openWindow(counterparty, counterpartyTop);
+            Inventory windowContents = offererWindow.getInventory();
+            clearInvocations(windowContents, offererView, counterpartyView);
+
+            // TradeGUI reads text through tradeService#i18n, which forwards to the plugin
+            // UltiTradeTestHelper bound into tradeService's own "plugin" field (UltiTradeTestHelper#setUp),
+            // not the local "plugin" mock reload() drives -- restub that one to switch languages.
+            lenient().when(UltiTradeTestHelper.getMockPlugin().i18n(anyString()))
+                    .thenAnswer(com.ultikits.plugins.trade.i18n.CatalogueText.answer("en"));
+            reload("enable-money-trade: true\ntrade-tax: 0.0\n");
+
+            ArgumentCaptor<ItemStack> cancelSlot = ArgumentCaptor.forClass(ItemStack.class);
+            verify(windowContents, atLeastOnce()).setItem(eq(TradeGUI.CANCEL_SLOT), cancelSlot.capture());
+            assertThat(cancelSlot.getAllValues())
+                    .extracting(this::plainDisplayName)
+                    .contains(plainCatalogueText("en", "gui_cancel"));
         }
 
         @Test
@@ -893,5 +934,11 @@ class TradeReloadReconciliationTest {
         Field field = UltiToolsPlugin.class.getDeclaredField("resourceFolderPath");
         field.setAccessible(true);
         field.set(plugin, path);
+    }
+
+    /** The Chinese catalogue's console line for {@code key}, or a marker naming the missing key (UltiKits/UltiTrade#16). */
+    private static String zhLine(String key) {
+        return com.ultikits.plugins.trade.i18n.CatalogueText.entries("zh")
+                .getOrDefault(key, "<lang/zh has no " + key + ">");
     }
 }

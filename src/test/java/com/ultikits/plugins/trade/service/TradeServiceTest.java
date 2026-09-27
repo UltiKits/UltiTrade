@@ -51,6 +51,8 @@ class TradeServiceTest {
         economy = UltiTradeTestHelper.createMockEconomy();
 
         service = new TradeService();
+        // The module plugin, whose language file the service reads (UltiKits/UltiTrade#16)
+        UltiTradeTestHelper.setField(service, "plugin", UltiTradeTestHelper.getMockPlugin());
 
         // Inject dependencies via reflection
         UltiTradeTestHelper.setField(service, "config", config);
@@ -1184,6 +1186,23 @@ class TradeServiceTest {
         }
 
         @Test
+        @DisplayName("a service that never received its plugin still hands every stake back (UltiKits/UltiTrade#16, #34)")
+        void everyStakeIsReturnedWithoutAnInjectedPlugin() throws Exception {
+            // The cancellation reason now comes from the language file. A service with no injected
+            // plugin must not throw while resolving it: the per-trade catch in shutdown() would
+            // swallow the exception before the stakes were returned.
+            UltiTradeTestHelper.setField(service, "plugin", null);
+            ItemStack stake1 = new ItemStack(Material.DIAMOND, 3);
+            ItemStack stake2 = new ItemStack(Material.GOLD_INGOT, 5);
+            liveSession(player1, uuid1, stake1, player2, uuid2, stake2);
+
+            service.shutdown();
+
+            verify(player1.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(stake1));
+            verify(player2.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(stake2));
+        }
+
+        @Test
         @DisplayName("the cancellation is still recorded: with no scheduler available the entry is written on the calling thread")
         void theAuditRecordSurvivesShutdown() throws Exception {
             liveSession(player1, uuid1, new ItemStack(Material.DIAMOND, 3),
@@ -1823,7 +1842,8 @@ class TradeServiceTest {
             service.init();
 
             assertThat(service.hasEconomy()).isFalse();
-            verify(UltiTradeTestHelper.getMockLogger()).warn("Vault not found! Money trading disabled.");
+            verify(UltiTradeTestHelper.getMockLogger()).warn(com.ultikits.plugins.trade.i18n.CatalogueText.entries("zh")
+                    .getOrDefault("log_vault_missing", "<lang/zh has no log_vault_missing>"));
         }
 
         @Test

@@ -127,15 +127,15 @@ class TradeSessionTest {
     class ItemManagement {
 
         // TradeSession is a plain POJO (Map<Integer, ItemStack> storage) — it never touches a
-        // Bukkit registry. Per the phase's triage rule (14-CONTEXT.md), the registry access these
-        // tests used to hit came only from this test's own fixture construction
-        // (new ItemStack(Material.X) is registry-backed as of Paper 1.21), not from any production
-        // code path — confirmed by isolating this class (`mvn -B test -Dtest=TradeSessionTest`)
-        // both before and after this fix: the production class under test never references
-        // Material/Registry/ItemStack construction anywhere. Fixture-only, per CONTEXT.md's own
-        // precedent (UltiBot's DamageSource.builder(...) -> mock(DamageSource.class)): replaced
-        // with mock(ItemStack.class), which needs no live server, since every assertion below only
-        // needs a distinguishable opaque value stored in and retrieved from a Map.
+        // Bukkit registry. The registry access these tests used to hit came only from this test's
+        // own fixture construction (new ItemStack(Material.X) is registry-backed as of Paper
+        // 1.21), not from any production code path — confirmed by isolating this class (`mvn -B
+        // test -Dtest=TradeSessionTest`) both before and after this fix: the production class
+        // under test never references Material/Registry/ItemStack construction anywhere.
+        // Fixture-only, per CONTEXT.md's own precedent (UltiBot's DamageSource.builder(...) ->
+        // mock(DamageSource.class)): replaced with mock(ItemStack.class), which needs no live
+        // server, since every assertion below only needs a distinguishable opaque value stored
+        // in and retrieved from a Map.
 
         @Test
         @DisplayName("setItem should add item for player1")

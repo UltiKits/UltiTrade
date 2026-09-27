@@ -35,6 +35,16 @@ public class TradeLogService {
     
     // Player settings cache
     private final Map<UUID, PlayerTradeSettings> settingsCache = new ConcurrentHashMap<>();
+
+    /**
+     * This module's language-file text for {@code key}, in the server's language, so the console lines
+     * follow the {@code language} setting (UltiKits/UltiTrade#16). Without an injected plugin the key
+     * itself is returned, as the framework renders a missing key: a log write must never fail for want
+     * of its failure message.
+     */
+    private String i18n(String key) {
+        return plugin == null ? key : plugin.i18n(key);
+    }
     
     // Data operators
     private DataOperator<TradeLogData> logOperator;
@@ -91,7 +101,7 @@ public class TradeLogService {
         if (bukkitPlugin == null || !bukkitPlugin.isEnabled()) {
             // Nothing can be scheduled through a disabled plugin, and a repeating cleanup has no
             // meaning while the server is stopping (UltiKits/UltiTrade#34).
-            plugin.getLogger().warn("Not scheduling the trade-log cleanup task: the UltiTools plugin is not enabled.");
+            plugin.getLogger().warn(i18n("log_cleanup_not_scheduled"));
             scheduledIntervalHours = intervalHours;
             return null;
         }
@@ -121,7 +131,7 @@ public class TradeLogService {
                 settingsOperator.update(settings);
             } catch (Exception e) {
                 plugin.getLogger().warn(e,
-                    "Failed to save player settings: " + settings.getPlayerUuid());
+                    i18n("log_settings_save_failed").replace("{PLAYER}", String.valueOf(settings.getPlayerUuid())));
             }
         }
         settingsCache.clear();
@@ -142,7 +152,7 @@ public class TradeLogService {
             return;
         }
         
-        submitLogWrite("log trade", () -> {
+        submitLogWrite(i18n("log_trade_write_failed"), () -> {
             {
                 TradeLogData log = new TradeLogData(
                     session.getSessionId(),
@@ -194,7 +204,7 @@ public class TradeLogService {
             return;
         }
         
-        submitLogWrite("log cancelled trade", () -> {
+        submitLogWrite(i18n("log_cancelled_trade_write_failed"), () -> {
             {
                 Player player1 = Bukkit.getPlayer(session.getPlayer1());
                 Player player2 = Bukkit.getPlayer(session.getPlayer2());
@@ -248,33 +258,33 @@ public class TradeLogService {
      * the calling thread in that case keeps the audit trail complete instead of dropping it, and the
      * write's own failure is contained here rather than reaching the caller (UltiKits/UltiTrade#34).
      *
-     * @param description what is being written, for the warning if it fails
+     * @param failureLine the console line logged if the write fails, in the server's language
      * @param write       the write itself
      * @since 1.0.0
      */
-    private void submitLogWrite(String description, LogWrite write) {
+    private void submitLogWrite(String failureLine, LogWrite write) {
         if (bukkitPlugin != null && bukkitPlugin.isEnabled()) {
-            Bukkit.getScheduler().runTaskAsynchronously(bukkitPlugin, () -> runGuarded(description, write));
+            Bukkit.getScheduler().runTaskAsynchronously(bukkitPlugin, () -> runGuarded(failureLine, write));
             return;
         }
-        runGuarded(description, write);
+        runGuarded(failureLine, write);
     }
 
     /**
      * Run one log write, turning any failure into a warning.
      *
-     * @param description what is being written, for the warning if it fails
+     * @param failureLine the console line logged if the write fails, in the server's language
      * @param write       the write itself
      * @since 1.0.0
      */
-    private void runGuarded(String description, LogWrite write) {
+    private void runGuarded(String failureLine, LogWrite write) {
         try {
             write.run();
         } catch (Exception e) {
             // Same rule as TradeService#shutdown's rescue: the point of this method is that a log
             // failure reaches nobody, so the reporting itself must not be able to throw.
             if (plugin != null) {
-                plugin.getLogger().warn(e, "Failed to " + description);
+                plugin.getLogger().warn(e, failureLine);
             }
         }
     }
@@ -309,12 +319,12 @@ public class TradeLogService {
             }
             
             if (deleted > 0) {
-                plugin.getLogger().info(
-                    "Cleaned up " + deleted + " expired trade logs (older than " + retentionDays + " days)");
+                plugin.getLogger().info(i18n("log_logs_cleaned")
+                    .replace("{COUNT}", String.valueOf(deleted))
+                    .replace("{DAYS}", String.valueOf(retentionDays)));
             }
         } catch (Exception e) {
-            plugin.getLogger().warn(e,
-                "Failed to cleanup old logs");
+            plugin.getLogger().warn(e, i18n("log_logs_cleanup_failed"));
         }
     }
     
@@ -394,7 +404,7 @@ public class TradeLogService {
      * @param settings Settings to save
      */
     public void saveSettings(PlayerTradeSettings settings) {
-        submitLogWrite("save player settings", () -> settingsOperator.update(settings));
+        submitLogWrite(i18n("log_settings_write_failed"), () -> settingsOperator.update(settings));
     }
     
     /**
@@ -509,8 +519,7 @@ public class TradeLogService {
             return playerLogs;
             
         } catch (Exception e) {
-            plugin.getLogger().warn(e,
-                "Failed to get player logs");
+            plugin.getLogger().warn(e, i18n("log_player_logs_failed"));
             return new ArrayList<>();
         }
     }

@@ -189,8 +189,8 @@ public class TradeListener implements Listener {
             
             // Start money input conversation
             player.closeInventory();
-            player.sendMessage(ChatColor.GOLD + "请在聊天框中输入要交易的金币数量：");
-            player.sendMessage(ChatColor.GRAY + "(输入 'cancel' 取消)");
+            player.sendMessage(text(tradeService.i18n("input_money_prompt")));
+            player.sendMessage(text(tradeService.i18n("input_cancel")));
             waitingForInput.put(player.getUniqueId(), InputType.MONEY);
             
             // Reopen GUI after a delay if no input
@@ -213,9 +213,10 @@ public class TradeListener implements Listener {
             
             // Start exp input conversation
             player.closeInventory();
-            player.sendMessage(ChatColor.GREEN + "请在聊天框中输入要交易的经验值：");
-            player.sendMessage(ChatColor.AQUA + "你当前有 " + tradeService.getTotalExperience(player) + " 经验");
-            player.sendMessage(ChatColor.GRAY + "(输入 'cancel' 取消)");
+            player.sendMessage(text(tradeService.i18n("input_exp_prompt")));
+            player.sendMessage(text(tradeService.i18n("input_exp_current")
+                .replace("{AMOUNT}", String.valueOf(tradeService.getTotalExperience(player)))));
+            player.sendMessage(text(tradeService.i18n("input_cancel")));
             waitingForInput.put(player.getUniqueId(), InputType.EXPERIENCE);
             
             // Reopen GUI after a delay if no input
@@ -375,7 +376,7 @@ public class TradeListener implements Listener {
         
         // Check for cancel
         if (message.equalsIgnoreCase("cancel")) {
-            player.sendMessage(ChatColor.YELLOW + "已取消输入");
+            player.sendMessage(text(tradeService.i18n("input_cancelled")));
             Bukkit.getScheduler().runTask(getBukkitPlugin(), () -> {
                 TradeSession session = tradeService.getSession(player.getUniqueId());
                 if (session != null && tradeService.isTrading(player.getUniqueId())) {
@@ -390,14 +391,14 @@ public class TradeListener implements Listener {
         try {
             double value = Double.parseDouble(message);
             if (value < 0) {
-                player.sendMessage(ChatColor.RED + "数值不能为负数！");
+                player.sendMessage(text(tradeService.i18n("amount_negative")));
                 reopenGUI(player);
                 return;
             }
             
             TradeSession session = tradeService.getSession(player.getUniqueId());
             if (session == null) {
-                player.sendMessage(ChatColor.RED + "交易已结束！");
+                player.sendMessage(text(tradeService.i18n("trade_ended")));
                 return;
             }
             
@@ -406,41 +407,41 @@ public class TradeListener implements Listener {
                 // handler runs (UltiKits/UltiTrade#26). Without a provider the amount stays unchanged.
                 Economy currentEconomy = tradeService.getEconomy();
                 if (currentEconomy == null || !config.isEnableMoneyTrade()) {
-                    player.sendMessage(ChatColor.RED + "金币交易当前不可用！");
+                    player.sendMessage(text(tradeService.i18n("money_unavailable")));
                     reopenGUI(player);
                     return;
                 }
                 // Check balance
                 if (currentEconomy.getBalance(player) < value) {
-                    player.sendMessage(ChatColor.RED + "余额不足！");
+                    player.sendMessage(text(tradeService.i18n("insufficient_money")));
                     reopenGUI(player);
                     return;
                 }
                 session.setMoney(player.getUniqueId(), value);
-                player.sendMessage(ChatColor.GREEN + "已设置交易金币: " + value);
+                player.sendMessage(text(tradeService.i18n("money_set").replace("{AMOUNT}", String.valueOf(value))));
             } else {
                 // A reload may have turned experience trading off since the prompt opened
                 // (UltiKits/UltiTrade#26). Without it the amount stays unchanged.
                 if (!config.isEnableExpTrade()) {
-                    player.sendMessage(ChatColor.RED + "经验交易当前不可用！");
+                    player.sendMessage(text(tradeService.i18n("exp_unavailable")));
                     reopenGUI(player);
                     return;
                 }
                 // Check experience
                 int expValue = (int) value;
                 if (tradeService.getTotalExperience(player) < expValue) {
-                    player.sendMessage(ChatColor.RED + "经验不足！");
+                    player.sendMessage(text(tradeService.i18n("insufficient_exp")));
                     reopenGUI(player);
                     return;
                 }
                 session.setExp(player.getUniqueId(), expValue);
-                player.sendMessage(ChatColor.GREEN + "已设置交易经验: " + expValue);
+                player.sendMessage(text(tradeService.i18n("exp_set").replace("{AMOUNT}", String.valueOf(expValue))));
             }
             
             reopenGUI(player);
             
         } catch (NumberFormatException e) {
-            player.sendMessage(ChatColor.RED + "无效的数值！");
+            player.sendMessage(text(tradeService.i18n("invalid_amount")));
             reopenGUI(player);
         }
     }
@@ -549,5 +550,10 @@ public class TradeListener implements Listener {
         if (player2 != null && player2.getOpenInventory().getTopInventory().getHolder() instanceof TradeGUI) {
             ((TradeGUI) player2.getOpenInventory().getTopInventory().getHolder()).update();
         }
+    }
+
+    /** The language file's text, {@code &} colour codes applied. */
+    private static String text(String languageText) {
+        return ChatColor.translateAlternateColorCodes('&', languageText);
     }
 }

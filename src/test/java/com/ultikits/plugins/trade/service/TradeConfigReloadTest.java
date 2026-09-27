@@ -24,6 +24,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.*;
 
@@ -59,12 +60,17 @@ class TradeConfigReloadTest {
 
         UltiToolsPlugin plugin = mock(UltiTrade.class, CALLS_REAL_METHODS);
         setResourceFolderPath(plugin, moduleFolder.toString());
+        // No language is loaded in a unit test; answer from the Chinese file this module ships, as the
+        // framework does under the default language (UltiKits/UltiTrade#16)
+        doAnswer(com.ultikits.plugins.trade.i18n.CatalogueText.answer("zh")).when(plugin).i18n(anyString());
 
         TradeConfig config = new TradeConfig();
         config.init(plugin);
         assertThat(config.getMaxDistance()).isEqualTo(50);
 
         TradeService service = new TradeService();
+        // The module plugin, whose language file the service reads (UltiKits/UltiTrade#16)
+        UltiTradeTestHelper.setField(service, "plugin", UltiTradeTestHelper.getMockPlugin());
         TradeLogService logService = mock(TradeLogService.class);
         when(logService.isTradeEnabled(any())).thenReturn(true);
         when(logService.isBlocked(any(), any())).thenReturn(false);

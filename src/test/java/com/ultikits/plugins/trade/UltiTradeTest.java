@@ -42,7 +42,7 @@ class UltiTradeTest {
         SimpleContainer context = mock(SimpleContainer.class);
         when(plugin.getLogger()).thenReturn(logger);
         when(plugin.getContext()).thenReturn(context);
-        when(plugin.i18n(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(plugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.trade.i18n.CatalogueText.answer("zh"));
         when(plugin.registerSelf()).thenCallRealMethod();
 
         boolean result = plugin.registerSelf();
@@ -66,12 +66,13 @@ class UltiTradeTest {
             logger = mock(PluginLogger.class);
             SimpleContainer context = mock(SimpleContainer.class);
             tradeService = mock(TradeService.class);
+            com.ultikits.plugins.trade.i18n.TradeSeams.speak(tradeService, "zh");
             logService = mock(TradeLogService.class);
             when(plugin.getLogger()).thenReturn(logger);
             when(plugin.getContext()).thenReturn(context);
             when(context.getBean(TradeService.class)).thenReturn(tradeService);
             when(context.getBean(TradeLogService.class)).thenReturn(logService);
-            when(plugin.i18n(anyString())).thenAnswer(inv -> inv.getArgument(0));
+            when(plugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.trade.i18n.CatalogueText.answer("zh"));
             doCallRealMethod().when(plugin).onUnregister();
         }
 
@@ -130,7 +131,7 @@ class UltiTradeTest {
 
             assertThatCode(() -> plugin.onReload()).doesNotThrowAnyException();
 
-            verify(logger).error(failure, UltiTrade.CONFIRMATION_RESET_FAILED);
+            verify(logger).error(failure, zhLine("log_confirmation_reset_failed"));
         }
 
         @Test
@@ -143,8 +144,8 @@ class UltiTradeTest {
             assertThatCode(() -> plugin.onReload()).doesNotThrowAnyException();
 
             verify(tradeService, times(1)).reloadEconomy();
-            verify(logger).error(failure, "Could not apply enable-trade-log or cleanup-interval-hours from the reloaded configuration;"
-                    + " the old-log cleanup task keeps its previous schedule until the next successful /ul reload UltiTrade");
+            // The console line follows the language setting (UltiKits/UltiTrade#16)
+            verify(logger).error(failure, zhLine("log_cleanup_reconcile_failed"));
         }
 
         @Test
@@ -157,8 +158,7 @@ class UltiTradeTest {
             assertThatCode(() -> plugin.onReload()).doesNotThrowAnyException();
 
             verify(logService, times(1)).reloadCleanupTask();
-            verify(logger).error(failure, "Could not apply enable-money-trade from the reloaded configuration;"
-                    + " money trading keeps its previous provider until the next successful /ul reload UltiTrade");
+            verify(logger).error(failure, zhLine("log_economy_reconcile_failed"));
         }
 
         @Test
@@ -241,12 +241,13 @@ class UltiTradeTest {
             logger = mock(PluginLogger.class);
             SimpleContainer context = mock(SimpleContainer.class);
             tradeService = mock(TradeService.class);
+            com.ultikits.plugins.trade.i18n.TradeSeams.speak(tradeService, "zh");
             logService = mock(TradeLogService.class);
             when(plugin.getLogger()).thenReturn(logger);
             when(plugin.getContext()).thenReturn(context);
             when(context.getBean(TradeService.class)).thenReturn(tradeService);
             when(context.getBean(TradeLogService.class)).thenReturn(logService);
-            when(plugin.i18n(anyString())).thenAnswer(inv -> inv.getArgument(0));
+            when(plugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.trade.i18n.CatalogueText.answer("en"));
             when(plugin.operatorConfigFile()).thenReturn(file);
             return plugin;
         }
@@ -355,5 +356,11 @@ class UltiTradeTest {
         Field field = UltiTrade.class.getDeclaredField("placeholderExpansion");
         field.setAccessible(true);
         field.set(plugin, expansion);
+    }
+
+    /** The Chinese catalogue's console line for {@code key}, or a marker naming the missing key. */
+    private static String zhLine(String key) {
+        return com.ultikits.plugins.trade.i18n.CatalogueText.entries("zh")
+                .getOrDefault(key, "<lang/zh has no " + key + ">");
     }
 }
