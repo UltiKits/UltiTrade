@@ -377,6 +377,96 @@ class TradeListenerTest {
     }
 
     /**
+     * UltiKits/UltiTrade#36: a click that changes nothing about the offer leaves both confirmations
+     * alone; a click that does change it resets both and repaints both windows, so no window keeps
+     * showing a confirmation the session no longer holds.
+     */
+    @Nested
+    @DisplayName("confirmations are reset only by a real offer change, and always repainted (UltiKits/UltiTrade#36)")
+    class ConfirmationResetOnlyOnChange {
+
+        private TradeGUI gui;
+        private TradeGUI otherGui;
+        private TradeSession session;
+
+        @BeforeEach
+        void bothWindowsOpenWithTheOtherPlayerConfirmed() {
+            session = new TradeSession(player1, player2);
+            session.setConfirmed(uuid2, true);
+            gui = mock(TradeGUI.class);
+            otherGui = mock(TradeGUI.class);
+            when(gui.getSession()).thenReturn(session);
+            lenient().when(gui.isYourSlot(TradeGUI.YOUR_SLOTS[0])).thenReturn(true);
+            lenient().when(gui.getItemIndex(TradeGUI.YOUR_SLOTS[0])).thenReturn(0);
+            lenient().when(gui.isMoneySlot(TradeGUI.YOUR_MONEY_SLOT)).thenReturn(true);
+            lenient().when(gui.isExpSlot(TradeGUI.YOUR_EXP_SLOT)).thenReturn(true);
+            showing(player1, gui);
+            showing(player2, otherGui);
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            lenient().doReturn(player1).when(server).getPlayer(uuid1);
+            lenient().doReturn(player2).when(server).getPlayer(uuid2);
+        }
+
+        private void showing(Player player, TradeGUI window) {
+            InventoryView view = mock(InventoryView.class);
+            Inventory top = mock(Inventory.class);
+            lenient().when(top.getHolder()).thenReturn(window);
+            lenient().when(view.getTopInventory()).thenReturn(top);
+            lenient().when(player.getOpenInventory()).thenReturn(view);
+        }
+
+        private InventoryClickEvent click(int rawSlot, ItemStack cursor) {
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(gui);
+            InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getInventory()).thenReturn(top);
+            when(event.getWhoClicked()).thenReturn(player1);
+            when(event.getRawSlot()).thenReturn(rawSlot);
+            lenient().when(event.getCursor()).thenReturn(cursor);
+            lenient().when(event.getView()).thenReturn(mock(InventoryView.class));
+            return event;
+        }
+
+        @Test
+        @DisplayName("an empty own slot clicked with an empty cursor keeps the other player's confirmation")
+        void emptyClickKeepsConfirmation() {
+            listener.onInventoryClick(click(TradeGUI.YOUR_SLOTS[0], null));
+
+            assertThat(session.isConfirmed(uuid2)).isTrue();
+        }
+
+        @Test
+        @DisplayName("opening the money prompt, which changes no offer, keeps the other player's confirmation")
+        void openingTheMoneyPromptKeepsConfirmation() {
+            when(tradeService.hasEconomy()).thenReturn(true);
+
+            listener.onInventoryClick(click(TradeGUI.YOUR_MONEY_SLOT, null));
+
+            assertThat(session.isConfirmed(uuid2)).isTrue();
+        }
+
+        @Test
+        @DisplayName("opening the experience prompt, which changes no offer, keeps the other player's confirmation")
+        void openingTheExperiencePromptKeepsConfirmation() {
+            when(config.isEnableExpTrade()).thenReturn(true);
+
+            listener.onInventoryClick(click(TradeGUI.YOUR_EXP_SLOT, null));
+
+            assertThat(session.isConfirmed(uuid2)).isTrue();
+        }
+
+        @Test
+        @DisplayName("POSITIVE CONTROL: placing an item resets both confirmations and repaints both windows")
+        void placingResetsAndRepaintsBoth() {
+            listener.onInventoryClick(click(TradeGUI.YOUR_SLOTS[0], new ItemStack(Material.DIAMOND)));
+
+            assertThat(session.isConfirmed(uuid2)).isFalse();
+            verify(gui).update();
+            verify(otherGui).update();
+        }
+    }
+
+    /**
      * An item taken back out of the trade window has to end up somewhere the acting player can
      * recover it. These cases run the listener against a REAL {@link TradeService}, not the mock the
      * outer class injects, so they observe the delivery itself — the inventory call and the drop —
