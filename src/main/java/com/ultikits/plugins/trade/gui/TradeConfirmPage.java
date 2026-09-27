@@ -269,6 +269,16 @@ public class TradeConfirmPage implements InventoryHolder {
     }
     
     /**
+     * Retires the page without answering it, for when its owner replaces it with another window (the
+     * reload redraw). Replacing the page closes it, and that close is not the player's "back": without
+     * this the Cancel callback would schedule a second trade window, whose opening closes the
+     * replacement and so cancels the trade.
+     */
+    public void dismiss() {
+        answered = true;
+    }
+
+    /**
      * Create an item with name and lore.
      */
     private ItemStack createItem(Material material, String name, List<String> lore) {

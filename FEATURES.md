@@ -189,9 +189,9 @@ trade that carries experience is cancelled at completion when `enable-exp-trade`
 redraws every open trade window from the reloaded configuration (title, money and experience
 availability, `trade-tax`, `exp-tax-rate`), keeping every offer exactly as the session holds it and
 redrawing each player's window in isolation; on a server without `InventoryView#setTitle` only the
-title keeps its previous text. An open large-trade confirmation page is replaced with a trade window,
-although on current builds that page does not stay open because of `UltiKits/UltiTrade#23`
-(`UltiKits/UltiTrade#27`). The two kinds of value are treated differently on purpose: the terms of a
+title keeps its previous text. An open large-trade confirmation page is replaced with a trade window
+and the trade keeps running — the replacement is not the page's Cancel, so it schedules no second
+window (`UltiKits/UltiTrade#27`). The two kinds of value are treated differently on purpose: the terms of a
 deal (taxes, threshold, which offers are allowed) always follow the reloaded configuration, which is why
 open windows are redrawn and confirmations voided, while a pending trade request keeps the
 `request-timeout` it was sent with, because that is a promise to the receiving player of how long they

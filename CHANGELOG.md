@@ -205,9 +205,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   experience amount while `enable-exp-trade` is off (UltiKits/UltiTrade#26).
 - `/ul reload UltiTrade` now redraws every open trade window from the reloaded configuration, so its
   title, money and experience availability and taxes match what the trade will charge. Every offer is
-  kept as it was. An open large-trade confirmation page is replaced with a trade window, although on
-  current builds that page does not stay open because of UltiKits/UltiTrade#23
-  (UltiKits/UltiTrade#27).
+  kept as it was. An open large-trade confirmation page is replaced with a trade window and the trade
+  keeps running; the player confirms again from that window (UltiKits/UltiTrade#27).
 - Players can no longer take the display item out of the money slot of the trade window while money
   trading is off, out of the experience slot while experience trading is off, or the glass pane out of
   an empty item slot, by clicking it. Every click in the trade window is now cancelled before its action
@@ -273,8 +272,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   经验，而交易完成时 `enable-exp-trade` 已关闭，该交易会被取消，而不是在不转移经验的情况下交换物品；
   `enable-exp-trade` 关闭时，聊天输入提示也会拒绝经验数额（UltiKits/UltiTrade#26）。
 - `/ul reload UltiTrade` 现在会按重载后的配置重绘所有已打开的交易界面，使其标题、金币与经验交易的可用状态和税率
-  与交易实际收取的一致；所有出价保持不变。已打开的大额交易确认页会被替换为交易界面，但在当前版本中该确认页因
-  UltiKits/UltiTrade#23 不会保持打开（UltiKits/UltiTrade#27）。
+  与交易实际收取的一致；所有出价保持不变。已打开的大额交易确认页会被替换为交易界面，交易继续进行，
+  玩家需在该界面重新确认（UltiKits/UltiTrade#27）。
 - 玩家不再能通过点击，在金币交易关闭时从交易界面的金币栏、在经验交易关闭时从经验栏取走展示物品，或从空物品栏
   取走玻璃板。交易界面中的每次点击现在都会先被取消，再执行对应操作（UltiKits/UltiTrade#25）。
 - `/upm uninstall UltiTrade` 现在会先执行本模块自身的清理（关闭交易服务、注销 PlaceholderAPI 扩展），

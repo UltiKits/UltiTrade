@@ -305,7 +305,9 @@ public class TradeService {
             gui.update();
             retitle(view, gui.buildTitle());
         } else if (holder instanceof TradeConfirmPage) {
-            // A new window renders the session itself (UltiKits/UltiTrade#35).
+            // A new window renders the session itself (UltiKits/UltiTrade#35). The page is retired first:
+            // this replacement is not the player closing it, so its Cancel ("back") must not run.
+            ((TradeConfirmPage) holder).dismiss();
             TradeGUI gui = new TradeGUI(this, session, player);
             player.openInventory(gui.getInventory());
         }
