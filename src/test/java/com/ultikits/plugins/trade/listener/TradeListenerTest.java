@@ -372,6 +372,130 @@ class TradeListenerTest {
     }
 
     /**
+     * UltiKits/UltiTrade#40: a delayed task and a pending prompt belong to the trade they were created
+     * in. After that trade ends and the player opens a newer one, they must not act on the newer
+     * trade -- which "is this player trading?" cannot tell apart from the old one.
+     */
+    @Nested
+    @DisplayName("stale prompts and timers leave a newer trade alone (UltiKits/UltiTrade#40)")
+    class StaleTasksLeaveANewerTradeAlone {
+
+        private TradeSession oldTrade;
+        private TradeSession newTrade;
+        private net.milkbowl.vault.economy.Economy economy;
+
+        @BeforeEach
+        void anOldTradeWithAMoneyPrompt() {
+            oldTrade = new TradeSession(player1, player2);
+            newTrade = new TradeSession(player1, player2);
+            when(tradeService.hasEconomy()).thenReturn(true);
+            economy = UltiTradeTestHelper.createMockEconomy();
+            lenient().when(tradeService.getEconomy()).thenReturn(economy);
+            lenient().when(tradeService.isTrading(uuid1)).thenReturn(true);
+            when(tradeService.getSession(uuid1)).thenReturn(oldTrade);
+            lenient().when(tradeService.getConfig()).thenReturn(config);
+        }
+
+        private TradeGUI windowFor(TradeSession session) {
+            TradeGUI gui = mock(TradeGUI.class);
+            when(gui.getSession()).thenReturn(session);
+            when(gui.isMoneySlot(TradeGUI.YOUR_MONEY_SLOT)).thenReturn(true);
+            return gui;
+        }
+
+        private InventoryClickEvent moneySlotClick(TradeGUI gui) {
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(gui);
+            InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getInventory()).thenReturn(top);
+            when(event.getWhoClicked()).thenReturn(player1);
+            when(event.getRawSlot()).thenReturn(TradeGUI.YOUR_MONEY_SLOT);
+            return event;
+        }
+
+        /** Opens the money prompt in {@code session}'s window and returns its 10-second timeout task. */
+        private Runnable openMoneyPrompt(TradeSession session) {
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+            listener.onInventoryClick(moneySlotClick(windowFor(session)));
+            org.mockito.ArgumentCaptor<Runnable> timeout = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTaskLater(any(), timeout.capture(), eq(200L));
+            return timeout.getValue();
+        }
+
+        @Test
+        @DisplayName("the old prompt's timeout does not reopen the old trade's window over the newer trade")
+        void oldTimeoutDoesNotReopenTheOldWindow() {
+            Runnable oldTimeout = openMoneyPrompt(oldTrade);
+            when(tradeService.getSession(uuid1)).thenReturn(newTrade);
+            clearInvocations(player1);
+
+            oldTimeout.run();
+
+            verify(player1, never()).openInventory(any(Inventory.class));
+        }
+
+        @Test
+        @DisplayName("an amount typed for the old prompt is not applied to the newer trade")
+        void oldPromptDoesNotSetTheNewerTradesMoney() {
+            openMoneyPrompt(oldTrade);
+            when(tradeService.getSession(uuid1)).thenReturn(newTrade);
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, "100", new HashSet<>()));
+
+            assertThat(newTrade.getPlayerMoney(uuid1)).isEqualTo(0.0);
+            verify(player1).sendMessage(contains(org.bukkit.ChatColor.translateAlternateColorCodes('&',
+                    tradeService.i18n("trade_ended"))));
+        }
+
+        @Test
+        @DisplayName("the old prompt's timeout does not close a prompt opened in the newer trade")
+        void oldTimeoutLeavesTheNewerPromptOpen() {
+            Runnable oldTimeout = openMoneyPrompt(oldTrade);
+            when(tradeService.getSession(uuid1)).thenReturn(newTrade);
+            openMoneyPrompt(newTrade);
+
+            oldTimeout.run();
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, "100", new HashSet<>()));
+
+            assertThat(newTrade.getPlayerMoney(uuid1)).isEqualTo(100.0);
+        }
+
+        @Test
+        @DisplayName("POSITIVE CONTROL: the prompt's own timeout reopens its own trade's window")
+        void ownTimeoutReopensItsOwnWindow() {
+            Runnable timeout = openMoneyPrompt(oldTrade);
+            clearInvocations(player1);
+
+            timeout.run();
+
+            verify(player1).openInventory(any(Inventory.class));
+        }
+
+        @Test
+        @DisplayName("a close-to-cancel task from the old trade does not cancel the newer trade")
+        void oldCloseTaskDoesNotCancelTheNewerTrade() {
+            TradeGUI oldWindow = windowFor(oldTrade);
+            InventoryCloseEvent close = mock(InventoryCloseEvent.class);
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(oldWindow);
+            when(close.getInventory()).thenReturn(top);
+            when(close.getPlayer()).thenReturn(player1);
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+
+            listener.onInventoryClose(close);
+            org.mockito.ArgumentCaptor<Runnable> cancel = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTaskLater(any(), cancel.capture(), eq(1L));
+            when(tradeService.getSession(uuid1)).thenReturn(newTrade);
+            cancel.getValue().run();
+
+            verify(tradeService, never()).cancelTrade(any(Player.class));
+            verify(tradeService, never()).cancelTrade(eq(newTrade), any());
+        }
+    }
+
+    /**
      * UltiKits/UltiTrade#36: a click that changes nothing about the offer leaves both confirmations
      * alone; a click that does change it resets both and repaints both windows, so no window keeps
      * showing a confirmation the session no longer holds.
