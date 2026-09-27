@@ -1411,6 +1411,52 @@ class TradeListenerTest {
             assertThat(session.getPlayerExp(uuid1)).isEqualTo(0);
         }
 
+        /**
+         * UltiKits/UltiTrade#28: with money or experience trading unavailable the prompt still accepts
+         * {@code 0}, so a player can withdraw an offer they made while it was available.
+         */
+        @Test
+        @DisplayName("With money trading unavailable the money prompt still accepts 0 and withdraws the offer (UltiKits/UltiTrade#28)")
+        void zeroWithdrawsAMoneyOfferWhileMoneyIsUnavailable() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            session.setMoney(uuid1, 50.0);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            lenient().when(tradeService.getEconomy()).thenReturn(null);
+            addToWaitingForInput(uuid1, 0); // MONEY
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, "0", new HashSet<>()));
+
+            assertThat(session.getPlayerMoney(uuid1)).isEqualTo(0.0);
+        }
+
+        @Test
+        @DisplayName("With experience trading off the experience prompt still accepts 0 and withdraws the offer (UltiKits/UltiTrade#28)")
+        void zeroWithdrawsAnExperienceOfferWhileExperienceIsOff() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            session.setExp(uuid1, 40);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            when(config.isEnableExpTrade()).thenReturn(false);
+            addToWaitingForInput(uuid1, 1); // EXPERIENCE
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, "0", new HashSet<>()));
+
+            assertThat(session.getPlayerExp(uuid1)).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("POSITIVE CONTROL: with money trading unavailable a non-zero amount is still refused")
+        void nonZeroIsStillRefusedWhileMoneyIsUnavailable() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            session.setMoney(uuid1, 50.0);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            lenient().when(tradeService.getEconomy()).thenReturn(null);
+            addToWaitingForInput(uuid1, 0); // MONEY
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, "10", new HashSet<>()));
+
+            assertThat(session.getPlayerMoney(uuid1)).isEqualTo(50.0);
+        }
+
         @Test
         @DisplayName("Should handle invalid number input")
         void handleInvalidNumber() throws Exception {
