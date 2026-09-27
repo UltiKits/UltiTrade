@@ -245,6 +245,36 @@ class TradeSessionTest {
         }
 
         @Test
+        @DisplayName("re-entering the same amount keeps both confirmations and the offer's revision")
+        void sameMoneyChangesNothing() {
+            session.setMoney(uuid1, 100.0);
+            session.setConfirmed(uuid1, true);
+            session.setConfirmed(uuid2, true);
+            int revision = session.getRevision();
+
+            session.setMoney(uuid1, 100.0);
+
+            assertThat(session.isConfirmed(uuid1)).isTrue();
+            assertThat(session.isConfirmed(uuid2)).isTrue();
+            assertThat(session.getRevision()).isEqualTo(revision);
+        }
+
+        @Test
+        @DisplayName("re-entering the same experience keeps both confirmations and the offer's revision")
+        void sameExpChangesNothing() {
+            session.setExp(uuid2, 30);
+            session.setConfirmed(uuid1, true);
+            session.setConfirmed(uuid2, true);
+            int revision = session.getRevision();
+
+            session.setExp(uuid2, 30);
+
+            assertThat(session.isConfirmed(uuid1)).isTrue();
+            assertThat(session.isConfirmed(uuid2)).isTrue();
+            assertThat(session.getRevision()).isEqualTo(revision);
+        }
+
+        @Test
         @DisplayName("getOtherPlayerMoney should return correct money")
         void getOtherPlayerMoney() {
             session.setMoney(uuid1, 100.0);

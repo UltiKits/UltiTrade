@@ -377,6 +377,43 @@ class TradeListenerTest {
      * trade -- which "is this player trading?" cannot tell apart from the old one.
      */
     @Nested
+    @DisplayName("a chat answer is applied on the server thread")
+    class ChatAnswerOnTheServerThread {
+
+        /**
+         * The chat event arrives on the chat thread, while a confirmation page checks the offer and
+         * confirms on the server thread; an amount set from the chat thread could land between that
+         * check and the confirmation. The answer is therefore only read on the chat thread and applied
+         * on the server thread.
+         */
+        @Test
+        @DisplayName("an answer from the chat thread changes the offer only when the server thread runs it")
+        void anAsynchronousAnswerIsAppliedByTheServerThread() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            net.milkbowl.vault.economy.Economy economy = UltiTradeTestHelper.createMockEconomy();
+            lenient().when(tradeService.getEconomy()).thenReturn(economy);
+            lenient().when(tradeService.getConfig()).thenReturn(config);
+            Map<UUID, TradeListener.PendingPrompt> waitingForInput = UltiTradeTestHelper.getField(listener, "waitingForInput");
+            waitingForInput.put(uuid1, new TradeListener.PendingPrompt(TradeListener.InputType.MONEY, session));
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+            int revision = session.getRevision();
+            AsyncPlayerChatEvent event = new AsyncPlayerChatEvent(true, player1, "100", new HashSet<>());
+
+            listener.onPlayerChat(event);
+
+            assertThat(event.isCancelled()).as("the answer is not broadcast").isTrue();
+            assertThat(session.getPlayerMoney(uuid1)).as("nothing changed on the chat thread").isEqualTo(0.0);
+            assertThat(session.getRevision()).isEqualTo(revision);
+            org.mockito.ArgumentCaptor<Runnable> apply = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler, atLeastOnce()).runTask(any(), apply.capture());
+            apply.getAllValues().get(0).run();
+            assertThat(session.getPlayerMoney(uuid1)).isEqualTo(100.0);
+        }
+    }
+
+    @Nested
     @DisplayName("stale prompts and timers leave a newer trade alone (UltiKits/UltiTrade#40)")
     class StaleTasksLeaveANewerTradeAlone {
 
