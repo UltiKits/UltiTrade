@@ -112,11 +112,10 @@ public class TradeGUI implements InventoryHolder {
         
         // Confirm button
         updateConfirmButton();
-        
+
         // Cancel button
-        ItemStack cancelBtn = createItem(Material.BARRIER, text(tradeService.i18n("gui_cancel")));
-        inventory.setItem(CANCEL_SLOT, cancelBtn);
-        
+        updateCancelButton();
+
         // Money display
         updateMoneyDisplay();
         
@@ -159,8 +158,9 @@ public class TradeGUI implements InventoryHolder {
         updateExpDisplay();
         updateStatusDisplay();
         updateConfirmButton();
+        updateCancelButton();
     }
-    
+
     /**
      * Create a clone of item with detailed information in lore.
      */
@@ -364,7 +364,21 @@ public class TradeGUI implements InventoryHolder {
         );
         inventory.setItem(CONFIRM_SLOT, confirmBtn);
     }
-    
+
+    /**
+     * Update the cancel button.
+     * <p>
+     * Rendered from this one method, called by both {@link #initializeGUI()} and {@link #update()},
+     * so the two paths cannot drift the way they did before -- {@code initializeGUI()} used to write
+     * this button's text inline and {@code update()} never touched it again, which left the cancel
+     * button showing the language it was built in even after a reload switched every other control
+     * (UltiKits/UltiTrade#44).
+     */
+    private void updateCancelButton() {
+        ItemStack cancelBtn = createItem(Material.BARRIER, text(tradeService.i18n("gui_cancel")));
+        inventory.setItem(CANCEL_SLOT, cancelBtn);
+    }
+
     /** The language file's text, {@code &} colour codes applied. */
     private static String text(String languageText) {
         return ChatColor.translateAlternateColorCodes('&', languageText);
