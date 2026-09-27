@@ -1166,6 +1166,30 @@ class TradeListenerTest {
             verify(player1).sendMessage(contains("\u4E0D\u80FD\u4E3A\u8D1F\u6570")); // "不能为负数"
         }
 
+        /**
+         * UltiKits/UltiTrade#29: {@code NaN} passed both the negative and the balance check and was
+         * stored as the offer, which then skipped the money transfer while the items still moved.
+         * Non-finite values are refused like any other invalid amount, at both prompts.
+         */
+        @org.junit.jupiter.params.ParameterizedTest(name = "{0} at the {1} prompt")
+        @org.junit.jupiter.params.provider.CsvSource({"NaN,0", "Infinity,0", "-Infinity,0", "NaN,1", "Infinity,1"})
+        @DisplayName("A non-finite amount is refused as invalid and leaves the offer unchanged (UltiKits/UltiTrade#29)")
+        void nonFiniteAmountIsRefused(String typed, int typeOrdinal) throws Exception {
+            addToWaitingForInput(uuid1, typeOrdinal);
+            TradeSession session = new TradeSession(player1, player2);
+            lenient().when(tradeService.getSession(uuid1)).thenReturn(session);
+            net.milkbowl.vault.economy.Economy economy = UltiTradeTestHelper.createMockEconomy();
+            lenient().when(economy.getBalance(any(Player.class))).thenReturn(Double.POSITIVE_INFINITY);
+            lenient().when(tradeService.getEconomy()).thenReturn(economy);
+            lenient().when(tradeService.getTotalExperience(player1)).thenReturn(Integer.MAX_VALUE);
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, typed, new HashSet<>()));
+
+            verify(player1).sendMessage(contains("\u65E0\u6548\u7684\u6570\u989D")); // "无效的数额"
+            assertThat(session.getPlayerMoney(uuid1)).isEqualTo(0.0);
+            assertThat(session.getPlayerExp(uuid1)).isEqualTo(0);
+        }
+
         @Test
         @DisplayName("Should handle invalid number input")
         void handleInvalidNumber() throws Exception {
