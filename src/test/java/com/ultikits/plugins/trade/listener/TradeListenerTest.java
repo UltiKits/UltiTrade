@@ -486,6 +486,28 @@ class TradeListenerTest {
         }
 
         @Test
+        @DisplayName("a prompt left over from the old trade does not stop the newer trade's window close from cancelling it")
+        void oldPromptDoesNotKeepTheNewerTradeOpen() {
+            openMoneyPrompt(oldTrade);
+            when(tradeService.getSession(uuid1)).thenReturn(newTrade);
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+            TradeGUI newWindow = mock(TradeGUI.class);
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(newWindow);
+            InventoryCloseEvent close = mock(InventoryCloseEvent.class);
+            when(close.getInventory()).thenReturn(top);
+            when(close.getPlayer()).thenReturn(player1);
+
+            listener.onInventoryClose(close);
+
+            org.mockito.ArgumentCaptor<Runnable> check = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTaskLater(any(), check.capture(), eq(1L));
+            check.getValue().run();
+            verify(tradeService).cancelTrade(player1);
+        }
+
+        @Test
         @DisplayName("the old prompt's timeout does not close a prompt opened in the newer trade")
         void oldTimeoutLeavesTheNewerPromptOpen() {
             Runnable oldTimeout = openMoneyPrompt(oldTrade);
@@ -1302,10 +1324,12 @@ class TradeListenerTest {
         @DisplayName("Should not cancel trade when waiting for input")
         void dontCancelWhenWaitingForInput() throws Exception {
             Map<UUID, TradeListener.PendingPrompt> waitingForInput = UltiTradeTestHelper.getField(listener, "waitingForInput");
-            waitingForInput.put(uuid1, new TradeListener.PendingPrompt(TradeListener.InputType.MONEY, null));
+            TradeSession session = new TradeSession(player1, player2);
+            // The prompt belongs to the trade whose window closes: only such a prompt suppresses the
+            // close's cancellation.
+            waitingForInput.put(uuid1, new TradeListener.PendingPrompt(TradeListener.InputType.MONEY, session));
 
             TradeGUI gui = mock(TradeGUI.class);
-            TradeSession session = new TradeSession(player1, player2);
             when(gui.getSession()).thenReturn(session);
             when(tradeService.getSession(uuid1)).thenReturn(session);
 
