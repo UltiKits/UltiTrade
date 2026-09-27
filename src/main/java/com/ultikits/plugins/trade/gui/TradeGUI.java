@@ -67,8 +67,13 @@ public class TradeGUI implements InventoryHolder {
         this.viewer = viewer;
         
         this.inventory = Bukkit.createInventory(this, SIZE, buildTitle());
-        
+
         initializeGUI();
+        // Every state-dependent slot comes from update(), here as on every later redraw, so a window
+        // is never shown without the session's stakes. Five of the seven places that open a trade
+        // window never called update(), and those windows showed an empty trade while the session
+        // held both players' offers -- which a player could then confirm (UltiKits/UltiTrade#35).
+        update();
     }
     
     /**
@@ -84,48 +89,23 @@ public class TradeGUI implements InventoryHolder {
     }
 
     /**
-     * Initialize GUI elements.
+     * Draws the parts of the window that never depend on the trade: the separators and the bottom
+     * row's filler. Everything that does -- both sides' items, money, experience, status and the two
+     * buttons -- is drawn by {@link #update()}, which the constructor runs next, so there is one path
+     * for it (UltiKits/UltiTrade#35).
      */
     private void initializeGUI() {
-        // Fill separators
         ItemStack separator = createItem(Material.BLACK_STAINED_GLASS_PANE, " ");
         for (int slot : SEPARATOR_SLOTS) {
             inventory.setItem(slot, separator);
         }
-        
-        // Fill empty slots with glass
-        ItemStack yourGlass = createItem(Material.LIME_STAINED_GLASS_PANE, text(tradeService.i18n("gui_your_items")));
-        ItemStack theirGlass = createItem(Material.CYAN_STAINED_GLASS_PANE, text(tradeService.i18n("gui_their_items")));
-        
-        for (int slot : YOUR_SLOTS) {
-            inventory.setItem(slot, yourGlass);
-        }
-        for (int slot : THEIR_SLOTS) {
-            inventory.setItem(slot, theirGlass);
-        }
-        
-        // Bottom row
+
         ItemStack bottomFiller = createItem(Material.GRAY_STAINED_GLASS_PANE, " ");
         for (int i = 45; i < 54; i++) {
             inventory.setItem(i, bottomFiller);
         }
-        
-        // Confirm button
-        updateConfirmButton();
-
-        // Cancel button
-        updateCancelButton();
-
-        // Money display
-        updateMoneyDisplay();
-        
-        // Experience display
-        updateExpDisplay();
-        
-        // Status display
-        updateStatusDisplay();
     }
-    
+
     /**
      * Update the GUI with current trade state.
      */

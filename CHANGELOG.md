@@ -76,6 +76,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A trade window always shows what both players have staked. Five of the seven ways a trade window
+  opens — after the money or experience prompt times out, after a `cancel` reply to the prompt, and on
+  the two large-trade confirmation paths — showed an empty trade while both stakes were still in it,
+  so a player could confirm a trade whose contents they could not see (UltiKits/UltiTrade#35).
+- 交易窗口始终显示双方已放入的内容。此前七种打开交易窗口的方式中有五种——金币或经验输入提示超时后、对提示回复 `cancel`
+  后，以及大额交易确认的两条路径——会显示空的交易，而双方的物品实际仍在交易中，玩家可能在看不到内容的情况下确认交易（UltiKits/UltiTrade#35）。
+
 - If a trade is cancelled while one participant cannot be found on the server, that participant's
   staked items are kept and handed back when they next join, instead of being destroyed. They are
   saved in a new table, `trade_pending_returns`; if they cannot be saved they are dropped at the

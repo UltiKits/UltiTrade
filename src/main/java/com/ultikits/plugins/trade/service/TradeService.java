@@ -254,8 +254,8 @@ public class TradeService {
             gui.update();
             retitle(view, gui.buildTitle());
         } else if (holder instanceof TradeConfirmPage) {
+            // A new window renders the session itself (UltiKits/UltiTrade#35).
             TradeGUI gui = new TradeGUI(this, session, player);
-            gui.update();
             player.openInventory(gui.getInventory());
         }
     }
