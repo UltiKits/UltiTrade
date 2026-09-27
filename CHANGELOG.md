@@ -76,6 +76,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A money or experience prompt left over from a cancelled trade no longer affects a trade the player opens
+  afterwards: its 10-second timeout no longer reopens the old trade's window (which cancelled the new trade
+  and told both players so), no longer closes a prompt opened in the new trade, and an amount typed for it
+  is answered with `The trade has ended!` instead of being applied to the new trade (UltiKits/UltiTrade#40).
+- 已取消交易遗留的金币或经验输入提示不再影响玩家之后开启的交易：其 10 秒超时不再重新打开旧交易的窗口（此前会导致新交易被取消并通知双方），
+  也不再关闭在新交易中打开的提示；为它输入的数额会提示「交易已结束」，不会被应用到新交易（UltiKits/UltiTrade#40）。
+
 - A trade whose money or experience meets `confirm-threshold` completes once both players have confirmed
   through the confirmation page, exactly as a smaller trade does. Before, the page only recorded the
   confirmation, so such a trade could never complete (UltiKits/UltiTrade#21).
