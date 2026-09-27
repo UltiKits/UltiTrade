@@ -76,6 +76,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The large-trade confirmation page's item previews now carry the `---Trade item---` marker line in
+  their lore; it was built and then discarded (UltiKits/UltiTrade#43).
+- 大额交易确认页面中预览的物品现在在描述中带有「交易物品」标记行；此前该行被生成后又被丢弃（UltiKits/UltiTrade#43）。
+
 - A trade window always shows what both players have staked. Five of the seven ways a trade window
   opens — after the money or experience prompt times out, after a `cancel` reply to the prompt, and on
   the two large-trade confirmation paths — showed an empty trade while both stakes were still in it,

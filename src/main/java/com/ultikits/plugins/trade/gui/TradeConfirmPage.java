@@ -193,6 +193,9 @@ public class TradeConfirmPage implements InventoryHolder {
                     List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
                     lore.add("");
                     lore.add(text(tradeService.i18n("confirm_item_marker")));
+                    // The marker lives on this copy's lore only once it is set back on the meta
+                    // (UltiKits/UltiTrade#43).
+                    meta.setLore(lore);
                     item.setItemMeta(meta);
                 }
                 inventory.setItem(startSlot + i, item);
