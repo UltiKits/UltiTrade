@@ -558,9 +558,17 @@ public class TradeListener implements Listener {
     @EventHandler
     public void onInventoryClose(InventoryCloseEvent event) {
         if (event.getInventory().getHolder() instanceof TradeConfirmPage) {
-            // Closing the confirmation page never cancels the trade; a close that is not one of the
-            // page's own buttons goes back to the trade window.
-            ((TradeConfirmPage) event.getInventory().getHolder()).handleClose();
+            // Closing the confirmation page never cancels the trade. Only the player's own close (Esc)
+            // counts as the page's Cancel and goes back to the trade window. A close by a plugin -- this
+            // module cancelling or completing the trade, a reload redrawing it, another window opened
+            // over it -- is not the player's answer, and running Cancel there would schedule a trade
+            // window nobody asked for (during shutdown, on a scheduler that refuses tasks).
+            TradeConfirmPage page = (TradeConfirmPage) event.getInventory().getHolder();
+            if (event.getReason() == InventoryCloseEvent.Reason.PLAYER) {
+                page.handleClose();
+            } else {
+                page.dismiss();
+            }
             return;
         }
         

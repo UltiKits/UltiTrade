@@ -254,9 +254,9 @@ public class TradeConfirmPage implements InventoryHolder {
     }
 
     /**
-     * Handles the page being closed. A close that is not a button's own counts as the Cancel ("back")
-     * button, so the player returns to the trade window rather than being left with no window while
-     * the trade keeps running.
+     * Handles the player closing the page themselves (Esc): it counts as the Cancel ("back") button,
+     * so the player returns to the trade window rather than being left with no window while the trade
+     * keeps running. A close by a plugin goes to {@link #dismiss()} instead.
      */
     public void handleClose() {
         if (answered) {
@@ -269,10 +269,11 @@ public class TradeConfirmPage implements InventoryHolder {
     }
     
     /**
-     * Retires the page without answering it, for when its owner replaces it with another window (the
-     * reload redraw). Replacing the page closes it, and that close is not the player's "back": without
-     * this the Cancel callback would schedule a second trade window, whose opening closes the
-     * replacement and so cancels the trade.
+     * Retires the page without answering it, for a close that is not the player's own: the reload
+     * redraw replacing it, a cancellation or completion closing it, another window opened over it.
+     * Such a close is not the player's "back"; running the Cancel callback there would schedule a
+     * trade window nobody asked for -- on a reload, one whose opening closes the replacement and so
+     * cancels the trade.
      */
     public void dismiss() {
         answered = true;
