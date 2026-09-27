@@ -7,6 +7,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.enchantments.Enchantment;
+import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.Inventory;
@@ -235,7 +236,11 @@ public class TradeConfirmPage implements InventoryHolder {
         
         int slot = event.getRawSlot();
         
-        if (answered) {
+        if (answered || !isViewer(event.getWhoClicked())) {
+            // Only the player the page was built for can answer it. Anyone else looking at this
+            // inventory -- which only another plugin can arrange -- would otherwise confirm, or complete,
+            // somebody else's trade; the trade window refuses non-participants the same way
+            // (UltiKits/UltiTrade#38).
             return;
         }
         if (slot == CONFIRM_SLOT) {
@@ -268,6 +273,16 @@ public class TradeConfirmPage implements InventoryHolder {
         }
     }
     
+    /**
+     * Whether {@code entity} is the player this page was built for.
+     *
+     * @param entity the player acting on or closing the page; may be {@code null}
+     * @return true only for the page's viewer
+     */
+    public boolean isViewer(HumanEntity entity) {
+        return entity != null && viewer.getUniqueId().equals(entity.getUniqueId());
+    }
+
     /**
      * Retires the page without answering it, for a close that is not the player's own: the reload
      * redraw replacing it, a cancellation or completion closing it, another window opened over it.

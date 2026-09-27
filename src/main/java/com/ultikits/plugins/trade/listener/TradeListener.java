@@ -564,6 +564,10 @@ public class TradeListener implements Listener {
             // over it -- is not the player's answer, and running Cancel there would schedule a trade
             // window nobody asked for (during shutdown, on a scheduler that refuses tasks).
             TradeConfirmPage page = (TradeConfirmPage) event.getInventory().getHolder();
+            if (!page.isViewer(event.getPlayer())) {
+                // Somebody else closing their view of this page; the viewer still has it open.
+                return;
+            }
             if (event.getReason() == InventoryCloseEvent.Reason.PLAYER) {
                 page.handleClose();
             } else {
