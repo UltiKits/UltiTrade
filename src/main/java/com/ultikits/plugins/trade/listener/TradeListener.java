@@ -302,6 +302,12 @@ public class TradeListener implements Listener {
         }
     }
     
+    /** Whether {@code playerUuid} has a chat prompt open that was opened in {@code session}. */
+    private boolean isAnsweringPromptOf(UUID playerUuid, TradeSession session) {
+        PendingPrompt prompt = waitingForInput.get(playerUuid);
+        return prompt != null && session != null && prompt.session == session;
+    }
+
     /**
      * Ends {@code prompt} after 10 seconds without an answer and reopens its trade's window.
      * <p>
@@ -581,9 +587,12 @@ public class TradeListener implements Listener {
         }
         
         Player player = (Player) event.getPlayer();
-        
-        // Don't cancel if waiting for input
-        if (waitingForInput.containsKey(player.getUniqueId())) {
+        TradeSession session = tradeService.getSession(player.getUniqueId());
+
+        // Don't cancel while the player answers a prompt of this trade. Only of this trade: a prompt
+        // left over from a trade cancelled while it was open stays until its timeout, and must not keep
+        // a newer trade running with no window (UltiKits/UltiTrade#40).
+        if (isAnsweringPromptOf(player.getUniqueId(), session)) {
             return;
         }
 
@@ -593,8 +602,6 @@ public class TradeListener implements Listener {
             return;
         }
         
-        TradeSession session = tradeService.getSession(player.getUniqueId());
-        
         if (session != null && session.getState() == TradeSession.TradeState.TRADING) {
             // Cancel trade when closing GUI -- this trade, the one whose window closed, and only if it
             // is still the player's trade when the task runs (UltiKits/UltiTrade#40).
@@ -602,7 +609,7 @@ public class TradeListener implements Listener {
                 getBukkitPlugin(),
                 () -> {
                     if (tradeService.getSession(player.getUniqueId()) == session
-                            && !waitingForInput.containsKey(player.getUniqueId())) {
+                            && !isAnsweringPromptOf(player.getUniqueId(), session)) {
                         tradeService.cancelTrade(player);
                     }
                 },
