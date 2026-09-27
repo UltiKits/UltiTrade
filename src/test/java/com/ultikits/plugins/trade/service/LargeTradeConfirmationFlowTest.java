@@ -262,6 +262,23 @@ class LargeTradeConfirmationFlowTest {
     }
 
     @Test
+    @DisplayName("a reload while the page is open shows the trade window and leaves the trade running")
+    void aReloadWhileThePageIsOpenKeepsTheTrade() {
+        TradeSession session = startLargeTrade();
+        service.confirmTrade(player1);
+        runScheduled();
+        assertThat(holderShownTo(player1)).isInstanceOf(TradeConfirmPage.class);
+
+        // The reload replaces the page with a trade window; replacing it is not the player's "back".
+        service.refreshOpenTradeWindowsAfterReload();
+        runScheduled();
+
+        assertThat(service.getSession(uuid1)).as("the trade is still running").isSameAs(session);
+        assertThat(session.getState()).isEqualTo(TradeSession.TradeState.TRADING);
+        assertThat(holderShownTo(player1)).isInstanceOf(TradeGUI.class);
+    }
+
+    @Test
     @DisplayName("POSITIVE CONTROL: once the page has opened, closing the trade window still cancels the trade")
     void theTransitionDoesNotOutliveThePage() {
         TradeSession session = startLargeTrade();
