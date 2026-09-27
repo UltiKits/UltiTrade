@@ -46,6 +46,14 @@ public class TradeConfirmPage implements InventoryHolder {
     // Display positions
     public static final int YOUR_ITEMS_START = 10;
     public static final int THEIR_ITEMS_START = 14;
+    /**
+     * Where the "N more items" indicator goes for the viewer's side: the slot left of their three
+     * previews (the slot to their right is {@link #INFO_SLOT}). It used to overwrite the third
+     * preview, so a 4-item offer showed only two items (UltiKits/UltiTrade#22).
+     */
+    public static final int YOUR_MORE_ITEMS_SLOT = YOUR_ITEMS_START - 1;
+    /** Where the "N more items" indicator goes for the other side: the slot right of its three previews. */
+    public static final int THEIR_MORE_ITEMS_SLOT = THEIR_ITEMS_START + 3;
     public static final int YOUR_MONEY_SLOT = 28;
     public static final int YOUR_EXP_SLOT = 29;
     public static final int THEIR_MONEY_SLOT = 32;
@@ -117,10 +125,10 @@ public class TradeConfirmPage implements InventoryHolder {
         inventory.setItem(INFO_SLOT, infoItem);
         
         // Display your items (3 slots)
-        displayItems(session.getPlayerItems(viewerUuid), YOUR_ITEMS_START, text(tradeService.i18n("gui_your_items")));
+        displayItems(session.getPlayerItems(viewerUuid), YOUR_ITEMS_START, YOUR_MORE_ITEMS_SLOT, text(tradeService.i18n("gui_your_items")));
         
         // Display their items (3 slots)
-        displayItems(session.getOtherPlayerItems(viewerUuid), THEIR_ITEMS_START, text(tradeService.i18n("gui_their_items")));
+        displayItems(session.getOtherPlayerItems(viewerUuid), THEIR_ITEMS_START, THEIR_MORE_ITEMS_SLOT, text(tradeService.i18n("gui_their_items")));
         
         // Money display
         ItemStack yourMoneyItem = createItem(Material.GOLD_INGOT, 
@@ -178,9 +186,11 @@ public class TradeConfirmPage implements InventoryHolder {
     }
     
     /**
-     * Display items in the GUI.
+     * Shows up to three of a side's items from {@code startSlot}, and, when the side offers more,
+     * the "N more items" indicator in {@code moreSlot} -- a slot of its own, so all three previews
+     * stay visible (UltiKits/UltiTrade#22).
      */
-    private void displayItems(Map<Integer, ItemStack> items, int startSlot, String emptyName) {
+    private void displayItems(Map<Integer, ItemStack> items, int startSlot, int moreSlot, String emptyName) {
         int displaySlots = 3;
         List<ItemStack> itemList = new ArrayList<>(items.values());
         
@@ -210,7 +220,7 @@ public class TradeConfirmPage implements InventoryHolder {
             ItemStack moreItem = createItem(Material.CHEST,
                 filled(tradeService.i18n("confirm_more_items"), "{COUNT}", String.valueOf(itemList.size() - displaySlots)),
                 Arrays.asList(text(tradeService.i18n("confirm_more_items_lore"))));
-            inventory.setItem(startSlot + displaySlots - 1, moreItem);
+            inventory.setItem(moreSlot, moreItem);
         }
     }
     

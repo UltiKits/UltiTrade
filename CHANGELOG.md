@@ -76,6 +76,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- On the large-trade confirmation page, a side offering four or more items shows three item previews
+  and the "N more items" count in a slot of its own; the count used to cover the third preview, so only
+  two items were visible (UltiKits/UltiTrade#22).
+- 大额交易确认页面上，一方放入四个及以上物品时，会显示三个物品预览，并在单独的格子中显示「还有 N 个物品」；
+  此前该提示覆盖了第三个预览，只能看到两个物品（UltiKits/UltiTrade#22）。
+
 - The large-trade confirmation page's item previews now carry the `---Trade item---` marker line in
   their lore; it was built and then discarded (UltiKits/UltiTrade#43).
 - 大额交易确认页面中预览的物品现在在描述中带有「交易物品」标记行；此前该行被生成后又被丢弃（UltiKits/UltiTrade#43）。
