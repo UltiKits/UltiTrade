@@ -248,6 +248,7 @@ class TradeConfirmPageTest {
                     () -> confirmed.set(true), () -> {});
 
             InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getWhoClicked()).thenReturn(player1);
             when(event.getRawSlot()).thenReturn(TradeConfirmPage.CONFIRM_SLOT);
 
             page.handleClick(event);
@@ -258,6 +259,25 @@ class TradeConfirmPageTest {
         }
 
         @Test
+        @DisplayName("a click on Confirm by somebody other than the page's viewer confirms nothing")
+        void aThirdPlayersConfirmClickIsRefused() {
+            AtomicBoolean confirmed = new AtomicBoolean(false);
+            TradeConfirmPage page = new TradeConfirmPage(tradeService, session, player1,
+                    () -> confirmed.set(true), () -> {});
+            Player outsider = UltiTradeTestHelper.createMockPlayer("Outsider", UUID.randomUUID());
+
+            InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getWhoClicked()).thenReturn(outsider);
+            when(event.getRawSlot()).thenReturn(TradeConfirmPage.CONFIRM_SLOT);
+
+            page.handleClick(event);
+
+            verify(event).setCancelled(true);
+            verify(player1, never()).closeInventory();
+            assertThat(confirmed.get()).isFalse();
+        }
+
+        @Test
         @DisplayName("Should run onCancel on cancel slot click")
         void cancelSlotClick() {
             AtomicBoolean cancelled = new AtomicBoolean(false);
@@ -265,6 +285,7 @@ class TradeConfirmPageTest {
                     () -> {}, () -> cancelled.set(true));
 
             InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getWhoClicked()).thenReturn(player1);
             when(event.getRawSlot()).thenReturn(TradeConfirmPage.CANCEL_SLOT);
 
             page.handleClick(event);
@@ -281,6 +302,7 @@ class TradeConfirmPageTest {
                     () -> {}, () -> {});
 
             InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getWhoClicked()).thenReturn(player1);
             when(event.getRawSlot()).thenReturn(0); // Background slot
 
             page.handleClick(event);
@@ -296,6 +318,7 @@ class TradeConfirmPageTest {
                     null, () -> {});
 
             InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getWhoClicked()).thenReturn(player1);
             when(event.getRawSlot()).thenReturn(TradeConfirmPage.CONFIRM_SLOT);
 
             // Should not throw
@@ -311,6 +334,7 @@ class TradeConfirmPageTest {
                     () -> {}, null);
 
             InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getWhoClicked()).thenReturn(player1);
             when(event.getRawSlot()).thenReturn(TradeConfirmPage.CANCEL_SLOT);
 
             // Should not throw
@@ -326,6 +350,7 @@ class TradeConfirmPageTest {
                     () -> {}, () -> {});
 
             InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getWhoClicked()).thenReturn(player1);
             when(event.getRawSlot()).thenReturn(TradeConfirmPage.INFO_SLOT);
 
             page.handleClick(event);

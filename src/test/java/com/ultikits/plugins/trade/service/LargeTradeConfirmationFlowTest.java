@@ -200,6 +200,7 @@ class LargeTradeConfirmationFlowTest {
         Object holder = holderShownTo(player);
         assertThat(holder).as("the confirmation page is what the player sees").isInstanceOf(TradeConfirmPage.class);
         InventoryClickEvent click = mock(InventoryClickEvent.class);
+        when(click.getWhoClicked()).thenReturn(player);
         when(click.getRawSlot()).thenReturn(slot);
         ((TradeConfirmPage) holder).handleClick(click);
         runScheduled();
@@ -322,6 +323,24 @@ class LargeTradeConfirmationFlowTest {
         service.shutdown();
 
         verify(player2.getInventory()).addItem(any(ItemStack.class));
+    }
+
+    @Test
+    @DisplayName("somebody else closing their view of the page does not answer it for its viewer")
+    void anOutsiderClosingThePageChangesNothing() {
+        TradeSession session = startLargeTrade();
+        service.confirmTrade(player1);
+        runScheduled();
+        Inventory page = screens.get(player1);
+        assertThat(page.getHolder()).isInstanceOf(TradeConfirmPage.class);
+        Player outsider = UltiTradeTestHelper.createMockPlayer("Outsider", UUID.randomUUID());
+
+        // Another plugin showed the same page to a third player, who now closes it themselves.
+        fireClose(outsider, page, InventoryCloseEvent.Reason.PLAYER);
+        runScheduled();
+
+        assertThat(holderShownTo(player1)).as("the viewer still has the page").isSameAs(page.getHolder());
+        assertThat(service.getSession(uuid1)).isSameAs(session);
     }
 
     @Test
