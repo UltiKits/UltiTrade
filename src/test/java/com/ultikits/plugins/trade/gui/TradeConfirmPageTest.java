@@ -56,6 +56,77 @@ class TradeConfirmPageTest {
         UltiTradeTestHelper.tearDown();
     }
 
+    /**
+     * The item previews: UltiKits/UltiTrade#22 (the "N more items" indicator takes a fourth slot of its
+     * own instead of the third preview) and UltiKits/UltiTrade#43 (each preview carries the
+     * trade-item marker line in its lore).
+     */
+    @Nested
+    @DisplayName("Item previews (UltiKits/UltiTrade#22, #43)")
+    class ItemPreviews {
+
+        private org.bukkit.inventory.Inventory openPage(UUID offering, int items) {
+            for (int i = 0; i < items; i++) {
+                session.setItem(offering, i, new ItemStack(Material.DIAMOND, i + 1));
+            }
+            org.bukkit.inventory.Inventory inventory = Bukkit.createInventory(null, TradeConfirmPage.SIZE, "x");
+            clearInvocations(inventory);
+            new TradeConfirmPage(tradeService, session, player1, () -> { }, () -> { });
+            return inventory;
+        }
+
+        @Test
+        @DisplayName("a 4-item offer shows 3 previews and the count in a fourth slot of its own")
+        void fourItemsShowThreePreviewsAndTheCount() {
+            org.bukkit.inventory.Inventory inventory = openPage(uuid1, 4);
+
+            for (int i = 0; i < 3; i++) {
+                int amount = i + 1;
+                verify(inventory).setItem(eq(TradeConfirmPage.YOUR_ITEMS_START + i),
+                        argThat(item -> item != null && item.getType() == Material.DIAMOND && item.getAmount() == amount));
+            }
+            // The slot left of the three previews; the one to their right is the info paper.
+            verify(inventory).setItem(eq(TradeConfirmPage.YOUR_ITEMS_START - 1),
+                    argThat(item -> item != null && item.getType() == Material.CHEST));
+            verify(inventory, never()).setItem(eq(TradeConfirmPage.YOUR_ITEMS_START + 2),
+                    argThat(item -> item != null && item.getType() == Material.CHEST));
+        }
+
+        @Test
+        @DisplayName("the other side's count also takes a fourth slot of its own")
+        void theirCountTakesItsOwnSlot() {
+            org.bukkit.inventory.Inventory inventory = openPage(uuid2, 5);
+
+            verify(inventory).setItem(eq(TradeConfirmPage.THEIR_ITEMS_START + 2),
+                    argThat(item -> item != null && item.getType() == Material.DIAMOND && item.getAmount() == 3));
+            // The slot right of the three previews.
+            verify(inventory).setItem(eq(TradeConfirmPage.THEIR_ITEMS_START + 3),
+                    argThat(item -> item != null && item.getType() == Material.CHEST));
+        }
+
+        @Test
+        @DisplayName("POSITIVE CONTROL: exactly 3 items show 3 previews and no count")
+        void threeItemsShowNoCount() {
+            org.bukkit.inventory.Inventory inventory = openPage(uuid1, 3);
+
+            verify(inventory, never()).setItem(anyInt(),
+                    argThat(item -> item != null && item.getType() == Material.CHEST));
+        }
+
+        @Test
+        @DisplayName("each preview carries the trade-item marker in its lore (UltiKits/UltiTrade#43)")
+        void previewsCarryTheMarker() {
+            org.bukkit.inventory.meta.ItemMeta meta = Bukkit.getItemFactory().getItemMeta(Material.DIAMOND);
+            String marker = org.bukkit.ChatColor.translateAlternateColorCodes('&',
+                    tradeService.i18n("confirm_item_marker"));
+            clearInvocations(meta);
+
+            openPage(uuid1, 1);
+
+            verify(meta, atLeastOnce()).setLore(argThat(lore -> lore != null && lore.contains(marker)));
+        }
+    }
+
     @Nested
     @DisplayName("Constructor")
     class Constructor {
