@@ -192,6 +192,50 @@ public class TradeService {
     }
 
     /**
+     * Withdraws, from every open trade, the money and experience offers a reload has made
+     * unavailable, and tells both players (UltiKits/UltiTrade#28).
+     * <p>
+     * Before, such an offer could not be withdrawn at all -- the money slot needs money trading, and
+     * the prompt refused every amount -- so the players could only cancel and start again; the trade
+     * was then cancelled at completion anyway. Withdrawing an offer takes nothing from anybody: money
+     * and experience move only when a trade completes. Setting an offer also resets both
+     * confirmations, and the windows are redrawn by {@link #refreshOpenTradeWindowsAfterReload()},
+     * which the reload runs after this. Called from {@link #resetConfirmationsAfterReload()}.
+     */
+    void withdrawUnavailableOffersAfterReload() {
+        boolean moneyAvailable = hasEconomy();
+        boolean expAvailable = config.isEnableExpTrade();
+        for (TradeSession session : activeSessions.values()) {
+            UUID first = session.getPlayer1();
+            UUID second = session.getPlayer2();
+            boolean moneyWithdrawn = false;
+            boolean expWithdrawn = false;
+            for (UUID participant : new UUID[] {first, second}) {
+                if (!moneyAvailable && session.getPlayerMoney(participant) != 0) {
+                    session.setMoney(participant, 0);
+                    moneyWithdrawn = true;
+                }
+                if (!expAvailable && session.getPlayerExp(participant) != 0) {
+                    session.setExp(participant, 0);
+                    expWithdrawn = true;
+                }
+            }
+            for (UUID participant : new UUID[] {first, second}) {
+                Player player = Bukkit.getPlayer(participant);
+                if (player == null) {
+                    continue;
+                }
+                if (moneyWithdrawn) {
+                    player.sendMessage(text(i18n("offer_withdrawn_money_unavailable")));
+                }
+                if (expWithdrawn) {
+                    player.sendMessage(text(i18n("offer_withdrawn_exp_unavailable")));
+                }
+            }
+        }
+    }
+
+    /**
      * Void every confirmation in open trades after a configuration reload (UltiKits/UltiTrade#26).
      * A reload can change the terms a confirmation was given for ({@code trade-tax},
      * {@code exp-tax-rate}, {@code confirm-threshold}, which offers are allowed), so a trade must never
@@ -199,6 +243,9 @@ public class TradeService {
      * confirm again.
      */
     public void resetConfirmationsAfterReload() {
+        // First withdraw the offers the reload made unavailable; that resets those trades'
+        // confirmations as well (UltiKits/UltiTrade#28).
+        withdrawUnavailableOffersAfterReload();
         for (TradeSession session : activeSessions.values()) {
             UUID first = session.getPlayer1();
             UUID second = session.getPlayer2();

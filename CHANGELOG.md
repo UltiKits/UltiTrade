@@ -76,6 +76,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- When `/ul reload UltiTrade` makes money trading unavailable (money trading turned off, or no economy
+  provider found), the money offered in every open trade is withdrawn and both players are told, so the
+  rest of the trade can still complete; experience offers are withdrawn the same way when experience trading
+  is turned off. While either is unavailable, its chat prompt accepts `0` to withdraw an offer. Before, such
+  an offer could not be withdrawn and the trade could only be cancelled (UltiKits/UltiTrade#28).
+- 当 `/ul reload UltiTrade` 使金币交易不可用（关闭金币交易或找不到经济提供者）时，所有进行中交易里出价的金币会被撤回并通知双方，交易的其余内容仍可完成；
+  关闭经验交易时，经验出价也同样撤回。不可用期间，对应的聊天提示接受 `0` 以撤回出价。此前这样的出价无法撤回，只能取消交易（UltiKits/UltiTrade#28）。
+
 - A money or experience prompt left over from a cancelled trade no longer affects a trade the player opens
   afterwards: its 10-second timeout no longer reopens the old trade's window (which cancelled the new trade
   and told both players so), no longer closes a prompt opened in the new trade, and an amount typed for it

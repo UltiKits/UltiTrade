@@ -437,6 +437,14 @@ public class TradeListener implements Listener {
                 // handler runs (UltiKits/UltiTrade#26). Without a provider the amount stays unchanged.
                 Economy currentEconomy = tradeService.getEconomy();
                 if (currentEconomy == null || !config.isEnableMoneyTrade()) {
+                    // 0 withdraws an offer made while money trading was available; nothing is taken
+                    // from anybody (UltiKits/UltiTrade#28).
+                    if (value == 0) {
+                        session.setMoney(player.getUniqueId(), 0);
+                        player.sendMessage(text(tradeService.i18n("money_set").replace("{AMOUNT}", String.valueOf(0.0))));
+                        reopenGUI(player, prompt);
+                        return;
+                    }
                     player.sendMessage(text(tradeService.i18n("money_unavailable")));
                     reopenGUI(player, prompt);
                     return;
@@ -453,6 +461,13 @@ public class TradeListener implements Listener {
                 // A reload may have turned experience trading off since the prompt opened
                 // (UltiKits/UltiTrade#26). Without it the amount stays unchanged.
                 if (!config.isEnableExpTrade()) {
+                    // As for money: 0 withdraws an offer (UltiKits/UltiTrade#28).
+                    if ((int) value == 0) {
+                        session.setExp(player.getUniqueId(), 0);
+                        player.sendMessage(text(tradeService.i18n("exp_set").replace("{AMOUNT}", "0")));
+                        reopenGUI(player, prompt);
+                        return;
+                    }
                     player.sendMessage(text(tradeService.i18n("exp_unavailable")));
                     reopenGUI(player, prompt);
                     return;
