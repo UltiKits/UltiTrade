@@ -184,10 +184,10 @@ public class TradeListener implements Listener {
         
         // Handle money slot click
         if (gui.isMoneySlot(slot) && tradeService.hasEconomy()) {
-            // Reset confirmation when changing money
-            session.setConfirmed(player.getUniqueId(), false);
-            session.setConfirmed(session.getOtherPlayer(player.getUniqueId()), false);
-            
+            // Opening the prompt changes no offer, so no confirmation is touched here: setting an
+            // amount resets both through TradeSession#setMoney, and reopenGUI repaints both windows
+            // (UltiKits/UltiTrade#36).
+
             // Start money input conversation
             player.closeInventory();
             player.sendMessage(text(tradeService.i18n("input_money_prompt")));
@@ -208,10 +208,9 @@ public class TradeListener implements Listener {
         
         // Handle experience slot click
         if (gui.isExpSlot(slot) && config.isEnableExpTrade()) {
-            // Reset confirmation when changing exp
-            session.setConfirmed(player.getUniqueId(), false);
-            session.setConfirmed(session.getOtherPlayer(player.getUniqueId()), false);
-            
+            // As for money: TradeSession#setExp resets both confirmations when an amount is set
+            // (UltiKits/UltiTrade#36).
+
             // Start exp input conversation
             player.closeInventory();
             player.sendMessage(text(tradeService.i18n("input_exp_prompt")));
@@ -256,10 +255,10 @@ public class TradeListener implements Listener {
         
         // Handle your item slots
         if (gui.isYourSlot(slot)) {
-            // Reset confirmation when changing items
-            session.setConfirmed(player.getUniqueId(), false);
-            session.setConfirmed(session.getOtherPlayer(player.getUniqueId()), false);
-            
+            // Confirmations are reset only where the offer really changes -- TradeSession#setItem
+            // resets both -- and each of those paths repaints both windows. Resetting here, before
+            // anything was decided, cleared both players' confirmations on a click that changed
+            // nothing and left both windows showing them as confirmed (UltiKits/UltiTrade#36).
             ItemStack cursor = event.getCursor();
             int index = gui.getItemIndex(slot);
 

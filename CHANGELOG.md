@@ -76,6 +76,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- In the trade window, clicking one of your own empty slots with nothing in hand, or opening the money or
+  experience prompt, no longer clears both players' confirmations. Confirmations are cleared only when an
+  offer actually changes, and both windows are then redrawn. Before, such a click cleared them without
+  redrawing, so a player still looked confirmed while the trade could not complete (UltiKits/UltiTrade#36).
+- 在交易窗口中，空手点击自己的空格子，或打开金币、经验输入提示，不再清除双方的确认。只有出价真正变化时才清除确认，并同时刷新双方窗口。
+  此前这样的点击会清除确认却不刷新，玩家看起来仍已确认，交易却无法完成（UltiKits/UltiTrade#36）。
+
 - The money and experience chat prompts refuse `NaN` and `Infinity` with `Invalid amount!`. Before,
   `NaN` was accepted as the money offer; the money transfer was then skipped while the items still moved,
   and the other player saw `NaN` (UltiKits/UltiTrade#29).
