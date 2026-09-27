@@ -124,12 +124,16 @@ class LargeTradeConfirmationFlowTest {
         UltiTradeTestHelper.tearDown();
     }
 
-    /** Opening and closing a window behave as on a server: a replaced or closed window fires its close. */
+    /**
+     * Opening and closing a window behave as on a server: a replaced or closed window fires its close,
+     * with the reason Paper gives it -- {@code OPEN_NEW} when another window replaces it,
+     * {@code PLUGIN} when a plugin closes it. {@link #pressEscape} is the player's own close.
+     */
     private void wireScreen(Player player) {
         lenient().when(player.openInventory(any(Inventory.class))).thenAnswer(inv -> {
             Inventory previous = screens.get(player);
             if (previous != null) {
-                fireClose(player, previous);
+                fireClose(player, previous, InventoryCloseEvent.Reason.OPEN_NEW);
             }
             screens.put(player, inv.getArgument(0));
             return view(player);
@@ -137,7 +141,7 @@ class LargeTradeConfirmationFlowTest {
         lenient().doAnswer(inv -> {
             Inventory previous = screens.remove(player);
             if (previous != null) {
-                fireClose(player, previous);
+                fireClose(player, previous, InventoryCloseEvent.Reason.PLUGIN);
             }
             return null;
         }).when(player).closeInventory();
@@ -154,11 +158,20 @@ class LargeTradeConfirmationFlowTest {
         return view;
     }
 
-    private void fireClose(Player player, Inventory inventory) {
+    private void fireClose(Player player, Inventory inventory, InventoryCloseEvent.Reason reason) {
         InventoryCloseEvent event = mock(InventoryCloseEvent.class);
         lenient().when(event.getInventory()).thenReturn(inventory);
         lenient().when(event.getPlayer()).thenReturn(player);
+        lenient().when(event.getReason()).thenReturn(reason);
         listener.onInventoryClose(event);
+    }
+
+    /** The player closes their window themselves (Esc). */
+    private void pressEscape(Player player) {
+        Inventory previous = screens.remove(player);
+        if (previous != null) {
+            fireClose(player, previous, InventoryCloseEvent.Reason.PLAYER);
+        }
     }
 
     private void runScheduled() {
@@ -238,7 +251,7 @@ class LargeTradeConfirmationFlowTest {
         service.confirmTrade(player1);
         runScheduled();
 
-        player1.closeInventory();
+        pressEscape(player1);
         runScheduled();
 
         assertThat(service.getSession(uuid1)).isSameAs(session);
@@ -279,6 +292,39 @@ class LargeTradeConfirmationFlowTest {
     }
 
     @Test
+    @DisplayName("a cancellation that closes the page does not answer it: no return to the trade window is scheduled")
+    void aCancellationClosingThePageDoesNotAnswerIt() {
+        TradeSession session = startLargeTrade();
+        service.confirmTrade(player1);
+        runScheduled();
+        assertThat(holderShownTo(player1)).isInstanceOf(TradeConfirmPage.class);
+
+        service.cancelTrade(session, "test");
+
+        // The one task left is the other player's trade-window close check; the page closed by the
+        // cancellation adds none.
+        assertThat(queue).hasSize(1);
+        assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+    }
+
+    @Test
+    @DisplayName("shutting down with the page open returns the other player's stake while the scheduler refuses tasks")
+    void shutdownWithThePageOpenReturnsTheStake() {
+        startLargeTrade();
+        service.confirmTrade(player1);
+        runScheduled();
+        assertThat(holderShownTo(player1)).isInstanceOf(TradeConfirmPage.class);
+        BukkitScheduler scheduler = Bukkit.getServer().getScheduler();
+        // The plugin is being disabled: the scheduler refuses new tasks.
+        when(scheduler.runTaskLater(any(), any(Runnable.class), anyLong()))
+                .thenThrow(new org.bukkit.plugin.IllegalPluginAccessException("disabled"));
+
+        service.shutdown();
+
+        verify(player2.getInventory()).addItem(any(ItemStack.class));
+    }
+
+    @Test
     @DisplayName("POSITIVE CONTROL: once the page has opened, closing the trade window still cancels the trade")
     void theTransitionDoesNotOutliveThePage() {
         TradeSession session = startLargeTrade();
@@ -287,7 +333,7 @@ class LargeTradeConfirmationFlowTest {
         clickPage(player1, TradeConfirmPage.CANCEL_SLOT);
         assertThat(holderShownTo(player1)).isInstanceOf(TradeGUI.class);
 
-        player1.closeInventory();
+        pressEscape(player1);
         runScheduled();
 
         assertThat(service.isTrading(uuid1)).isFalse();
