@@ -69,10 +69,10 @@ public class TradeService {
     private final Map<UUID, BossBar> requestBossBars = new ConcurrentHashMap<>();
     private final Map<UUID, BukkitTask> bossBarTasks = new ConcurrentHashMap<>();
     
-    // Bukkit plugin instance for scheduler tasks
     /** Players between closing their trade window and seeing the confirmation page (UltiKits/UltiTrade#23). */
     private final Set<UUID> confirmPageTransitions = ConcurrentHashMap.newKeySet();
 
+    // Bukkit plugin instance for scheduler tasks
     private Plugin bukkitPlugin;
 
     // Stakes of cancelled trades whose owner could not be found, handed over at their next join
