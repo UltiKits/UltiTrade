@@ -60,6 +60,13 @@ public class TradeListener implements Listener {
     // server thread, so it has to be a concurrent map: the timeout's remove(key, value) is atomic only there.
     private final Map<UUID, PendingPrompt> waitingForInput = new ConcurrentHashMap<>();
 
+    // A player's prompt is claimed (removed from waitingForInput) the instant their chat answer
+    // arrives, but the answer is only applied on the server thread afterward. This records which
+    // trade that claimed-but-not-yet-applied answer belongs to, so the close guard's
+    // isAnsweringPromptOf still sees the player as answering in that window (UltiKits/UltiTrade#47
+    // review). Written on the chat thread (possibly async) and read/cleared on the server thread.
+    private final Map<UUID, TradeSession> answeringSessions = new ConcurrentHashMap<>();
+
     enum InputType {
         MONEY, EXPERIENCE
     }
@@ -302,10 +309,28 @@ public class TradeListener implements Listener {
         }
     }
     
-    /** Whether {@code playerUuid} has a chat prompt open that was opened in {@code session}. */
+    /**
+     * Whether {@code playerUuid} has a chat prompt open that was opened in {@code session}, OR has
+     * already answered one and that answer is still on its way to the server thread.
+     * <p>
+     * {@code onPlayerChat} claims a prompt (removes it from {@link #waitingForInput}) the instant the
+     * chat message arrives, on whichever thread that is, so a second message cannot also claim it; the
+     * answer itself is only applied afterward, on the server thread, by {@link #answerPrompt}. Between
+     * those two points the prompt is gone from {@code waitingForInput}, but the trade is not idle -- the
+     * player has already answered, only the write has not landed. A close-guard check that ran only
+     * against {@code waitingForInput} in that window would see nobody answering and could cancel the
+     * trade the tick after a valid answer arrived, deferred only by ordinary scheduler timing rather
+     * than by anything the player did (UltiKits/UltiTrade#47 review). {@link #answeringSessions} is
+     * cleared as soon as {@link #answerPrompt} finishes, success or not, so this window is no wider than
+     * it has to be.
+     */
     private boolean isAnsweringPromptOf(UUID playerUuid, TradeSession session) {
         PendingPrompt prompt = waitingForInput.get(playerUuid);
-        return prompt != null && session != null && prompt.session == session;
+        if (prompt != null && session != null && prompt.session == session) {
+            return true;
+        }
+        TradeSession claimed = answeringSessions.get(playerUuid);
+        return claimed != null && claimed == session;
     }
 
     /**
@@ -392,21 +417,44 @@ public class TradeListener implements Listener {
      * change to a trade happens. Applied from the chat thread, an amount could land between a
      * confirmation page's check that the offer is unchanged and its confirmation, leaving a player
      * confirmed against an amount their page never showed.
+     * <p>
+     * Claiming also marks the trade as answering in {@link #answeringSessions}, kept until
+     * {@link #answerPrompt} finishes, so a close-guard check that runs in the gap between the claim and
+     * the applied answer still sees the player as answering rather than concluding nobody is
+     * (UltiKits/UltiTrade#47 review).
      */
     @EventHandler
     public void onPlayerChat(org.bukkit.event.player.AsyncPlayerChatEvent event) {
         Player player = event.getPlayer();
-        PendingPrompt prompt = waitingForInput.remove(player.getUniqueId());
+        UUID uuid = player.getUniqueId();
+        PendingPrompt prompt = waitingForInput.remove(uuid);
 
         if (prompt == null) {
             return;
         }
         event.setCancelled(true);
+        // A session-less prompt (a test fixture only; production always opens a prompt in a real
+        // session) has nothing for the close guard to protect, and ConcurrentHashMap rejects a null
+        // value outright.
+        if (prompt.session != null) {
+            answeringSessions.put(uuid, prompt.session);
+        }
         String message = event.getMessage().trim();
         if (event.isAsynchronous()) {
-            Bukkit.getScheduler().runTask(getBukkitPlugin(), () -> answerPrompt(player, prompt, message));
+            Bukkit.getScheduler().runTask(getBukkitPlugin(), () -> applyAnswer(player, prompt, message));
         } else {
+            applyAnswer(player, prompt, message);
+        }
+    }
+
+    /** Runs {@link #answerPrompt}, then always clears this answer's {@link #answeringSessions} entry. */
+    private void applyAnswer(Player player, PendingPrompt prompt, String message) {
+        try {
             answerPrompt(player, prompt, message);
+        } finally {
+            if (prompt.session != null) {
+                answeringSessions.remove(player.getUniqueId(), prompt.session);
+            }
         }
     }
 

@@ -76,6 +76,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A money or experience amount a player just typed can no longer be discarded by cancelling their
+  trade a tick later. Typing an answer claims it instantly (removed from the pending-prompt map) but
+  applies it only afterward, on the server thread; the close-guard's own deferred check -- scheduled
+  the instant the prompt itself closed the trade window, before the prompt was even registered -- could
+  run in that gap and, seeing no pending prompt, cancel the trade as though the player had never
+  answered. The claimed-but-not-yet-applied answer is now tracked separately so the close guard still
+  recognises it (UltiKits/UltiTrade#47 review).
+- 玩家刚输入的金额或经验数量，现在不会再因一个 tick 后交易被取消而丢失。输入答案会立即被认领（从待处理提示映射中移除），
+  但只会稍后在服务器线程上应用；而关闭守卫自身的延迟检查——在提示本身关闭交易窗口的那一刻就已排定，早于提示被登记之前——
+  可能恰好在这段间隙运行，看到没有待处理的提示，就会像玩家从未回答一样取消交易。现在会单独跟踪这个「已认领但尚未应用」
+  的答案，使关闭守卫仍能识别它（UltiKits/UltiTrade#47 复查）。
+
 - Two console lines name a file path or a world exactly as they are: the warning about a setting this
   version no longer reads, and the error for staked items that could not be saved and were dropped. A path
   or world name containing `{KEY}`, `{REASON}` or `{ITEMS}` used to be rewritten, because it was inserted

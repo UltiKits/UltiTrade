@@ -1473,6 +1473,55 @@ class TradeListenerTest {
 
             verify(tradeService, never()).cancelTrade(any(Player.class));
         }
+
+        /**
+         * Reproduces the exact ordering the P2 review described: the close-guard's deferred cancel
+         * check is registered (as it is the instant the money/experience prompt is opened, before the
+         * prompt itself is registered a moment later), then the player answers -- claimed immediately,
+         * applied only afterward on the server thread -- and only then does the deferred check run.
+         */
+        @Test
+        @DisplayName("An answer claimed but not yet applied still counts as answering for the close guard (UltiKits/UltiTrade#47 review)")
+        void claimedButNotYetAppliedAnswerStillCountsAsAnswering() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            TradeGUI gui = mock(TradeGUI.class);
+            when(gui.getSession()).thenReturn(session);
+
+            InventoryCloseEvent close = mock(InventoryCloseEvent.class);
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(gui);
+            when(close.getInventory()).thenReturn(top);
+            when(close.getPlayer()).thenReturn(player1);
+
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+
+            // The window closes -- as it does the instant the prompt is opened, before the prompt
+            // itself is registered -- so isAnsweringPromptOf is false here and the deferred cancel
+            // check is scheduled.
+            listener.onInventoryClose(close);
+            org.mockito.ArgumentCaptor<Runnable> deferredCancelCheck =
+                    org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTaskLater(any(), deferredCancelCheck.capture(), eq(1L));
+
+            // The prompt is registered, as production code does immediately after closeInventory().
+            Map<UUID, TradeListener.PendingPrompt> waitingForInput =
+                    UltiTradeTestHelper.getField(listener, "waitingForInput");
+            waitingForInput.put(uuid1, new TradeListener.PendingPrompt(TradeListener.InputType.MONEY, session));
+
+            // The player answers, asynchronously: onPlayerChat claims the prompt (removing it) and
+            // defers applying it to the server thread -- the deferred cancel check above has not run
+            // yet, so this is exactly the gap it has to survive.
+            AsyncPlayerChatEvent chat = new AsyncPlayerChatEvent(true, player1, "100", new HashSet<>());
+            listener.onPlayerChat(chat);
+            assertThat(waitingForInput).as("the prompt is claimed").doesNotContainKey(uuid1);
+
+            // The close-guard's deferred cancel check, registered before the answer arrived, now runs.
+            deferredCancelCheck.getValue().run();
+
+            verify(tradeService, never()).cancelTrade(any(Player.class));
+        }
     }
 
     @Nested
