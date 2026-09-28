@@ -350,6 +350,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `DEATH` 会取消交易；以上任何一种都会让交易悄悄保持进行、双方都没有窗口、两方出价被一直占用，直到有人手动运行
   取消命令。本模块自身或重载引发的关闭（`PLUGIN`、`OPEN_NEW`）行为不变——它们从不取消交易，因为引发关闭的代码
   本身已经掌管了会话的下一个状态。
+- `plugin.yml` now truthfully declares `softdepend: [ PlaceholderAPI, Vault ]` -- both are real, optional
+  integrations this module already handles the absence of at runtime (`UltiKits/UltiTrade#48`, `#49`),
+  but neither was ever declared. The framework is changing how it logs a module failing to load because
+  a plugin it declares as optional is missing (debug instead of SEVERE, maintainer decision of
+  2026-09-29); this module's PlaceholderAPI expansion would otherwise still trigger a misleadingly loud
+  SEVERE line under that change, for a dependency this module's own `plugin.yml` never admitted to
+  wanting in the first place.
+- `plugin.yml` 现在如实声明 `softdepend: [ PlaceholderAPI, Vault ]`——两者都是本模块已经在运行时妥善处理其缺失的真实、
+  可选集成（`UltiKits/UltiTrade#48`、`#49`），但此前都从未在文件中声明过。框架即将改变对「模块因其在 `plugin.yml`
+  中声明为可选依赖的插件缺失而加载失败」这一情形的日志方式（改为调试级而非 SEVERE，维护者 2026-09-29 的决定）；
+  若不声明，本模块的 PlaceholderAPI 扩展在该改动后仍会触发一条误导性的高调 SEVERE 日志——而这本是本模块自己的
+  `plugin.yml` 从未承认需要的依赖。
 
 ### Removed
 

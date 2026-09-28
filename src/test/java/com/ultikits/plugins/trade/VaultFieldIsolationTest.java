@@ -20,16 +20,20 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Every class the framework reflects over enumerates its declared fields, methods and constructors
  * without Vault on the classpath.
  * <p>
- * Found by the sweep this module's PlaceholderAPI fix was accompanied by: unlike UltiEconomy, this
- * module's {@code plugin.yml} declares NEITHER {@code depend:} NOR {@code softdepend:} for Vault, so
- * nothing guarantees Vault is present when the container autowires this module's beans. {@code
- * TradeService} (a {@code @Service} bean the container both autowires and scans for
- * {@code @Scheduled} methods -- {@code TradeService#cleanupExpiredRequests} carries one) carried a
- * field and a method return type of
- * {@code net.milkbowl.vault.economy.Economy} directly, so a server without Vault installed would
- * throw {@link NoClassDefFoundError} the instant the container reflects over this bean -- the same
- * crash shape as the PlaceholderAPI defect (UltiKits/UltiTrade#48), just for a different soft
- * dependency, and previously unobserved because every gate-3 boot so far has had Vault installed.
+ * Found by the sweep this module's PlaceholderAPI fix was accompanied by: at the time, this module's
+ * {@code plugin.yml} declared NEITHER {@code depend:} NOR {@code softdepend:} for Vault (unlike
+ * UltiEconomy), so nothing guaranteed Vault is present when the container autowires this module's
+ * beans. {@code plugin.yml} now declares {@code softdepend: [ PlaceholderAPI, Vault ]}, both truthfully
+ * -- {@code TradePlaceholderExpansion} and this class's own {@code Economy} usage are real, optional
+ * integrations -- but that declaration only changes how the framework LOGS a module load failure caused
+ * by a declared-optional dependency being absent (debug instead of SEVERE, per the framework's own
+ * 2026-09-29 change); it does not by itself stop the reflection this test guards against. {@code
+ * TradeService} (a {@code @Service} bean the container both autowires and scans for {@code @Scheduled}
+ * methods -- {@code TradeService#cleanupExpiredRequests} carries one) carried a field and a method
+ * return type of {@code net.milkbowl.vault.economy.Economy} directly, so a server without Vault
+ * installed would throw {@link NoClassDefFoundError} the instant the container reflects over this bean
+ * -- the same crash shape as the PlaceholderAPI defect (UltiKits/UltiTrade#48), just for a different
+ * soft dependency, and previously unobserved because every gate-3 boot so far has had Vault installed.
  * <p>
  * This test reproduces the crash directly: it defines a fresh copy of each class under this
  * module's own scan prefix through a classloader that hides {@code net.milkbowl.vault.*}, then
