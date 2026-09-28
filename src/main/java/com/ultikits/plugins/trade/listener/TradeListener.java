@@ -577,6 +577,27 @@ public class TradeListener implements Listener {
             }
             if (event.getReason() == InventoryCloseEvent.Reason.PLAYER) {
                 page.handleClose();
+            } else if (event.getReason() == InventoryCloseEvent.Reason.DEATH) {
+                // Death closes this page too, but it is neither the player's own Cancel (there is
+                // nothing to show them back while they are dead) nor the module retiring the page on
+                // its own. Left as dismiss() alone, the trade stayed active with the stake locked and
+                // no window for either participant, until someone ran the cancel command by hand.
+                // Cancel it the same deferred, session-checked way the trade window's own close does
+                // below, so a session already replaced by the time the task runs is left alone.
+                page.dismiss();
+                Player deadPlayer = (Player) event.getPlayer();
+                TradeSession deathSession = tradeService.getSession(deadPlayer.getUniqueId());
+                if (deathSession != null) {
+                    Bukkit.getScheduler().runTaskLater(
+                        getBukkitPlugin(),
+                        () -> {
+                            if (tradeService.getSession(deadPlayer.getUniqueId()) == deathSession) {
+                                tradeService.cancelTrade(deadPlayer);
+                            }
+                        },
+                        1L
+                    );
+                }
             } else {
                 page.dismiss();
             }

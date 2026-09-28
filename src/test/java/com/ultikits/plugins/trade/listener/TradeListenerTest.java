@@ -1309,6 +1309,61 @@ class TradeListenerTest {
         }
 
         @Test
+        @DisplayName("Dying while viewing the confirmation page cancels the trade instead of leaving it running with no window")
+        void deathClosingConfirmPageCancelsTheTrade() {
+            TradeConfirmPage confirmPage = mock(TradeConfirmPage.class);
+            when(confirmPage.isViewer(player1)).thenReturn(true);
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+
+            InventoryCloseEvent event = mock(InventoryCloseEvent.class);
+            when(event.getInventory()).thenReturn(mock(Inventory.class));
+            when(event.getInventory().getHolder()).thenReturn(confirmPage);
+            when(event.getPlayer()).thenReturn(player1);
+            when(event.getReason()).thenReturn(InventoryCloseEvent.Reason.DEATH);
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+
+            listener.onInventoryClose(event);
+
+            // The page itself never re-answers Cancel (there is nothing to show a dead player back).
+            verify(confirmPage).dismiss();
+            verify(confirmPage, never()).handleClose();
+            org.mockito.ArgumentCaptor<Runnable> cancel = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTaskLater(any(), cancel.capture(), eq(1L));
+            cancel.getValue().run();
+
+            verify(tradeService).cancelTrade(player1);
+        }
+
+        @Test
+        @DisplayName("A death-close task from a since-replaced session does not cancel the newer trade")
+        void staleDeathCloseTaskDoesNotCancelTheNewerTrade() {
+            TradeConfirmPage confirmPage = mock(TradeConfirmPage.class);
+            when(confirmPage.isViewer(player1)).thenReturn(true);
+            TradeSession oldSession = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(oldSession);
+
+            InventoryCloseEvent event = mock(InventoryCloseEvent.class);
+            when(event.getInventory()).thenReturn(mock(Inventory.class));
+            when(event.getInventory().getHolder()).thenReturn(confirmPage);
+            when(event.getPlayer()).thenReturn(player1);
+            when(event.getReason()).thenReturn(InventoryCloseEvent.Reason.DEATH);
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+
+            listener.onInventoryClose(event);
+            org.mockito.ArgumentCaptor<Runnable> cancel = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTaskLater(any(), cancel.capture(), eq(1L));
+            TradeSession newerSession = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(newerSession);
+
+            cancel.getValue().run();
+
+            verify(tradeService, never()).cancelTrade(any(Player.class));
+        }
+
+        @Test
         @DisplayName("Should not cancel if not a TradeGUI holder")
         void notTradeGUIHolder() {
             InventoryCloseEvent event = mock(InventoryCloseEvent.class);
