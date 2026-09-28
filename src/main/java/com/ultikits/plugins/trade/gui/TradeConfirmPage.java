@@ -284,6 +284,26 @@ public class TradeConfirmPage implements InventoryHolder {
     }
 
     /**
+     * Whether this page has already been answered or dismissed -- by a button click, the player's own
+     * Esc, or this module's own code retiring it ahead of a close it is about to cause itself
+     * (cancelling or completing the trade, or a reload redraw; see {@link #dismiss()}).
+     * <p>
+     * Used by the close listener to tell such a self-caused close apart from one this module did NOT
+     * cause: Paper reports the SAME {@code PLUGIN} or {@code OPEN_NEW} reason whether this module's own
+     * {@code closeInventory()}/{@code openInventory()} call triggered it or an unrelated plugin did
+     * (closing the page itself, or opening its own window over it), so the reason alone cannot tell
+     * them apart. A close this module causes always marks the page first (this method returns
+     * {@code true} by the time that close event fires); a close this method has not yet seen has to
+     * come from somewhere else, terminal for the trade the same way death or disconnect is
+     * (UltiKits/UltiTrade#47 review).
+     *
+     * @return true if a button click, Esc, or this module's own {@link #dismiss()} already ran
+     */
+    public boolean isAnswered() {
+        return answered;
+    }
+
+    /**
      * Retires the page without answering it, for a close that is not the player's own: the reload
      * redraw replacing it, a cancellation or completion closing it, another window opened over it.
      * Such a close is not the player's "back"; running the Cancel callback there would schedule a

@@ -76,6 +76,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- An unrelated plugin closing a player's large-trade confirmation page, or opening its own window over
+  it, no longer leaves the trade running with both stakes locked and no window until someone cancels
+  it by hand. Paper reports the identical `PLUGIN`/`OPEN_NEW` reason whether this module's own close
+  (a button click, completing or cancelling the trade, a reload redraw) caused it or an unrelated
+  plugin did, so those two could not be told apart by the reason alone; every one of this module's own
+  closes now marks the page first, and a `PLUGIN`/`OPEN_NEW` close that arrives unmarked is treated as
+  terminal, the same as death or disconnect already were (UltiKits/UltiTrade#47 review).
+- 现在其他插件关闭玩家的大额交易确认页面，或在其上打开自己的窗口时，不会再让交易悄悄保持进行、双方都没有窗口，
+  直到有人手动取消。此前无论是本模块自身的关闭（点击按钮、完成或取消交易、重载重绘）还是其他插件造成的关闭，
+  Paper 报告的都是同一个 `PLUGIN`/`OPEN_NEW` 原因，仅凭原因无法区分两者；现在本模块自身的每一次关闭都会先标记
+  该页面，一个未被标记就到达的 `PLUGIN`/`OPEN_NEW` 关闭会被当作终止性原因处理，与死亡、断线的处理方式一致
+  （UltiKits/UltiTrade#47 复查）。
+
 - A money or experience amount a player just typed can no longer be discarded by cancelling their
   trade a tick later. Typing an answer claims it instantly (removed from the pending-prompt map) but
   applies it only afterward, on the server thread; the close-guard's own deferred check -- scheduled

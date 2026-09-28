@@ -1378,10 +1378,14 @@ class TradeListenerTest {
 
         @ParameterizedTest(name = "{0}")
         @EnumSource(value = InventoryCloseEvent.Reason.class, names = {"PLUGIN", "OPEN_NEW"})
-        @DisplayName("A close this module (or a reload) caused itself never schedules a cancellation on top of whatever caused it")
+        @DisplayName("A close this module (or a reload) already marked the page for never schedules a cancellation on top of whatever caused it")
         void moduleInitiatedCloseDoesNotCancelTheTrade(InventoryCloseEvent.Reason reason) {
             TradeConfirmPage confirmPage = mock(TradeConfirmPage.class);
             when(confirmPage.isViewer(player1)).thenReturn(true);
+            // isAnswered() true is exactly what marks this PLUGIN/OPEN_NEW close as this module's own:
+            // a button click, TradeService#cancelTrade/#completeTrade, or a reload redraw always calls
+            // TradeConfirmPage#dismiss() before causing the close (UltiKits/UltiTrade#47 review).
+            when(confirmPage.isAnswered()).thenReturn(true);
             TradeSession session = new TradeSession(player1, player2);
             when(tradeService.getSession(uuid1)).thenReturn(session);
 
@@ -1399,6 +1403,43 @@ class TradeListenerTest {
             verify(confirmPage, never()).handleClose();
             verify(scheduler, never()).runTaskLater(any(), any(Runnable.class), anyLong());
             verify(tradeService, never()).cancelTrade(any(Player.class));
+        }
+
+        /**
+         * The narrowing this review round added: Paper reports the identical {@code PLUGIN}/
+         * {@code OPEN_NEW} reason whether this module's own {@code closeInventory()}/
+         * {@code openInventory()} call caused the close or an unrelated plugin did (closing the page
+         * itself, or opening its own window over it). An unmarked close -- {@code isAnswered()} still
+         * false, meaning none of this module's own paths ran first -- is therefore terminal the same as
+         * DEATH or DISCONNECT, not silently dismissed (UltiKits/UltiTrade#47 review).
+         */
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = InventoryCloseEvent.Reason.class, names = {"PLUGIN", "OPEN_NEW"})
+        @DisplayName("A PLUGIN/OPEN_NEW close this module did not already mark is terminal, the same as an unrecognised reason")
+        void unmarkedPluginOrOpenNewCloseCancelsTheTrade(InventoryCloseEvent.Reason reason) {
+            TradeConfirmPage confirmPage = mock(TradeConfirmPage.class);
+            when(confirmPage.isViewer(player1)).thenReturn(true);
+            when(confirmPage.isAnswered()).thenReturn(false);
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+
+            InventoryCloseEvent event = mock(InventoryCloseEvent.class);
+            when(event.getInventory()).thenReturn(mock(Inventory.class));
+            when(event.getInventory().getHolder()).thenReturn(confirmPage);
+            when(event.getPlayer()).thenReturn(player1);
+            when(event.getReason()).thenReturn(reason);
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+
+            listener.onInventoryClose(event);
+
+            verify(confirmPage).dismiss();
+            verify(confirmPage, never()).handleClose();
+            org.mockito.ArgumentCaptor<Runnable> cancel = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTaskLater(any(), cancel.capture(), eq(1L));
+            cancel.getValue().run();
+
+            verify(tradeService).cancelTrade(player1);
         }
 
         @Test

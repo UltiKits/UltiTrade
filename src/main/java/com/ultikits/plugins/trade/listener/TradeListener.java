@@ -616,28 +616,29 @@ public class TradeListener implements Listener {
             // Closing the confirmation page never cancels the trade by itself. Only the player's own
             // close (Esc, reason PLAYER) counts as the page's Cancel and goes back to the trade window.
             // A close by a plugin -- this module cancelling or completing the trade, a reload redrawing
-            // it, another window opened over it -- is not the player's answer, and running Cancel there
-            // would schedule a trade window nobody asked for (during shutdown, on a scheduler that
-            // refuses tasks).
+            // it -- is not the player's answer, and running Cancel there would schedule a trade window
+            // nobody asked for (during shutdown, on a scheduler that refuses tasks).
             //
-            // Every other reason is the SERVER deciding, independently of this module, that the player
-            // may no longer see the page -- they died, disconnected, teleported, their chunk unloaded,
-            // or Paper otherwise revoked access -- and unlike the module-initiated reasons above, nothing
-            // else in this module reacts to it. Left as dismiss() alone (as this used to be for every
-            // non-PLAYER, non-DEATH reason), the trade stayed active with both stakes locked and no
-            // window for either participant, until someone ran the cancel command by hand. All of them
-            // are handled the one way: dismiss the page (nothing to show a player back who cannot see it
-            // any more) and cancel the trade one tick later, re-checked against the session at run time
-            // so a session already replaced by then is left alone -- the same pattern DEATH already used
-            // before this sweep (UltiKits/UltiTrade#47 review, sweeping every
-            // InventoryCloseEvent.Reason). UNKNOWN is included: it names no module-initiated transition
-            // this file causes, so it is treated the same as a reason we cannot yet recognise, which
-            // costs nothing but a redundant re-open if a future reopen path turns out to fire it. TELEPORT
-            // is deprecated since Paper 1.21.10 ("not called anymore as inventories are not closed on
+            // Every other close is terminal, cancelling the trade the same deferred, session-checked
+            // way DEATH already did before this sweep (UltiKits/UltiTrade#47 review, sweeping every
+            // InventoryCloseEvent.Reason): the server deciding, independently of this module, that the
+            // player may no longer see the page (they died, disconnected, teleported, their chunk
+            // unloaded, or Paper otherwise revoked access), an unrecognised reason, OR -- the narrowing
+            // this review round added -- a PLUGIN/OPEN_NEW close this module did NOT cause. Paper
+            // reports the identical PLUGIN or OPEN_NEW reason whether this module's own
+            // closeInventory()/openInventory() call triggered the close or an unrelated plugin did
+            // (closing the page itself, or opening its own window over it), so the reason alone cannot
+            // tell those two apart; {@link TradeConfirmPage#isAnswered()} can, because every one of this
+            // module's own closes marks the page first (a button click, this branch's own dismiss()
+            // below, or TradeService's cancelTrade/completeTrade/refreshOpenTradeWindow dismissing it
+            // before closing or replacing it). A PLUGIN/OPEN_NEW close this module did not already mark
+            // left the trade running with both stakes locked and no window, exactly like the reasons
+            // this sweep already covered, until someone ran the cancel command by hand. TELEPORT is
+            // deprecated since Paper 1.21.10 ("not called anymore as inventories are not closed on
             // teleportation") and so cannot fire on this module's target server, but the constant is not
-            // removed and this module's own `plugin.yml` declares `api-version: '1.19'` for compatibility
-            // with older servers that may still send it, so it stays in the terminal set rather than
-            // being dropped as dead code.
+            // removed and this module's own `plugin.yml` declares `api-version: '1.19'` for
+            // compatibility with older servers that may still send it, so it stays in the terminal set
+            // rather than being dropped as dead code.
             TradeConfirmPage page = (TradeConfirmPage) event.getInventory().getHolder();
             if (!page.isViewer(event.getPlayer())) {
                 // Somebody else closing their view of this page; the viewer still has it open.
@@ -648,8 +649,9 @@ public class TradeListener implements Listener {
                 page.handleClose();
                 return;
             }
+            boolean alreadyAccountedFor = page.isAnswered();
             page.dismiss();
-            if (!isModuleInitiatedCloseReason(reason)) {
+            if (!alreadyAccountedFor) {
                 Player affectedPlayer = (Player) event.getPlayer();
                 TradeSession affectedSession = tradeService.getSession(affectedPlayer.getUniqueId());
                 if (affectedSession != null) {
@@ -703,29 +705,6 @@ public class TradeListener implements Listener {
         }
     }
     
-    /**
-     * Whether {@code reason} is one of this module's own transitions for the large-trade confirmation
-     * page, as opposed to the server deciding independently that the player can no longer see it.
-     * <p>
-     * {@code PLUGIN} is every programmatic {@code closeInventory()} call this module makes while the
-     * page is open: {@link TradeConfirmPage#handleClick} closing it before running the Confirm/Cancel
-     * callback, {@link TradeService#cancelTrade} / {@link TradeService#completeTrade} closing it while
-     * ending the session, and {@link TradeService#refreshOpenTradeWindow} retiring it for a reload
-     * redraw. {@code OPEN_NEW} is the close Bukkit fires on the old window the instant one of those
-     * paths (or, in principle, another plugin) opens a new inventory over it. Both are already handled
-     * by the code that caused them; running the terminal-close cancellation here as well would either
-     * duplicate an already-scheduled cancellation or cancel a trade a reload only meant to redraw.
-     * {@code PLAYER} never reaches this method -- the caller returns after {@link TradeConfirmPage
-     * #handleClose} for that reason, before this check.
-     *
-     * @param reason the close event's reason; never {@code PLAYER}
-     * @return true if this module's own code caused the close and already owns the session's next state
-     */
-    private static boolean isModuleInitiatedCloseReason(InventoryCloseEvent.Reason reason) {
-        return reason == InventoryCloseEvent.Reason.PLUGIN
-            || reason == InventoryCloseEvent.Reason.OPEN_NEW;
-    }
-
     /**
      * Hand a joining player the stake of any trade that was cancelled while the server could not
      * find them (UltiKits/UltiTrade#32). Runs on the main thread, where the join event is fired.

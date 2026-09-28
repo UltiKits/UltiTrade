@@ -333,6 +333,31 @@ public class TradeService {
     }
 
     /**
+     * Marks {@code player}'s large-trade confirmation page as answered, if one is currently open,
+     * before this service closes their inventory itself (in {@link #cancelTrade} or
+     * {@link #completeTrade}).
+     * <p>
+     * Paper reports the identical {@code InventoryCloseEvent.Reason.PLUGIN} whether this
+     * {@code closeInventory()} call causes the close or an unrelated plugin's does, so the listener
+     * cannot tell the two apart from the reason alone; {@link TradeConfirmPage#isAnswered()} lets it,
+     * because every close this service or the page itself causes marks the page first. Left unmarked,
+     * the listener would (correctly) treat an unexplained {@code PLUGIN} close as terminal and try to
+     * cancel a trade this call is already ending -- redundant here, since {@code isCurrentSession}-style
+     * checks make a second {@code cancelTrade} on an already-cleaned-up session a no-op, but worth
+     * avoiding rather than relying on (UltiKits/UltiTrade#47 review).
+     */
+    private static void dismissConfirmPageIfOpen(Player player) {
+        if (player == null) {
+            return;
+        }
+        InventoryView view = player.getOpenInventory();
+        if (view != null && view.getTopInventory() != null
+                && view.getTopInventory().getHolder() instanceof TradeConfirmPage) {
+            ((TradeConfirmPage) view.getTopInventory().getHolder()).dismiss();
+        }
+    }
+
+    /**
      * Check if economy is available.
      */
     public boolean hasEconomy() {
@@ -902,10 +927,15 @@ public class TradeService {
             }
         }
         
-        // Close inventories
+        // Close inventories. Dismissed first if a confirmation page is open: this closeInventory()
+        // call is what fires it, and unlike closing a TradeGUI, the confirmation page's own close
+        // handler cannot otherwise tell this deliberate close apart from an unrelated plugin closing
+        // it (UltiKits/UltiTrade#47 review).
+        dismissConfirmPageIfOpen(player1);
+        dismissConfirmPageIfOpen(player2);
         player1.closeInventory();
         player2.closeInventory();
-        
+
         session.setState(TradeSession.TradeState.COMPLETED);
         cleanupSession(session);
 
@@ -942,6 +972,8 @@ public class TradeService {
                     giveOrDrop(player1, item);
                 }
             }
+            // Dismissed first if a confirmation page is open (see completeTrade's own comment on why).
+            dismissConfirmPageIfOpen(player1);
             player1.closeInventory();
             String msg = config.getTradeCancelledMessage();
             if (reason != null) {
@@ -961,6 +993,8 @@ public class TradeService {
                     giveOrDrop(player2, item);
                 }
             }
+            // Dismissed first if a confirmation page is open (see completeTrade's own comment on why).
+            dismissConfirmPageIfOpen(player2);
             player2.closeInventory();
             String msg = config.getTradeCancelledMessage();
             if (reason != null) {
