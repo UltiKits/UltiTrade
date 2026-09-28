@@ -8,7 +8,7 @@ import com.ultikits.plugins.trade.entity.TradeSession;
 import com.ultikits.plugins.trade.gui.TradeConfirmPage;
 import com.ultikits.plugins.trade.gui.TradeGUI;
 import com.ultikits.plugins.trade.listener.TradeListener;
-import com.ultikits.plugins.trade.placeholder.TradePlaceholderExpansion;
+import com.ultikits.plugins.placeholderapi.trade.TradePlaceholderExpansion;
 import com.ultikits.plugins.trade.entity.PlayerTradeSettings;
 import com.ultikits.plugins.trade.service.TradeLogService;
 import com.ultikits.plugins.trade.service.TradeService;

@@ -1,6 +1,6 @@
 package com.ultikits.plugins.trade;
 
-import com.ultikits.plugins.trade.placeholder.TradePlaceholderExpansion;
+import com.ultikits.plugins.placeholderapi.trade.TradePlaceholderExpansion;
 import com.ultikits.plugins.trade.service.TradeLogService;
 import com.ultikits.plugins.trade.service.TradeService;
 import com.ultikits.ultitools.context.SimpleContainer;

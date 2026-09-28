@@ -1,4 +1,4 @@
-package com.ultikits.plugins.trade.placeholder;
+package com.ultikits.plugins.placeholderapi.trade;
 
 import com.ultikits.plugins.trade.entity.PlayerTradeSettings;
 import com.ultikits.plugins.trade.service.TradeLogService;
