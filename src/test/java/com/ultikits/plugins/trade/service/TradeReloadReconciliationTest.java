@@ -551,6 +551,33 @@ class TradeReloadReconciliationTest {
         }
 
         @Test
+        @DisplayName("a reload that fails to open the replacement window for an open confirmation page cancels that trade instead of leaving a dead, inert page (UltiKits/UltiTrade#47 review)")
+        void reloadCancelsTheTradeWhenReplacingTheConfirmationPageFails() throws Exception {
+            TradeConfirmPage page = mock(TradeConfirmPage.class);
+            when(offererTop.getHolder()).thenReturn(page);
+            openWindow(counterparty, counterpartyTop);
+
+            RuntimeException openFailure = new RuntimeException("boom");
+            doThrow(openFailure).when(offerer).openInventory(any(Inventory.class));
+
+            reload("enable-money-trade: true\ntrade-tax: 0.5\n");
+
+            // The page was dismissed before the failed replacement, as any redraw does; left alone,
+            // it would now be inert (its buttons and Esc all see answered == true) with the trade
+            // still running and both stakes locked. It is cancelled instead, and each stake -- the
+            // diamonds this test's offerer put up -- is returned rather than lost. dismiss() is
+            // idempotent and runs a second, harmless time from cancelTrade's own
+            // dismissConfirmPageIfOpen, since the page is still the offerer's open holder.
+            verify(page, atLeastOnce()).dismiss();
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+            verify(offererInventory).addItem(UltiTradeTestHelper.deliveredCopyOf(diamond));
+            verify(counterpartyInventory).addItem(UltiTradeTestHelper.deliveredCopyOf(emerald));
+            // The caller's own per-player SEVERE log for the failed redraw still fires -- the failure
+            // is rethrown after recovering the session, not swallowed.
+            verify(UltiTradeTestHelper.getMockLogger()).error(eq(openFailure), contains("Offerer"));
+        }
+
+        @Test
         @DisplayName("redrawing the windows neither loses nor duplicates anything offered")
         void redrawKeepsOffersIntact() throws Exception {
             TradeGUI offererWindow = openWindow(offerer, offererTop);

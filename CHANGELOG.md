@@ -76,6 +76,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A reload that fails to build or open the replacement trade window for an open large-trade
+  confirmation page now cancels that trade and returns both stakes, instead of leaving the page
+  dismissed and inert (its buttons and Esc now do nothing) while the trade keeps running with both
+  stakes locked, recoverable only by someone noticing and cancelling it by hand. The reload's own
+  per-player error log for the failed redraw is unchanged (UltiKits/UltiTrade#47 review).
+- 现在重载时若未能为已打开的大额交易确认页面构建或打开替换窗口，会取消该笔交易并返还双方出价，而不是让该页面
+  保持已失效状态（其按钮和 Esc 此时均不再产生任何效果），同时交易仍在进行、双方出价被一直占用，只能靠有人发现
+  后手动取消。重载原有的、按玩家记录的重绘失败错误日志保持不变（UltiKits/UltiTrade#47 复查）。
+
 - An unrelated plugin closing a player's large-trade confirmation page, or opening its own window over
   it, no longer leaves the trade running with both stakes locked and no window until someone cancels
   it by hand. Paper reports the identical `PLUGIN`/`OPEN_NEW` reason whether this module's own close

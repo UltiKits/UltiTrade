@@ -314,8 +314,19 @@ public class TradeService {
             // A new window renders the session itself (UltiKits/UltiTrade#35). The page is retired first:
             // this replacement is not the player closing it, so its Cancel ("back") must not run.
             ((TradeConfirmPage) holder).dismiss();
-            TradeGUI gui = new TradeGUI(this, session, player);
-            player.openInventory(gui.getInventory());
+            try {
+                TradeGUI gui = new TradeGUI(this, session, player);
+                player.openInventory(gui.getInventory());
+            } catch (RuntimeException | LinkageError e) {
+                // The page is already dismissed and inert -- its buttons and Esc now do nothing --
+                // so if building or opening the replacement then fails, the player would otherwise be
+                // left staring at a dead window while the trade keeps running with both stakes locked,
+                // recoverable only by someone noticing and cancelling it by hand. Cancelled here
+                // instead, then rethrown so the caller's own SEVERE log for this player's failed
+                // redraw still fires (UltiKits/UltiTrade#47 review).
+                cancelTrade(session, i18n("cancel_reason_reload_window_failed"));
+                throw e;
+            }
         }
     }
 
