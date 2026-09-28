@@ -347,9 +347,18 @@ public class TradeConfirmPage implements InventoryHolder {
     
     /**
      * Open the confirm page for a player.
+     * <p>
+     * {@code HumanEntity#openInventory} is {@code @Nullable}: another plugin refusing the
+     * {@code InventoryOpenEvent} this fires makes it return {@code null} rather than throwing, so this
+     * page never actually appears. The caller needs to know that happened -- by the time it calls this,
+     * the trade window this page was meant to replace has already been closed, so leaving the failure
+     * unreported would put the player in front of no trade UI at all, with the session still running
+     * and both stakes still locked (UltiKits/UltiTrade#47 review).
+     *
+     * @return true if the page actually opened; false if another plugin refused it
      */
-    public void open() {
-        viewer.openInventory(inventory);
+    public boolean open() {
+        return viewer.openInventory(inventory) != null;
     }
     
     @Override

@@ -33,6 +33,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
@@ -224,6 +225,28 @@ class LargeTradeConfirmationFlowTest {
         assertThat(session.getState()).isEqualTo(TradeSession.TradeState.TRADING);
         assertThat(holderShownTo(player1)).isInstanceOf(TradeConfirmPage.class);
         verify(player1, never()).sendMessage(contains("交易已取消")); // "交易已取消"
+    }
+
+    @Test
+    @DisplayName("another plugin refusing the confirmation page's own open falls back to the trade window instead of leaving no window at all (UltiKits/UltiTrade#47 review)")
+    void refusedConfirmPageOpenFallsBackToTheTradeWindow() {
+        TradeSession session = startLargeTrade();
+        // HumanEntity#openInventory is @Nullable: another plugin cancelling the InventoryOpenEvent
+        // this fires for the confirmation page specifically makes it return null rather than throw.
+        // The trade window's own later re-open still goes through the ordinary wiring in wireScreen,
+        // registered before this stub and so checked only once this one's narrower matcher misses.
+        when(player1.openInventory(argThat((Inventory inv) -> inv.getHolder() instanceof TradeConfirmPage)))
+                .thenReturn(null);
+
+        service.confirmTrade(player1);
+        runScheduled();
+
+        assertThat(service.getSession(uuid1)).as("the trade is still running").isSameAs(session);
+        assertThat(session.getState()).isEqualTo(TradeSession.TradeState.TRADING);
+        assertThat(holderShownTo(player1))
+                .as("sent back to the trade window, not left with no window at all while the trade window "
+                        + "it was meant to replace is already closed")
+                .isInstanceOf(TradeGUI.class);
     }
 
     @Test

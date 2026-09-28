@@ -76,6 +76,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- An unrelated plugin refusing the large-trade confirmation page's own `InventoryOpenEvent` no longer
+  leaves the player with no trade UI at all while the trade keeps running with both stakes locked. The
+  trade window this page was meant to replace is already closed by the time it tries to open, and
+  `HumanEntity#openInventory` returns `null` for a refused open rather than throwing, so the failure
+  went unnoticed before. The player is now sent back to the trade window instead, exactly as clicking
+  the page's own Cancel would -- the trade is not cancelled outright, since nothing about the player's
+  offer changed (UltiKits/UltiTrade#47 review).
+- 现在有其他插件拒绝大额交易确认页面自身的 `InventoryOpenEvent` 时，不会再让玩家完全没有交易界面，同时交易仍在进行、
+  双方出价被一直占用。该页面原本要替换的交易窗口此时已经关闭，而 `HumanEntity#openInventory` 在打开被拒绝时会返回
+  `null` 而不是抛出异常，因此此前这一失败不会被察觉。现在会像点击该页面自身的取消按钮一样把玩家送回交易窗口——不会
+  直接取消交易，因为玩家的出价并未发生任何变化（UltiKits/UltiTrade#47 复查）。
+
 - A reload that fails to build or open the replacement trade window for an open large-trade
   confirmation page now cancels that trade and returns both stakes, instead of leaving the page
   dismissed and inert (its buttons and Esc now do nothing) while the trade keeps running with both

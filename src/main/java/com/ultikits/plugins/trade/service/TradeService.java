@@ -731,11 +731,20 @@ public class TradeService {
                 return;
             }
             int shownRevision = session.getRevision();
-            new TradeConfirmPage(
+            boolean opened = new TradeConfirmPage(
                 this, session, player,
                 () -> confirmFromPage(session, player, shownRevision),
                 () -> reopenTradeWindow(session, player)
             ).open();
+            if (!opened) {
+                // Another plugin refused the InventoryOpenEvent this fired: the trade window this page
+                // was meant to replace is already closed (above), so the player is otherwise left with
+                // no trade UI at all while the session keeps running with both stakes locked. Sent back
+                // to the trade window exactly as clicking the page's own Cancel would (UltiKits/UltiTrade
+                // #47 review) -- not cancelled outright, since the player did nothing wrong here and
+                // nothing about their offer changed.
+                reopenTradeWindow(session, player);
+            }
         }, 1L);
     }
 
