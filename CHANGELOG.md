@@ -335,6 +335,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - 现在在查看大额交易确认页面时死亡也会取消交易，与其他方式关闭该页面一致。此前 Paper 以 `InventoryCloseEvent.Reason.DEATH`
   关闭该页面时，会被当作模块自身的关闭（重载、完成、取消）处理，交易会悄悄保持进行、双方都没有窗口，两方的出价也一直
   被占用，直到有人手动运行取消命令。
+- Every other reason the server, not this module, can close the large-trade confirmation page for now
+  cancels the trade the same way `DEATH` already did: disconnecting, a teleport (on a server old enough
+  to still send it — deprecated since Paper 1.21.10, which no longer fires it for a normal teleport, but
+  this module's `plugin.yml` still declares `api-version: '1.19'`), the chunk unloading, the server
+  otherwise revoking access, or an unrecognised reason. Before this, only `DEATH` cancelled the trade;
+  every one of these left it running with both stakes locked and no window for either participant, until
+  someone ran the cancel command by hand. A close this module or a reload causes itself (`PLUGIN`,
+  `OPEN_NEW`) is unchanged — it never cancels the trade, since the code that caused it already owns the
+  session's next state.
+- 现在服务器（而非本模块）出于其他任何原因关闭大额交易确认页面时，都会像 `DEATH` 一样取消交易：断线、传送（仅限仍会
+  发送该原因的旧版本服务端——Paper 自 1.21.10 起已弃用该原因，普通传送不再触发关闭，但本模块 `plugin.yml` 仍声明
+  `api-version: '1.19'`）、所在区块被卸载、服务器出于其他原因收回了访问权限，或是一个未识别的原因。此前只有
+  `DEATH` 会取消交易；以上任何一种都会让交易悄悄保持进行、双方都没有窗口、两方出价被一直占用，直到有人手动运行
+  取消命令。本模块自身或重载引发的关闭（`PLUGIN`、`OPEN_NEW`）行为不变——它们从不取消交易，因为引发关闭的代码
+  本身已经掌管了会话的下一个状态。
 
 ### Removed
 

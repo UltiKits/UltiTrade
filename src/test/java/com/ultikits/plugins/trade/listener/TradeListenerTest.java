@@ -1308,9 +1308,20 @@ class TradeListenerTest {
             verify(tradeService, never()).cancelTrade(any(Player.class));
         }
 
-        @Test
-        @DisplayName("Dying while viewing the confirmation page cancels the trade instead of leaving it running with no window")
-        void deathClosingConfirmPageCancelsTheTrade() {
+        /**
+         * Every {@link InventoryCloseEvent.Reason} the server -- not this module -- can pick for
+         * closing the confirmation page while the player can no longer see it: they died, disconnected,
+         * their chunk unloaded, the server otherwise decided they may no longer use the inventory, an
+         * unrecognised reason, or (on a server old enough to still send it; deprecated since Paper
+         * 1.21.10 and not fired on this module's target server) a teleport. {@code PLAYER} is excluded:
+         * it is the page's own Cancel answer, covered by {@code dontCancelOnConfirmPageClose} and the
+         * button tests. {@code PLUGIN} and {@code OPEN_NEW} are excluded: they are this module's own
+         * transitions, covered by {@code moduleInitiatedCloseDoesNotCancelTheTrade} below.
+         */
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = InventoryCloseEvent.Reason.class, names = {"DEATH", "DISCONNECT", "TELEPORT", "UNLOADED", "CANT_USE", "UNKNOWN"})
+        @DisplayName("Closing the confirmation page for a reason the player caused, not this module, cancels the trade instead of leaving it running with no window")
+        void terminalReasonClosingConfirmPageCancelsTheTrade(InventoryCloseEvent.Reason reason) {
             TradeConfirmPage confirmPage = mock(TradeConfirmPage.class);
             when(confirmPage.isViewer(player1)).thenReturn(true);
             TradeSession session = new TradeSession(player1, player2);
@@ -1320,13 +1331,14 @@ class TradeListenerTest {
             when(event.getInventory()).thenReturn(mock(Inventory.class));
             when(event.getInventory().getHolder()).thenReturn(confirmPage);
             when(event.getPlayer()).thenReturn(player1);
-            when(event.getReason()).thenReturn(InventoryCloseEvent.Reason.DEATH);
+            when(event.getReason()).thenReturn(reason);
             org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
             clearInvocations(scheduler);
 
             listener.onInventoryClose(event);
 
-            // The page itself never re-answers Cancel (there is nothing to show a dead player back).
+            // The page itself never re-answers Cancel (there is nothing to show back a player who can
+            // no longer see the page).
             verify(confirmPage).dismiss();
             verify(confirmPage, never()).handleClose();
             org.mockito.ArgumentCaptor<Runnable> cancel = org.mockito.ArgumentCaptor.forClass(Runnable.class);
@@ -1336,9 +1348,10 @@ class TradeListenerTest {
             verify(tradeService).cancelTrade(player1);
         }
 
-        @Test
-        @DisplayName("A death-close task from a since-replaced session does not cancel the newer trade")
-        void staleDeathCloseTaskDoesNotCancelTheNewerTrade() {
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = InventoryCloseEvent.Reason.class, names = {"DEATH", "DISCONNECT", "TELEPORT", "UNLOADED", "CANT_USE", "UNKNOWN"})
+        @DisplayName("A terminal-reason close task from a since-replaced session does not cancel the newer trade")
+        void staleTerminalCloseTaskDoesNotCancelTheNewerTrade(InventoryCloseEvent.Reason reason) {
             TradeConfirmPage confirmPage = mock(TradeConfirmPage.class);
             when(confirmPage.isViewer(player1)).thenReturn(true);
             TradeSession oldSession = new TradeSession(player1, player2);
@@ -1348,7 +1361,7 @@ class TradeListenerTest {
             when(event.getInventory()).thenReturn(mock(Inventory.class));
             when(event.getInventory().getHolder()).thenReturn(confirmPage);
             when(event.getPlayer()).thenReturn(player1);
-            when(event.getReason()).thenReturn(InventoryCloseEvent.Reason.DEATH);
+            when(event.getReason()).thenReturn(reason);
             org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
             clearInvocations(scheduler);
 
@@ -1360,6 +1373,31 @@ class TradeListenerTest {
 
             cancel.getValue().run();
 
+            verify(tradeService, never()).cancelTrade(any(Player.class));
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = InventoryCloseEvent.Reason.class, names = {"PLUGIN", "OPEN_NEW"})
+        @DisplayName("A close this module (or a reload) caused itself never schedules a cancellation on top of whatever caused it")
+        void moduleInitiatedCloseDoesNotCancelTheTrade(InventoryCloseEvent.Reason reason) {
+            TradeConfirmPage confirmPage = mock(TradeConfirmPage.class);
+            when(confirmPage.isViewer(player1)).thenReturn(true);
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+
+            InventoryCloseEvent event = mock(InventoryCloseEvent.class);
+            when(event.getInventory()).thenReturn(mock(Inventory.class));
+            when(event.getInventory().getHolder()).thenReturn(confirmPage);
+            when(event.getPlayer()).thenReturn(player1);
+            when(event.getReason()).thenReturn(reason);
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+
+            listener.onInventoryClose(event);
+
+            verify(confirmPage).dismiss();
+            verify(confirmPage, never()).handleClose();
+            verify(scheduler, never()).runTaskLater(any(), any(Runnable.class), anyLong());
             verify(tradeService, never()).cancelTrade(any(Player.class));
         }
 
