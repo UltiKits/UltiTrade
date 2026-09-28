@@ -27,6 +27,7 @@ import org.bukkit.boss.BossBar;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
@@ -316,18 +317,41 @@ public class TradeService {
             ((TradeConfirmPage) holder).dismiss();
             try {
                 TradeGUI gui = new TradeGUI(this, session, player);
-                player.openInventory(gui.getInventory());
+                // The page is already dismissed and inert -- its buttons and Esc now do nothing -- so
+                // if opening the replacement is refused (openOrCancel's own null-return case) or
+                // building/opening it throws (caught below), the player would otherwise be left
+                // staring at a dead window while the trade keeps running with both stakes locked,
+                // recoverable only by someone noticing and cancelling it by hand. openOrCancel cancels
+                // the trade itself on a refusal; a thrown exception is cancelled here, then rethrown so
+                // the caller's own SEVERE log for this player's failed redraw still fires
+                // (UltiKits/UltiTrade#47 review).
+                openOrCancel(player, session, gui.getInventory());
             } catch (RuntimeException | LinkageError e) {
-                // The page is already dismissed and inert -- its buttons and Esc now do nothing --
-                // so if building or opening the replacement then fails, the player would otherwise be
-                // left staring at a dead window while the trade keeps running with both stakes locked,
-                // recoverable only by someone noticing and cancelling it by hand. Cancelled here
-                // instead, then rethrown so the caller's own SEVERE log for this player's failed
-                // redraw still fires (UltiKits/UltiTrade#47 review).
                 cancelTrade(session, i18n("cancel_reason_reload_window_failed"));
                 throw e;
             }
         }
+    }
+
+    /**
+     * Opens {@code inventory} for {@code player}, and cancels {@code session} instead of leaving the
+     * player with no trade UI at all if another plugin refuses the {@code InventoryOpenEvent} this
+     * fires. {@code HumanEntity#openInventory} is {@code @Nullable}: a refused open returns {@code
+     * null} rather than throwing, which is easy to miss because nothing crashes -- the trade would
+     * otherwise keep running with both stakes locked, recoverable only by someone noticing and
+     * cancelling it by hand (UltiKits/UltiTrade#47 review). Every place in this class and
+     * {@code TradeListener} that reopens or first opens a {@link TradeGUI} for a still-running session
+     * goes through this one method, rather than checking the return value itself.
+     *
+     * @return true if the inventory actually opened; false if another plugin refused it (in which case
+     *         {@code session} has already been cancelled)
+     */
+    public boolean openOrCancel(Player player, TradeSession session, Inventory inventory) {
+        if (player.openInventory(inventory) != null) {
+            return true;
+        }
+        cancelTrade(session, i18n("cancel_reason_window_refused"));
+        return false;
     }
 
     /**
@@ -636,13 +660,21 @@ public class TradeService {
         playerSessionMap.put(player1.getUniqueId(), session.getSessionId());
         playerSessionMap.put(player2.getUniqueId(), session.getSessionId());
         
-        // Open trade GUI for both players
+        // Open trade GUI for both players. Neither has staked anything yet, so a refused open just
+        // cancels this freshly-created, still-empty session (UltiKits/UltiTrade#47 review) rather than
+        // leaving one player looking at a trade window for a trade the other side never really joined.
+        // player2's window is not even attempted once player1's is refused: cancelTrade already closes
+        // whichever of the two opened.
         TradeGUI gui1 = new TradeGUI(this, session, player1);
         TradeGUI gui2 = new TradeGUI(this, session, player2);
-        
-        player1.openInventory(gui1.getInventory());
-        player2.openInventory(gui2.getInventory());
-        
+
+        if (!openOrCancel(player1, session, gui1.getInventory())) {
+            return;
+        }
+        if (!openOrCancel(player2, session, gui2.getInventory())) {
+            return;
+        }
+
         // Play sound
         playSound(player1, Sound.BLOCK_CHEST_OPEN);
         playSound(player2, Sound.BLOCK_CHEST_OPEN);
@@ -780,7 +812,7 @@ public class TradeService {
         Bukkit.getScheduler().runTaskLater(bukkitPlugin, () -> {
             if (isCurrentSession(player.getUniqueId(), session)) {
                 TradeGUI gui = new TradeGUI(this, session, player);
-                player.openInventory(gui.getInventory());
+                openOrCancel(player, session, gui.getInventory());
             }
         }, 1L);
     }

@@ -396,6 +396,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `DEATH` 会取消交易；以上任何一种都会让交易悄悄保持进行、双方都没有窗口、两方出价被一直占用，直到有人手动运行
   取消命令。本模块自身或重载引发的关闭（`PLUGIN`、`OPEN_NEW`）行为不变——它们从不取消交易，因为引发关闭的代码
   本身已经掌管了会话的下一个状态。
+- Every other place this module opens a trade window now recovers the same way the large-trade
+  confirmation page already did: a refused `InventoryOpenEvent` returns `null` from
+  `HumanEntity#openInventory` rather than throwing, and none of the six other call sites checked for
+  it, so an unrelated plugin could leave a player with no window at all while their session kept
+  running and, in three of the six, before either side had staked anything, with no way back short
+  of a manual cancel. Starting a trade whose first player's own window is refused now cancels that
+  still-empty session immediately, without ever showing the second player a window for a trade the
+  first never really joined; a refused reopen after a timeout, after answering an amount prompt, or
+  after a session-move both-windows redraw all now fall back to cancelling that trade the same way
+  (UltiKits/UltiTrade#47 review).
+- 本模块中打开交易窗口的其余每一处，现在都采用大额交易确认页面已经使用的同一种恢复方式：`InventoryOpenEvent`
+  被拒绝时，`HumanEntity#openInventory` 返回的是 `null` 而不是抛出异常，此前其余六处调用均未检查这一点，导致其他
+  插件可能让玩家完全没有窗口，而其会话仍在继续运行——六处中有三处发生在双方都尚未压上任何出价时，且都只能靠手动
+  取消才能恢复。现在，若开始一笔交易时第一位玩家自己的窗口被拒绝，会立即取消这个仍为空的会话，不会再让第二位
+  玩家看到一个对方从未真正加入的交易窗口；超时后的重新打开、回答金额提示后的重新打开，以及会话转移后双方窗口的
+  重绘，若被拒绝也都会同样地取消该笔交易（UltiKits/UltiTrade#47 复查）。
+
 - `plugin.yml` now truthfully declares `softdepend: [ PlaceholderAPI, Vault ]` -- both are real, optional
   integrations this module already handles the absence of at runtime (`UltiKits/UltiTrade#48`, `#49`),
   but neither was ever declared. The framework is changing how it logs a module failing to load because

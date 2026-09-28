@@ -578,6 +578,26 @@ class TradeReloadReconciliationTest {
         }
 
         @Test
+        @DisplayName("a reload that has the replacement window's open refused (not thrown) also cancels rather than leaving a dead page (Codex, UltiKits/UltiTrade#47)")
+        void reloadCancelsTheTradeWhenTheReplacementOpenIsRefused() throws Exception {
+            TradeConfirmPage page = mock(TradeConfirmPage.class);
+            when(offererTop.getHolder()).thenReturn(page);
+            openWindow(counterparty, counterpartyTop);
+
+            // A refused InventoryOpenEvent does not throw -- openInventory(Inventory) is documented
+            // @Nullable and simply returns null. The prior fix only wrapped the call in try/catch,
+            // which a null return does not enter.
+            when(offerer.openInventory(any(Inventory.class))).thenReturn(null);
+
+            reload("enable-money-trade: true\ntrade-tax: 0.5\n");
+
+            verify(page, atLeastOnce()).dismiss();
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+            verify(offererInventory).addItem(UltiTradeTestHelper.deliveredCopyOf(diamond));
+            verify(counterpartyInventory).addItem(UltiTradeTestHelper.deliveredCopyOf(emerald));
+        }
+
+        @Test
         @DisplayName("redrawing the windows neither loses nor duplicates anything offered")
         void redrawKeepsOffersIntact() throws Exception {
             TradeGUI offererWindow = openWindow(offerer, offererTop);

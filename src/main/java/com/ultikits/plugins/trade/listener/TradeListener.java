@@ -27,6 +27,7 @@ import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.Map;
@@ -347,9 +348,29 @@ public class TradeListener implements Listener {
         Bukkit.getScheduler().runTaskLater(getBukkitPlugin(), () -> {
             if (waitingForInput.remove(uuid, prompt) && tradeService.getSession(uuid) == prompt.session) {
                 TradeGUI newGui = new TradeGUI(tradeService, prompt.session, player);
-                player.openInventory(newGui.getInventory());
+                openOrCancel(player, prompt.session, newGui.getInventory());
             }
         }, 200L); // 10 seconds timeout
+    }
+
+    /**
+     * Opens {@code inventory} for {@code player}, and cancels {@code session} instead of leaving the
+     * player with no trade UI at all if another plugin refuses the {@code InventoryOpenEvent} this
+     * fires. {@code HumanEntity#openInventory} is {@code @Nullable}: a refused open returns {@code
+     * null} rather than throwing, which is easy to miss because nothing crashes -- the trade would
+     * otherwise keep running with both stakes locked, recoverable only by someone noticing and
+     * cancelling it by hand (UltiKits/UltiTrade#47 review; {@link TradeService#openOrCancel} is the
+     * same check for that class's own callers).
+     *
+     * @return true if the inventory actually opened; false if another plugin refused it (in which case
+     *         {@code session} has already been cancelled)
+     */
+    private boolean openOrCancel(Player player, TradeSession session, Inventory inventory) {
+        if (player.openInventory(inventory) != null) {
+            return true;
+        }
+        tradeService.cancelTrade(session, tradeService.i18n("cancel_reason_window_refused"));
+        return false;
     }
 
     /**
@@ -470,7 +491,9 @@ public class TradeListener implements Listener {
                 // Only the prompt's own trade is reopened (UltiKits/UltiTrade#40).
                 if (session != null && session == prompt.session) {
                     TradeGUI gui = new TradeGUI(tradeService, session, player);
-                    player.openInventory(gui.getInventory());
+                    // A refused open cancels the trade instead of leaving the player with no window
+                    // at all (UltiKits/UltiTrade#47 review).
+                    openOrCancel(player, session, gui.getInventory());
                 }
             });
             return;
@@ -571,8 +594,12 @@ public class TradeListener implements Listener {
             TradeSession session = tradeService.getSession(player.getUniqueId());
             if (session != null && session == prompt.session) {
                 TradeGUI gui = new TradeGUI(tradeService, session, player);
-                player.openInventory(gui.getInventory());
-                updateBothGUIs(session);
+                // A refused open cancels the trade instead of leaving the player with no window at
+                // all; updating both windows for an already-cancelled trade would be meaningless
+                // (UltiKits/UltiTrade#47 review).
+                if (openOrCancel(player, session, gui.getInventory())) {
+                    updateBothGUIs(session);
+                }
             }
         });
     }

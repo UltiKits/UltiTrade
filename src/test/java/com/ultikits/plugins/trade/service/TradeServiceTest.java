@@ -1784,6 +1784,23 @@ class TradeServiceTest {
             verify(player1).playSound(any(Location.class), eq(org.bukkit.Sound.BLOCK_CHEST_OPEN), eq(1.0f), eq(1.0f));
             verify(player2).playSound(any(Location.class), eq(org.bukkit.Sound.BLOCK_CHEST_OPEN), eq(1.0f), eq(1.0f));
         }
+
+        @Test
+        @DisplayName("startTrade cancels the freshly-created session rather than leaving one side in a phantom trade if the first player's own open is refused (Codex sweep, UltiKits/UltiTrade#47)")
+        void startTradeCancelsWhenTheFirstOpenIsRefused() throws Exception {
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+            when(player1.openInventory(any(org.bukkit.inventory.Inventory.class))).thenReturn(null);
+
+            service.startTrade(player1, player2);
+
+            assertThat(service.isTrading(uuid1)).isFalse();
+            assertThat(service.isTrading(uuid2)).isFalse();
+            // player2's own window is never attempted once player1's refusal cancels the session --
+            // there is nothing left to show them.
+            verify(player2, never()).openInventory(any(org.bukkit.inventory.Inventory.class));
+        }
     }
 
     @Nested
