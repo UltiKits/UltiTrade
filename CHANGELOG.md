@@ -310,6 +310,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   玩家自身背包内进行的拖拽也因同样的原因（只是层级不同）被拒绝，使玩家在交易期间无法整理自己的背包。交易界面与确认
   预览界面现在只管辖各自窗口内的格位。以下三种操作从自身背包格发起时仍会被拒绝，因为它们并不局限于所点击的那一格，
   会伸进窗口内：Shift 点击、双击收集，以及服务器报告为未知的操作（UltiKits/UltiTrade#39）。
+- This module now loads on a server without PlaceholderAPI installed. The module main class carried
+  a field typed directly as `TradePlaceholderExpansion` (a PlaceholderAPI type), so the framework's
+  container threw `NoClassDefFoundError` while autowiring the module and the whole module failed to
+  load — trading, not just placeholders, was unavailable, present since the module's initial commit
+  (UltiKits/UltiTrade#48).
+- 本模块现在可以在没有安装 PlaceholderAPI 的服务器上加载。此前模块主类的一个字段直接以 `TradePlaceholderExpansion`
+  （一个 PlaceholderAPI 类型）声明，框架容器在自动装配本模块时会抛出 `NoClassDefFoundError`，导致整个模块加载失败——
+  不仅是变量功能，交易功能本身也一并不可用；此缺陷自本模块首个提交起就存在（UltiKits/UltiTrade#48）。
+- This module now loads on a server without Vault installed. `TradeService`'s economy field and
+  `getEconomy()`'s return type were typed directly as `net.milkbowl.vault.economy.Economy`, and this
+  module never declared Vault as a dependency (not even a soft one) in `plugin.yml`, so nothing
+  guaranteed Vault's absence was handled — the same crash shape as #48, for a different soft
+  dependency, found by a sweep for the same defect class (UltiKits/UltiTrade#49).
+- 本模块现在可以在没有安装 Vault 的服务器上加载。此前 `TradeService` 的经济字段与 `getEconomy()` 的返回值类型都直接
+  声明为 `net.milkbowl.vault.economy.Economy`，而本模块的 `plugin.yml` 从未把 Vault 声明为依赖（甚至连软依赖都没有），
+  因此没有任何机制保证缺少 Vault 时的行为——与 #48 崩溃形状相同，只是软依赖不同，由针对同一缺陷类的普查发现
+  （UltiKits/UltiTrade#49）。
 
 ### Removed
 
