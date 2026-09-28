@@ -327,6 +327,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   声明为 `net.milkbowl.vault.economy.Economy`，而本模块的 `plugin.yml` 从未把 Vault 声明为依赖（甚至连软依赖都没有），
   因此没有任何机制保证缺少 Vault 时的行为——与 #48 崩溃形状相同，只是软依赖不同，由针对同一缺陷类的普查发现
   （UltiKits/UltiTrade#49）。
+- Dying while viewing the large-trade confirmation page now cancels the trade, the same as closing
+  it any other way. Paper closes the page with `InventoryCloseEvent.Reason.DEATH`, which used to be
+  treated the same as the module's own close (reload, completion, cancellation) and silently left
+  the trade running with no window for either player, holding both stakes until someone ran the
+  cancel command by hand.
+- 现在在查看大额交易确认页面时死亡也会取消交易，与其他方式关闭该页面一致。此前 Paper 以 `InventoryCloseEvent.Reason.DEATH`
+  关闭该页面时，会被当作模块自身的关闭（重载、完成、取消）处理，交易会悄悄保持进行、双方都没有窗口，两方的出价也一直
+  被占用，直到有人手动运行取消命令。
 
 ### Removed
 
