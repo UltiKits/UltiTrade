@@ -80,8 +80,14 @@ public class TradeService {
     private DataOperator<PendingStakeReturn> pendingReturns;
 
     // Economy integration. Volatile: a reload replaces it on the main thread while the async chat
-    // handler may read it; callers read it once per operation.
-    private volatile Economy economy;
+    // handler may read it; callers read it once per operation. Held as Object, not Economy: this
+    // module declares NEITHER a hard depend NOR a softdepend on Vault in plugin.yml, so nothing
+    // guarantees Vault is present when the framework autowires this @Service bean and scans it for
+    // @Scheduled methods (both walk Class#getDeclaredFields()/getDeclaredMethods(), which eagerly
+    // resolve every declared type) -- a field or method return type of Economy directly would throw
+    // NoClassDefFoundError and fail the whole module on a server without Vault, the same crash shape
+    // as UltiKits/UltiTrade#48's PlaceholderAPI field, just for a different soft dependency.
+    private volatile Object economy;
     
     /**
      * This module's language-file text for {@code key}, in the server's language. The GUIs, the
@@ -330,14 +336,15 @@ public class TradeService {
      * Check if economy is available.
      */
     public boolean hasEconomy() {
-        Economy current = economy;
+        Object current = economy;
         return current != null && config.isEnableMoneyTrade();
     }
     
     /**
-     * Get economy instance.
+     * Get economy instance. Returned as Object, not Economy -- see the field's own comment; the one
+     * production caller ({@code TradeListener}) casts it back after checking it is non-null.
      */
-    public Economy getEconomy() {
+    public Object getEconomy() {
         return economy;
     }
     
@@ -798,7 +805,7 @@ public class TradeService {
         double money1 = session.getPlayerMoney(session.getPlayer1());
         double money2 = session.getPlayerMoney(session.getPlayer2());
         // Read the provider once: a reload may replace it at any time.
-        Economy currentEconomy = economy;
+        Economy currentEconomy = (Economy) economy;
         boolean moneyAvailable = currentEconomy != null && config.isEnableMoneyTrade();
 
         // Never move items or experience while silently dropping offered money (UltiKits/UltiTrade#26):

@@ -455,8 +455,9 @@ public class TradeListener implements Listener {
             
             if (inputType == InputType.MONEY) {
                 // Read the provider once (UltiKits/UltiTrade#26). Without a provider the amount stays
-                // unchanged.
-                Economy currentEconomy = tradeService.getEconomy();
+                // unchanged. getEconomy() returns Object, not Economy -- see TradeService's field
+                // comment; casting here is safe because a non-null value only ever holds an Economy.
+                Economy currentEconomy = (Economy) tradeService.getEconomy();
                 if (currentEconomy == null || !config.isEnableMoneyTrade()) {
                     // 0 withdraws an offer made while money trading was available; nothing is taken
                     // from anybody (UltiKits/UltiTrade#28).
