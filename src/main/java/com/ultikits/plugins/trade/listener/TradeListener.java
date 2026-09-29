@@ -27,11 +27,12 @@ import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Listener for trade GUI interactions and shift+right-click trading.
@@ -56,11 +57,30 @@ public class TradeListener implements Listener {
      */
     private static final int MAPPED_PLAYER_SLOTS = 36;
 
-    // Track players waiting for input (money/exp)
-    private final Map<UUID, InputType> waitingForInput = new HashMap<>();
-    
-    private enum InputType {
+    // Track players waiting for input (money/exp). Read and removed on the chat thread as well as the
+    // server thread, so it has to be a concurrent map: the timeout's remove(key, value) is atomic only there.
+    private final Map<UUID, PendingPrompt> waitingForInput = new ConcurrentHashMap<>();
+
+    // A player's prompt is claimed (removed from waitingForInput) the instant their chat answer
+    // arrives, but the answer is only applied on the server thread afterward. This records which
+    // trade that claimed-but-not-yet-applied answer belongs to, so the close guard's
+    // isAnsweringPromptOf still sees the player as answering in that window (UltiKits/UltiTrade#47
+    // review). Written on the chat thread (possibly async) and read/cleared on the server thread.
+    private final Map<UUID, TradeSession> answeringSessions = new ConcurrentHashMap<>();
+
+    enum InputType {
         MONEY, EXPERIENCE
+    }
+
+    /** A chat prompt a player has open: what it asks for, and the trade it was opened in. */
+    static final class PendingPrompt {
+        final InputType type;
+        final TradeSession session;
+
+        PendingPrompt(InputType type, TradeSession session) {
+            this.type = type;
+            this.session = session;
+        }
     }
 
     /**
@@ -184,51 +204,38 @@ public class TradeListener implements Listener {
         
         // Handle money slot click
         if (gui.isMoneySlot(slot) && tradeService.hasEconomy()) {
-            // Reset confirmation when changing money
-            session.setConfirmed(player.getUniqueId(), false);
-            session.setConfirmed(session.getOtherPlayer(player.getUniqueId()), false);
-            
+            // Opening the prompt changes no offer, so no confirmation is touched here: setting an
+            // amount resets both through TradeSession#setMoney, and reopenGUI repaints both windows
+            // (UltiKits/UltiTrade#36).
+
             // Start money input conversation
             player.closeInventory();
             player.sendMessage(text(tradeService.i18n("input_money_prompt")));
             player.sendMessage(text(tradeService.i18n("input_cancel")));
-            waitingForInput.put(player.getUniqueId(), InputType.MONEY);
-            
+            PendingPrompt prompt = new PendingPrompt(InputType.MONEY, session);
+            waitingForInput.put(player.getUniqueId(), prompt);
+
             // Reopen GUI after a delay if no input
-            Bukkit.getScheduler().runTaskLater(getBukkitPlugin(), () -> {
-                if (waitingForInput.remove(player.getUniqueId()) != null) {
-                    if (tradeService.isTrading(player.getUniqueId())) {
-                        TradeGUI newGui = new TradeGUI(tradeService, session, player);
-                        player.openInventory(newGui.getInventory());
-                    }
-                }
-            }, 200L); // 10 seconds timeout
+            scheduleReopenAfterTimeout(player, prompt);
             return;
         }
         
         // Handle experience slot click
         if (gui.isExpSlot(slot) && config.isEnableExpTrade()) {
-            // Reset confirmation when changing exp
-            session.setConfirmed(player.getUniqueId(), false);
-            session.setConfirmed(session.getOtherPlayer(player.getUniqueId()), false);
-            
+            // As for money: TradeSession#setExp resets both confirmations when an amount is set
+            // (UltiKits/UltiTrade#36).
+
             // Start exp input conversation
             player.closeInventory();
             player.sendMessage(text(tradeService.i18n("input_exp_prompt")));
             player.sendMessage(text(tradeService.i18n("input_exp_current")
                 .replace("{AMOUNT}", String.valueOf(tradeService.getTotalExperience(player)))));
             player.sendMessage(text(tradeService.i18n("input_cancel")));
-            waitingForInput.put(player.getUniqueId(), InputType.EXPERIENCE);
-            
+            PendingPrompt prompt = new PendingPrompt(InputType.EXPERIENCE, session);
+            waitingForInput.put(player.getUniqueId(), prompt);
+
             // Reopen GUI after a delay if no input
-            Bukkit.getScheduler().runTaskLater(getBukkitPlugin(), () -> {
-                if (waitingForInput.remove(player.getUniqueId()) != null) {
-                    if (tradeService.isTrading(player.getUniqueId())) {
-                        TradeGUI newGui = new TradeGUI(tradeService, session, player);
-                        player.openInventory(newGui.getInventory());
-                    }
-                }
-            }, 200L); // 10 seconds timeout
+            scheduleReopenAfterTimeout(player, prompt);
             return;
         }
         
@@ -256,10 +263,10 @@ public class TradeListener implements Listener {
         
         // Handle your item slots
         if (gui.isYourSlot(slot)) {
-            // Reset confirmation when changing items
-            session.setConfirmed(player.getUniqueId(), false);
-            session.setConfirmed(session.getOtherPlayer(player.getUniqueId()), false);
-            
+            // Confirmations are reset only where the offer really changes -- TradeSession#setItem
+            // resets both -- and each of those paths repaints both windows. Resetting here, before
+            // anything was decided, cleared both players' confirmations on a click that changed
+            // nothing and left both windows showing them as confirmed (UltiKits/UltiTrade#36).
             ItemStack cursor = event.getCursor();
             int index = gui.getItemIndex(slot);
 
@@ -303,6 +310,69 @@ public class TradeListener implements Listener {
         }
     }
     
+    /**
+     * Whether {@code playerUuid} has a chat prompt open that was opened in {@code session}, OR has
+     * already answered one and that answer is still on its way to the server thread.
+     * <p>
+     * {@code onPlayerChat} claims a prompt (removes it from {@link #waitingForInput}) the instant the
+     * chat message arrives, on whichever thread that is, so a second message cannot also claim it; the
+     * answer itself is only applied afterward, on the server thread, by {@link #answerPrompt}. Between
+     * those two points the prompt is gone from {@code waitingForInput}, but the trade is not idle -- the
+     * player has already answered, only the write has not landed. A close-guard check that ran only
+     * against {@code waitingForInput} in that window would see nobody answering and could cancel the
+     * trade the tick after a valid answer arrived, deferred only by ordinary scheduler timing rather
+     * than by anything the player did (UltiKits/UltiTrade#47 review). {@link #answeringSessions} is
+     * cleared as soon as {@link #answerPrompt} finishes, success or not, so this window is no wider than
+     * it has to be.
+     */
+    private boolean isAnsweringPromptOf(UUID playerUuid, TradeSession session) {
+        PendingPrompt prompt = waitingForInput.get(playerUuid);
+        if (prompt != null && session != null && prompt.session == session) {
+            return true;
+        }
+        TradeSession claimed = answeringSessions.get(playerUuid);
+        return claimed != null && claimed == session;
+    }
+
+    /**
+     * Ends {@code prompt} after 10 seconds without an answer and reopens its trade's window.
+     * <p>
+     * The task acts only on its own prompt and its own trade. It used to check only whether the
+     * player was trading at all -- true again once they had opened a newer trade -- so a prompt left
+     * over from a cancelled trade reopened the old window over the new one, whose close then
+     * cancelled the new trade; and it removed whatever prompt the player had open, including one
+     * opened in the newer trade (UltiKits/UltiTrade#40).
+     */
+    private void scheduleReopenAfterTimeout(Player player, PendingPrompt prompt) {
+        UUID uuid = player.getUniqueId();
+        Bukkit.getScheduler().runTaskLater(getBukkitPlugin(), () -> {
+            if (waitingForInput.remove(uuid, prompt) && tradeService.getSession(uuid) == prompt.session) {
+                TradeGUI newGui = new TradeGUI(tradeService, prompt.session, player);
+                openOrCancel(player, prompt.session, newGui.getInventory());
+            }
+        }, 200L); // 10 seconds timeout
+    }
+
+    /**
+     * Opens {@code inventory} for {@code player}, and cancels {@code session} instead of leaving the
+     * player with no trade UI at all if another plugin refuses the {@code InventoryOpenEvent} this
+     * fires. {@code HumanEntity#openInventory} is {@code @Nullable}: a refused open returns {@code
+     * null} rather than throwing, which is easy to miss because nothing crashes -- the trade would
+     * otherwise keep running with both stakes locked, recoverable only by someone noticing and
+     * cancelling it by hand (UltiKits/UltiTrade#47 review; {@link TradeService#openOrCancel} is the
+     * same check for that class's own callers).
+     *
+     * @return true if the inventory actually opened; false if another plugin refused it (in which case
+     *         {@code session} has already been cancelled)
+     */
+    private boolean openOrCancel(Player player, TradeSession session, Inventory inventory) {
+        if (player.openInventory(inventory) != null) {
+            return true;
+        }
+        tradeService.cancelTrade(session, tradeService.i18n("cancel_reason_window_refused"));
+        return false;
+    }
+
     /**
      * Whether a raw slot belongs to the trade window itself rather than to the acting player's own
      * inventory.
@@ -362,27 +432,68 @@ public class TradeListener implements Listener {
 
     /**
      * Handle chat input for money/exp.
+     * <p>
+     * The chat event normally arrives on the chat thread. There the answer is only claimed (the
+     * prompt removed, the message hidden); it is applied on the server thread, where every other
+     * change to a trade happens. Applied from the chat thread, an amount could land between a
+     * confirmation page's check that the offer is unchanged and its confirmation, leaving a player
+     * confirmed against an amount their page never showed.
+     * <p>
+     * Claiming also marks the trade as answering in {@link #answeringSessions}, kept until
+     * {@link #answerPrompt} finishes, so a close-guard check that runs in the gap between the claim and
+     * the applied answer still sees the player as answering rather than concluding nobody is
+     * (UltiKits/UltiTrade#47 review).
      */
     @EventHandler
     public void onPlayerChat(org.bukkit.event.player.AsyncPlayerChatEvent event) {
         Player player = event.getPlayer();
-        InputType inputType = waitingForInput.remove(player.getUniqueId());
-        
-        if (inputType == null) {
+        UUID uuid = player.getUniqueId();
+        PendingPrompt prompt = waitingForInput.remove(uuid);
+
+        if (prompt == null) {
             return;
         }
-        
         event.setCancelled(true);
+        // A session-less prompt (a test fixture only; production always opens a prompt in a real
+        // session) has nothing for the close guard to protect, and ConcurrentHashMap rejects a null
+        // value outright.
+        if (prompt.session != null) {
+            answeringSessions.put(uuid, prompt.session);
+        }
         String message = event.getMessage().trim();
-        
+        if (event.isAsynchronous()) {
+            Bukkit.getScheduler().runTask(getBukkitPlugin(), () -> applyAnswer(player, prompt, message));
+        } else {
+            applyAnswer(player, prompt, message);
+        }
+    }
+
+    /** Runs {@link #answerPrompt}, then always clears this answer's {@link #answeringSessions} entry. */
+    private void applyAnswer(Player player, PendingPrompt prompt, String message) {
+        try {
+            answerPrompt(player, prompt, message);
+        } finally {
+            if (prompt.session != null) {
+                answeringSessions.remove(player.getUniqueId(), prompt.session);
+            }
+        }
+    }
+
+    /** Applies {@code message} as the answer to {@code prompt}. Runs on the server thread. */
+    private void answerPrompt(Player player, PendingPrompt prompt, String message) {
+        InputType inputType = prompt.type;
+
         // Check for cancel
         if (message.equalsIgnoreCase("cancel")) {
             player.sendMessage(text(tradeService.i18n("input_cancelled")));
             Bukkit.getScheduler().runTask(getBukkitPlugin(), () -> {
                 TradeSession session = tradeService.getSession(player.getUniqueId());
-                if (session != null && tradeService.isTrading(player.getUniqueId())) {
+                // Only the prompt's own trade is reopened (UltiKits/UltiTrade#40).
+                if (session != null && session == prompt.session) {
                     TradeGUI gui = new TradeGUI(tradeService, session, player);
-                    player.openInventory(gui.getInventory());
+                    // A refused open cancels the trade instead of leaving the player with no window
+                    // at all (UltiKits/UltiTrade#47 review).
+                    openOrCancel(player, session, gui.getInventory());
                 }
             });
             return;
@@ -391,31 +502,50 @@ public class TradeListener implements Listener {
         // Parse number
         try {
             double value = Double.parseDouble(message);
+            // NaN and the infinities parse, and NaN passes both the negative and the balance check,
+            // after which every "money > 0" test at completion is false: the money transfer was
+            // skipped while the items still moved (UltiKits/UltiTrade#29).
+            if (!Double.isFinite(value)) {
+                player.sendMessage(text(tradeService.i18n("invalid_amount")));
+                reopenGUI(player, prompt);
+                return;
+            }
             if (value < 0) {
                 player.sendMessage(text(tradeService.i18n("amount_negative")));
-                reopenGUI(player);
+                reopenGUI(player, prompt);
                 return;
             }
             
+            // The amount belongs to the trade the prompt was opened in; if that trade has ended, even
+            // when a newer one has started since, it is not applied (UltiKits/UltiTrade#40).
             TradeSession session = tradeService.getSession(player.getUniqueId());
-            if (session == null) {
+            if (session == null || session != prompt.session) {
                 player.sendMessage(text(tradeService.i18n("trade_ended")));
                 return;
             }
             
             if (inputType == InputType.MONEY) {
-                // Read the provider once: a reload on the main thread may drop it while this async
-                // handler runs (UltiKits/UltiTrade#26). Without a provider the amount stays unchanged.
-                Economy currentEconomy = tradeService.getEconomy();
+                // Read the provider once (UltiKits/UltiTrade#26). Without a provider the amount stays
+                // unchanged. getEconomy() returns Object, not Economy -- see TradeService's field
+                // comment; casting here is safe because a non-null value only ever holds an Economy.
+                Economy currentEconomy = (Economy) tradeService.getEconomy();
                 if (currentEconomy == null || !config.isEnableMoneyTrade()) {
+                    // 0 withdraws an offer made while money trading was available; nothing is taken
+                    // from anybody (UltiKits/UltiTrade#28).
+                    if (value == 0) {
+                        session.setMoney(player.getUniqueId(), 0);
+                        player.sendMessage(text(tradeService.i18n("money_set").replace("{AMOUNT}", String.valueOf(0.0))));
+                        reopenGUI(player, prompt);
+                        return;
+                    }
                     player.sendMessage(text(tradeService.i18n("money_unavailable")));
-                    reopenGUI(player);
+                    reopenGUI(player, prompt);
                     return;
                 }
                 // Check balance
                 if (currentEconomy.getBalance(player) < value) {
                     player.sendMessage(text(tradeService.i18n("insufficient_money")));
-                    reopenGUI(player);
+                    reopenGUI(player, prompt);
                     return;
                 }
                 session.setMoney(player.getUniqueId(), value);
@@ -424,39 +554,52 @@ public class TradeListener implements Listener {
                 // A reload may have turned experience trading off since the prompt opened
                 // (UltiKits/UltiTrade#26). Without it the amount stays unchanged.
                 if (!config.isEnableExpTrade()) {
+                    // As for money: 0 withdraws an offer (UltiKits/UltiTrade#28).
+                    if ((int) value == 0) {
+                        session.setExp(player.getUniqueId(), 0);
+                        player.sendMessage(text(tradeService.i18n("exp_set").replace("{AMOUNT}", "0")));
+                        reopenGUI(player, prompt);
+                        return;
+                    }
                     player.sendMessage(text(tradeService.i18n("exp_unavailable")));
-                    reopenGUI(player);
+                    reopenGUI(player, prompt);
                     return;
                 }
                 // Check experience
                 int expValue = (int) value;
                 if (tradeService.getTotalExperience(player) < expValue) {
                     player.sendMessage(text(tradeService.i18n("insufficient_exp")));
-                    reopenGUI(player);
+                    reopenGUI(player, prompt);
                     return;
                 }
                 session.setExp(player.getUniqueId(), expValue);
                 player.sendMessage(text(tradeService.i18n("exp_set").replace("{AMOUNT}", String.valueOf(expValue))));
             }
             
-            reopenGUI(player);
+            reopenGUI(player, prompt);
             
         } catch (NumberFormatException e) {
             player.sendMessage(text(tradeService.i18n("invalid_amount")));
-            reopenGUI(player);
+            reopenGUI(player, prompt);
         }
     }
     
     /**
-     * Reopen trade GUI for player.
+     * Reopens the trade window of the trade {@code prompt} was opened in, if that is still the
+     * player's trade. A prompt left over from an ended trade must not reopen anything over a newer
+     * trade, whose window being replaced would cancel it (UltiKits/UltiTrade#40).
      */
-    private void reopenGUI(Player player) {
+    private void reopenGUI(Player player, PendingPrompt prompt) {
         Bukkit.getScheduler().runTask(getBukkitPlugin(), () -> {
             TradeSession session = tradeService.getSession(player.getUniqueId());
-            if (session != null && tradeService.isTrading(player.getUniqueId())) {
+            if (session != null && session == prompt.session) {
                 TradeGUI gui = new TradeGUI(tradeService, session, player);
-                player.openInventory(gui.getInventory());
-                updateBothGUIs(session);
+                // A refused open cancels the trade instead of leaving the player with no window at
+                // all; updating both windows for an already-cancelled trade would be meaningless
+                // (UltiKits/UltiTrade#47 review).
+                if (openOrCancel(player, session, gui.getInventory())) {
+                    updateBothGUIs(session);
+                }
             }
         });
     }
@@ -497,7 +640,59 @@ public class TradeListener implements Listener {
     @EventHandler
     public void onInventoryClose(InventoryCloseEvent event) {
         if (event.getInventory().getHolder() instanceof TradeConfirmPage) {
-            // Don't cancel trade when closing confirm page
+            // Closing the confirmation page never cancels the trade by itself. Only the player's own
+            // close (Esc, reason PLAYER) counts as the page's Cancel and goes back to the trade window.
+            // A close by a plugin -- this module cancelling or completing the trade, a reload redrawing
+            // it -- is not the player's answer, and running Cancel there would schedule a trade window
+            // nobody asked for (during shutdown, on a scheduler that refuses tasks).
+            //
+            // Every other close is terminal, cancelling the trade the same deferred, session-checked
+            // way DEATH already did before this sweep (UltiKits/UltiTrade#47 review, sweeping every
+            // InventoryCloseEvent.Reason): the server deciding, independently of this module, that the
+            // player may no longer see the page (they died, disconnected, teleported, their chunk
+            // unloaded, or Paper otherwise revoked access), an unrecognised reason, OR -- the narrowing
+            // this review round added -- a PLUGIN/OPEN_NEW close this module did NOT cause. Paper
+            // reports the identical PLUGIN or OPEN_NEW reason whether this module's own
+            // closeInventory()/openInventory() call triggered the close or an unrelated plugin did
+            // (closing the page itself, or opening its own window over it), so the reason alone cannot
+            // tell those two apart; {@link TradeConfirmPage#isAnswered()} can, because every one of this
+            // module's own closes marks the page first (a button click, this branch's own dismiss()
+            // below, or TradeService's cancelTrade/completeTrade/refreshOpenTradeWindow dismissing it
+            // before closing or replacing it). A PLUGIN/OPEN_NEW close this module did not already mark
+            // left the trade running with both stakes locked and no window, exactly like the reasons
+            // this sweep already covered, until someone ran the cancel command by hand. TELEPORT is
+            // deprecated since Paper 1.21.10 ("not called anymore as inventories are not closed on
+            // teleportation") and so cannot fire on this module's target server, but the constant is not
+            // removed and this module's own `plugin.yml` declares `api-version: '1.19'` for
+            // compatibility with older servers that may still send it, so it stays in the terminal set
+            // rather than being dropped as dead code.
+            TradeConfirmPage page = (TradeConfirmPage) event.getInventory().getHolder();
+            if (!page.isViewer(event.getPlayer())) {
+                // Somebody else closing their view of this page; the viewer still has it open.
+                return;
+            }
+            InventoryCloseEvent.Reason reason = event.getReason();
+            if (reason == InventoryCloseEvent.Reason.PLAYER) {
+                page.handleClose();
+                return;
+            }
+            boolean alreadyAccountedFor = page.isAnswered();
+            page.dismiss();
+            if (!alreadyAccountedFor) {
+                Player affectedPlayer = (Player) event.getPlayer();
+                TradeSession affectedSession = tradeService.getSession(affectedPlayer.getUniqueId());
+                if (affectedSession != null) {
+                    Bukkit.getScheduler().runTaskLater(
+                        getBukkitPlugin(),
+                        () -> {
+                            if (tradeService.getSession(affectedPlayer.getUniqueId()) == affectedSession) {
+                                tradeService.cancelTrade(affectedPlayer);
+                            }
+                        },
+                        1L
+                    );
+                }
+            }
             return;
         }
         
@@ -506,21 +701,29 @@ public class TradeListener implements Listener {
         }
         
         Player player = (Player) event.getPlayer();
-        
-        // Don't cancel if waiting for input
-        if (waitingForInput.containsKey(player.getUniqueId())) {
+        TradeSession session = tradeService.getSession(player.getUniqueId());
+
+        // Don't cancel while the player answers a prompt of this trade. Only of this trade: a prompt
+        // left over from a trade cancelled while it was open stays until its timeout, and must not keep
+        // a newer trade running with no window (UltiKits/UltiTrade#40).
+        if (isAnsweringPromptOf(player.getUniqueId(), session)) {
+            return;
+        }
+
+        // Nor when the window was closed to open the large-trade confirmation page
+        // (UltiKits/UltiTrade#23).
+        if (tradeService.isOpeningConfirmPage(player.getUniqueId())) {
             return;
         }
         
-        TradeSession session = tradeService.getSession(player.getUniqueId());
-        
         if (session != null && session.getState() == TradeSession.TradeState.TRADING) {
-            // Cancel trade when closing GUI
+            // Cancel trade when closing GUI -- this trade, the one whose window closed, and only if it
+            // is still the player's trade when the task runs (UltiKits/UltiTrade#40).
             Bukkit.getScheduler().runTaskLater(
                 getBukkitPlugin(),
                 () -> {
-                    if (tradeService.isTrading(player.getUniqueId()) && 
-                        !waitingForInput.containsKey(player.getUniqueId())) {
+                    if (tradeService.getSession(player.getUniqueId()) == session
+                            && !isAnsweringPromptOf(player.getUniqueId(), session)) {
                         tradeService.cancelTrade(player);
                     }
                 },

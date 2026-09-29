@@ -6,3 +6,4 @@ authors:
   - UltiKits Team
 api-version: 621
 loadAfter: []
+softdepend: [ PlaceholderAPI, Vault ]

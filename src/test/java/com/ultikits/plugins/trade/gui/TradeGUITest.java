@@ -60,6 +60,47 @@ class TradeGUITest {
         UltiTradeTestHelper.tearDown();
     }
 
+    /**
+     * UltiKits/UltiTrade#35: every state-dependent slot is rendered when the window is built, so
+     * every path that opens a trade window shows what the session holds. Five of the seven open
+     * paths never called {@code update()}, and their windows showed an empty trade while the session
+     * held both players' stakes.
+     */
+    @Nested
+    @DisplayName("A new window shows the session's stakes (UltiKits/UltiTrade#35)")
+    class RendersTheSessionWhenBuilt {
+
+        @Test
+        @DisplayName("both players' offered items are in the window as soon as it is built")
+        void aNewWindowShowsBothSidesStakes() {
+            ItemStack mine = new ItemStack(Material.DIAMOND, 3);
+            ItemStack theirs = new ItemStack(Material.EMERALD, 2);
+            session.setItem(uuid1, 0, mine);
+            session.setItem(uuid2, 0, theirs);
+            Inventory inventory = gui.getInventory();
+            clearInvocations(inventory);
+
+            new TradeGUI(tradeService, session, player1);
+
+            verify(inventory).setItem(TradeGUI.YOUR_SLOTS[0], mine);
+            verify(inventory).setItem(eq(TradeGUI.THEIR_SLOTS[0]),
+                    argThat(item -> item != null && item.getType() == Material.EMERALD));
+        }
+
+        @Test
+        @DisplayName("POSITIVE CONTROL: the confirmation state is drawn from the session when the window is built")
+        void aNewWindowShowsTheOtherSidesConfirmation() {
+            session.setConfirmed(uuid2, true);
+            Inventory inventory = gui.getInventory();
+            clearInvocations(inventory);
+
+            new TradeGUI(tradeService, session, player1);
+
+            verify(inventory, atLeastOnce()).setItem(eq(TradeGUI.THEIR_STATUS_SLOT),
+                    argThat(item -> item != null && item.getType() == Material.LIME_WOOL));
+        }
+    }
+
     @Nested
     @DisplayName("Constructor")
     class Constructor {

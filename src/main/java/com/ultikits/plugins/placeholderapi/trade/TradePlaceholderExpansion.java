@@ -1,4 +1,4 @@
-package com.ultikits.plugins.trade.placeholder;
+package com.ultikits.plugins.placeholderapi.trade;
 
 import com.ultikits.plugins.trade.entity.PlayerTradeSettings;
 import com.ultikits.plugins.trade.service.TradeLogService;
@@ -12,6 +12,14 @@ import org.jetbrains.annotations.Nullable;
 /**
  * PlaceholderAPI expansion for UltiTrade.
  * Provides trade-related placeholders.
+ * <p>
+ * This class lives outside {@code com.ultikits.plugins.trade}, the module's scan package,
+ * on purpose (moved here to fix a load-time crash without PlaceholderAPI, UltiKits/UltiTrade#48,
+ * mirroring UltiKits/UltiEconomy#20). A class extending {@link PlaceholderExpansion} cannot be
+ * loaded on a server without PlaceholderAPI, and the framework's component scan attempts to load
+ * every class under the module's scan package at boot. Here it is loaded only when
+ * {@code UltiTrade#registerPlaceholderAPI} creates it, after checking that PlaceholderAPI is
+ * installed.
  *
  * @author wisdomme
  * @version 1.0.0

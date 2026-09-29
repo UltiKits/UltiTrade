@@ -83,6 +83,25 @@ class RemovedConfigKeysTest {
         return file;
     }
 
+    /**
+     * The placeholder class of UltiKits/UltiMail#37, swept into this module: the operator's file path
+     * is inserted before {@code {KEY}} and {@code {REASON}}, so a server installed under a directory
+     * whose name contains either token had it rewritten.
+     */
+    @Test
+    @DisplayName("a path containing a later placeholder's token is named exactly as it is (one-pass fill)")
+    void aPathContainingAPlaceholderTokenIsNamedAsWritten(@TempDir File dir) throws IOException {
+        File odd = new File(dir, "srv-{KEY}-{REASON}");
+        assertThat(odd.mkdirs()).isTrue();
+        File file = write(odd, "trade-timeout: 120\n");
+        List<String> warnings = new ArrayList<>();
+
+        TradeSeams.warnAboutLeftovers(file, warnings::add, ENGLISH);
+
+        assertThat(warnings).hasSize(1);
+        assertThat(warnings.get(0)).startsWith(file.getPath() + " still contains 'trade-timeout'");
+    }
+
     @Test
     @DisplayName("under language: en the trade-timeout warning reads exactly as before the language sweep")
     void englishWarningIsByteIdentical(@TempDir File dir) throws IOException {

@@ -221,13 +221,8 @@ class TradeListenerTest {
         @Test
         @DisplayName("Should remove from waiting for input on quit")
         void removeFromWaitingOnQuit() throws Exception {
-            Map<UUID, ?> waitingForInput = UltiTradeTestHelper.getField(listener, "waitingForInput");
-            // Add player to waiting list - we need to use the enum via reflection
-            Class<?> inputTypeClass = Class.forName("com.ultikits.plugins.trade.listener.TradeListener$InputType");
-            Object moneyType = inputTypeClass.getEnumConstants()[0]; // MONEY
-            @SuppressWarnings("unchecked")
-            Map<UUID, Object> typedMap = (Map<UUID, Object>) waitingForInput;
-            typedMap.put(uuid1, moneyType);
+            Map<UUID, TradeListener.PendingPrompt> waitingForInput = UltiTradeTestHelper.getField(listener, "waitingForInput");
+            waitingForInput.put(uuid1, new TradeListener.PendingPrompt(TradeListener.InputType.MONEY, null));
 
             when(tradeService.isTrading(uuid1)).thenReturn(false);
 
@@ -373,6 +368,295 @@ class TradeListenerTest {
             listener.onInventoryClick(event);
 
             assertCancelledAndNothingMoved(event);
+        }
+    }
+
+    /**
+     * UltiKits/UltiTrade#40: a delayed task and a pending prompt belong to the trade they were created
+     * in. After that trade ends and the player opens a newer one, they must not act on the newer
+     * trade -- which "is this player trading?" cannot tell apart from the old one.
+     */
+    @Nested
+    @DisplayName("a chat answer is applied on the server thread")
+    class ChatAnswerOnTheServerThread {
+
+        /**
+         * The chat event arrives on the chat thread, while a confirmation page checks the offer and
+         * confirms on the server thread; an amount set from the chat thread could land between that
+         * check and the confirmation. The answer is therefore only read on the chat thread and applied
+         * on the server thread.
+         */
+        @Test
+        @DisplayName("an answer from the chat thread changes the offer only when the server thread runs it")
+        void anAsynchronousAnswerIsAppliedByTheServerThread() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            net.milkbowl.vault.economy.Economy economy = UltiTradeTestHelper.createMockEconomy();
+            lenient().when(tradeService.getEconomy()).thenReturn(economy);
+            lenient().when(tradeService.getConfig()).thenReturn(config);
+            Map<UUID, TradeListener.PendingPrompt> waitingForInput = UltiTradeTestHelper.getField(listener, "waitingForInput");
+            waitingForInput.put(uuid1, new TradeListener.PendingPrompt(TradeListener.InputType.MONEY, session));
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+            int revision = session.getRevision();
+            AsyncPlayerChatEvent event = new AsyncPlayerChatEvent(true, player1, "100", new HashSet<>());
+
+            listener.onPlayerChat(event);
+
+            assertThat(event.isCancelled()).as("the answer is not broadcast").isTrue();
+            assertThat(session.getPlayerMoney(uuid1)).as("nothing changed on the chat thread").isEqualTo(0.0);
+            assertThat(session.getRevision()).isEqualTo(revision);
+            org.mockito.ArgumentCaptor<Runnable> apply = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler, atLeastOnce()).runTask(any(), apply.capture());
+            apply.getAllValues().get(0).run();
+            assertThat(session.getPlayerMoney(uuid1)).isEqualTo(100.0);
+        }
+    }
+
+    @Nested
+    @DisplayName("stale prompts and timers leave a newer trade alone (UltiKits/UltiTrade#40)")
+    class StaleTasksLeaveANewerTradeAlone {
+
+        private TradeSession oldTrade;
+        private TradeSession newTrade;
+        private net.milkbowl.vault.economy.Economy economy;
+
+        @BeforeEach
+        void anOldTradeWithAMoneyPrompt() {
+            oldTrade = new TradeSession(player1, player2);
+            newTrade = new TradeSession(player1, player2);
+            when(tradeService.hasEconomy()).thenReturn(true);
+            economy = UltiTradeTestHelper.createMockEconomy();
+            lenient().when(tradeService.getEconomy()).thenReturn(economy);
+            lenient().when(tradeService.isTrading(uuid1)).thenReturn(true);
+            when(tradeService.getSession(uuid1)).thenReturn(oldTrade);
+            lenient().when(tradeService.getConfig()).thenReturn(config);
+        }
+
+        private TradeGUI windowFor(TradeSession session) {
+            TradeGUI gui = mock(TradeGUI.class);
+            when(gui.getSession()).thenReturn(session);
+            when(gui.isMoneySlot(TradeGUI.YOUR_MONEY_SLOT)).thenReturn(true);
+            return gui;
+        }
+
+        private InventoryClickEvent moneySlotClick(TradeGUI gui) {
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(gui);
+            InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getInventory()).thenReturn(top);
+            when(event.getWhoClicked()).thenReturn(player1);
+            when(event.getRawSlot()).thenReturn(TradeGUI.YOUR_MONEY_SLOT);
+            return event;
+        }
+
+        /** Opens the money prompt in {@code session}'s window and returns its 10-second timeout task. */
+        private Runnable openMoneyPrompt(TradeSession session) {
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+            listener.onInventoryClick(moneySlotClick(windowFor(session)));
+            org.mockito.ArgumentCaptor<Runnable> timeout = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTaskLater(any(), timeout.capture(), eq(200L));
+            return timeout.getValue();
+        }
+
+        @Test
+        @DisplayName("the old prompt's timeout does not reopen the old trade's window over the newer trade")
+        void oldTimeoutDoesNotReopenTheOldWindow() {
+            Runnable oldTimeout = openMoneyPrompt(oldTrade);
+            when(tradeService.getSession(uuid1)).thenReturn(newTrade);
+            clearInvocations(player1);
+
+            oldTimeout.run();
+
+            verify(player1, never()).openInventory(any(Inventory.class));
+        }
+
+        @Test
+        @DisplayName("an amount typed for the old prompt is not applied to the newer trade")
+        void oldPromptDoesNotSetTheNewerTradesMoney() {
+            openMoneyPrompt(oldTrade);
+            when(tradeService.getSession(uuid1)).thenReturn(newTrade);
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, "100", new HashSet<>()));
+
+            assertThat(newTrade.getPlayerMoney(uuid1)).isEqualTo(0.0);
+            verify(player1).sendMessage(contains(org.bukkit.ChatColor.translateAlternateColorCodes('&',
+                    tradeService.i18n("trade_ended"))));
+        }
+
+        @Test
+        @DisplayName("a prompt left over from the old trade does not stop the newer trade's window close from cancelling it")
+        void oldPromptDoesNotKeepTheNewerTradeOpen() {
+            openMoneyPrompt(oldTrade);
+            when(tradeService.getSession(uuid1)).thenReturn(newTrade);
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+            TradeGUI newWindow = mock(TradeGUI.class);
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(newWindow);
+            InventoryCloseEvent close = mock(InventoryCloseEvent.class);
+            when(close.getInventory()).thenReturn(top);
+            when(close.getPlayer()).thenReturn(player1);
+
+            listener.onInventoryClose(close);
+
+            org.mockito.ArgumentCaptor<Runnable> check = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTaskLater(any(), check.capture(), eq(1L));
+            check.getValue().run();
+            verify(tradeService).cancelTrade(player1);
+        }
+
+        @Test
+        @DisplayName("the old prompt's timeout does not close a prompt opened in the newer trade")
+        void oldTimeoutLeavesTheNewerPromptOpen() {
+            Runnable oldTimeout = openMoneyPrompt(oldTrade);
+            when(tradeService.getSession(uuid1)).thenReturn(newTrade);
+            openMoneyPrompt(newTrade);
+
+            oldTimeout.run();
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, "100", new HashSet<>()));
+
+            assertThat(newTrade.getPlayerMoney(uuid1)).isEqualTo(100.0);
+        }
+
+        @Test
+        @DisplayName("an invalid answer to the old prompt does not reopen a window over the newer trade")
+        void invalidAnswerToTheOldPromptReopensNothing() {
+            openMoneyPrompt(oldTrade);
+            when(tradeService.getSession(uuid1)).thenReturn(newTrade);
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler, player1);
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, "abc", new HashSet<>()));
+            org.mockito.ArgumentCaptor<Runnable> reopen = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTask(any(), reopen.capture());
+            reopen.getValue().run();
+
+            verify(player1, never()).openInventory(any(Inventory.class));
+        }
+
+        @Test
+        @DisplayName("POSITIVE CONTROL: the prompt's own timeout reopens its own trade's window")
+        void ownTimeoutReopensItsOwnWindow() {
+            Runnable timeout = openMoneyPrompt(oldTrade);
+            clearInvocations(player1);
+
+            timeout.run();
+
+            verify(player1).openInventory(any(Inventory.class));
+        }
+
+        @Test
+        @DisplayName("a close-to-cancel task from the old trade does not cancel the newer trade")
+        void oldCloseTaskDoesNotCancelTheNewerTrade() {
+            TradeGUI oldWindow = windowFor(oldTrade);
+            InventoryCloseEvent close = mock(InventoryCloseEvent.class);
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(oldWindow);
+            when(close.getInventory()).thenReturn(top);
+            when(close.getPlayer()).thenReturn(player1);
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+
+            listener.onInventoryClose(close);
+            org.mockito.ArgumentCaptor<Runnable> cancel = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTaskLater(any(), cancel.capture(), eq(1L));
+            when(tradeService.getSession(uuid1)).thenReturn(newTrade);
+            cancel.getValue().run();
+
+            verify(tradeService, never()).cancelTrade(any(Player.class));
+            verify(tradeService, never()).cancelTrade(eq(newTrade), any());
+        }
+    }
+
+    /**
+     * UltiKits/UltiTrade#36: a click that changes nothing about the offer leaves both confirmations
+     * alone; a click that does change it resets both and repaints both windows, so no window keeps
+     * showing a confirmation the session no longer holds.
+     */
+    @Nested
+    @DisplayName("confirmations are reset only by a real offer change, and always repainted (UltiKits/UltiTrade#36)")
+    class ConfirmationResetOnlyOnChange {
+
+        private TradeGUI gui;
+        private TradeGUI otherGui;
+        private TradeSession session;
+
+        @BeforeEach
+        void bothWindowsOpenWithTheOtherPlayerConfirmed() {
+            session = new TradeSession(player1, player2);
+            session.setConfirmed(uuid2, true);
+            gui = mock(TradeGUI.class);
+            otherGui = mock(TradeGUI.class);
+            when(gui.getSession()).thenReturn(session);
+            lenient().when(gui.isYourSlot(TradeGUI.YOUR_SLOTS[0])).thenReturn(true);
+            lenient().when(gui.getItemIndex(TradeGUI.YOUR_SLOTS[0])).thenReturn(0);
+            lenient().when(gui.isMoneySlot(TradeGUI.YOUR_MONEY_SLOT)).thenReturn(true);
+            lenient().when(gui.isExpSlot(TradeGUI.YOUR_EXP_SLOT)).thenReturn(true);
+            showing(player1, gui);
+            showing(player2, otherGui);
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            lenient().doReturn(player1).when(server).getPlayer(uuid1);
+            lenient().doReturn(player2).when(server).getPlayer(uuid2);
+        }
+
+        private void showing(Player player, TradeGUI window) {
+            InventoryView view = mock(InventoryView.class);
+            Inventory top = mock(Inventory.class);
+            lenient().when(top.getHolder()).thenReturn(window);
+            lenient().when(view.getTopInventory()).thenReturn(top);
+            lenient().when(player.getOpenInventory()).thenReturn(view);
+        }
+
+        private InventoryClickEvent click(int rawSlot, ItemStack cursor) {
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(gui);
+            InventoryClickEvent event = mock(InventoryClickEvent.class);
+            when(event.getInventory()).thenReturn(top);
+            when(event.getWhoClicked()).thenReturn(player1);
+            when(event.getRawSlot()).thenReturn(rawSlot);
+            lenient().when(event.getCursor()).thenReturn(cursor);
+            lenient().when(event.getView()).thenReturn(mock(InventoryView.class));
+            return event;
+        }
+
+        @Test
+        @DisplayName("an empty own slot clicked with an empty cursor keeps the other player's confirmation")
+        void emptyClickKeepsConfirmation() {
+            listener.onInventoryClick(click(TradeGUI.YOUR_SLOTS[0], null));
+
+            assertThat(session.isConfirmed(uuid2)).isTrue();
+        }
+
+        @Test
+        @DisplayName("opening the money prompt, which changes no offer, keeps the other player's confirmation")
+        void openingTheMoneyPromptKeepsConfirmation() {
+            when(tradeService.hasEconomy()).thenReturn(true);
+
+            listener.onInventoryClick(click(TradeGUI.YOUR_MONEY_SLOT, null));
+
+            assertThat(session.isConfirmed(uuid2)).isTrue();
+        }
+
+        @Test
+        @DisplayName("opening the experience prompt, which changes no offer, keeps the other player's confirmation")
+        void openingTheExperiencePromptKeepsConfirmation() {
+            when(config.isEnableExpTrade()).thenReturn(true);
+
+            listener.onInventoryClick(click(TradeGUI.YOUR_EXP_SLOT, null));
+
+            assertThat(session.isConfirmed(uuid2)).isTrue();
+        }
+
+        @Test
+        @DisplayName("POSITIVE CONTROL: placing an item resets both confirmations and repaints both windows")
+        void placingResetsAndRepaintsBoth() {
+            listener.onInventoryClick(click(TradeGUI.YOUR_SLOTS[0], new ItemStack(Material.DIAMOND)));
+
+            assertThat(session.isConfirmed(uuid2)).isFalse();
+            verify(gui).update();
+            verify(otherGui).update();
         }
     }
 
@@ -1024,6 +1308,140 @@ class TradeListenerTest {
             verify(tradeService, never()).cancelTrade(any(Player.class));
         }
 
+        /**
+         * Every {@link InventoryCloseEvent.Reason} the server -- not this module -- can pick for
+         * closing the confirmation page while the player can no longer see it: they died, disconnected,
+         * their chunk unloaded, the server otherwise decided they may no longer use the inventory, an
+         * unrecognised reason, or (on a server old enough to still send it; deprecated since Paper
+         * 1.21.10 and not fired on this module's target server) a teleport. {@code PLAYER} is excluded:
+         * it is the page's own Cancel answer, covered by {@code dontCancelOnConfirmPageClose} and the
+         * button tests. {@code PLUGIN} and {@code OPEN_NEW} are excluded: they are this module's own
+         * transitions, covered by {@code moduleInitiatedCloseDoesNotCancelTheTrade} below.
+         */
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = InventoryCloseEvent.Reason.class, names = {"DEATH", "DISCONNECT", "TELEPORT", "UNLOADED", "CANT_USE", "UNKNOWN"})
+        @DisplayName("Closing the confirmation page for a reason the player caused, not this module, cancels the trade instead of leaving it running with no window")
+        void terminalReasonClosingConfirmPageCancelsTheTrade(InventoryCloseEvent.Reason reason) {
+            TradeConfirmPage confirmPage = mock(TradeConfirmPage.class);
+            when(confirmPage.isViewer(player1)).thenReturn(true);
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+
+            InventoryCloseEvent event = mock(InventoryCloseEvent.class);
+            when(event.getInventory()).thenReturn(mock(Inventory.class));
+            when(event.getInventory().getHolder()).thenReturn(confirmPage);
+            when(event.getPlayer()).thenReturn(player1);
+            when(event.getReason()).thenReturn(reason);
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+
+            listener.onInventoryClose(event);
+
+            // The page itself never re-answers Cancel (there is nothing to show back a player who can
+            // no longer see the page).
+            verify(confirmPage).dismiss();
+            verify(confirmPage, never()).handleClose();
+            org.mockito.ArgumentCaptor<Runnable> cancel = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTaskLater(any(), cancel.capture(), eq(1L));
+            cancel.getValue().run();
+
+            verify(tradeService).cancelTrade(player1);
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = InventoryCloseEvent.Reason.class, names = {"DEATH", "DISCONNECT", "TELEPORT", "UNLOADED", "CANT_USE", "UNKNOWN"})
+        @DisplayName("A terminal-reason close task from a since-replaced session does not cancel the newer trade")
+        void staleTerminalCloseTaskDoesNotCancelTheNewerTrade(InventoryCloseEvent.Reason reason) {
+            TradeConfirmPage confirmPage = mock(TradeConfirmPage.class);
+            when(confirmPage.isViewer(player1)).thenReturn(true);
+            TradeSession oldSession = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(oldSession);
+
+            InventoryCloseEvent event = mock(InventoryCloseEvent.class);
+            when(event.getInventory()).thenReturn(mock(Inventory.class));
+            when(event.getInventory().getHolder()).thenReturn(confirmPage);
+            when(event.getPlayer()).thenReturn(player1);
+            when(event.getReason()).thenReturn(reason);
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+
+            listener.onInventoryClose(event);
+            org.mockito.ArgumentCaptor<Runnable> cancel = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTaskLater(any(), cancel.capture(), eq(1L));
+            TradeSession newerSession = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(newerSession);
+
+            cancel.getValue().run();
+
+            verify(tradeService, never()).cancelTrade(any(Player.class));
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = InventoryCloseEvent.Reason.class, names = {"PLUGIN", "OPEN_NEW"})
+        @DisplayName("A close this module (or a reload) already marked the page for never schedules a cancellation on top of whatever caused it")
+        void moduleInitiatedCloseDoesNotCancelTheTrade(InventoryCloseEvent.Reason reason) {
+            TradeConfirmPage confirmPage = mock(TradeConfirmPage.class);
+            when(confirmPage.isViewer(player1)).thenReturn(true);
+            // isAnswered() true is exactly what marks this PLUGIN/OPEN_NEW close as this module's own:
+            // a button click, TradeService#cancelTrade/#completeTrade, or a reload redraw always calls
+            // TradeConfirmPage#dismiss() before causing the close (UltiKits/UltiTrade#47 review).
+            when(confirmPage.isAnswered()).thenReturn(true);
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+
+            InventoryCloseEvent event = mock(InventoryCloseEvent.class);
+            when(event.getInventory()).thenReturn(mock(Inventory.class));
+            when(event.getInventory().getHolder()).thenReturn(confirmPage);
+            when(event.getPlayer()).thenReturn(player1);
+            when(event.getReason()).thenReturn(reason);
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+
+            listener.onInventoryClose(event);
+
+            verify(confirmPage).dismiss();
+            verify(confirmPage, never()).handleClose();
+            verify(scheduler, never()).runTaskLater(any(), any(Runnable.class), anyLong());
+            verify(tradeService, never()).cancelTrade(any(Player.class));
+        }
+
+        /**
+         * The narrowing this review round added: Paper reports the identical {@code PLUGIN}/
+         * {@code OPEN_NEW} reason whether this module's own {@code closeInventory()}/
+         * {@code openInventory()} call caused the close or an unrelated plugin did (closing the page
+         * itself, or opening its own window over it). An unmarked close -- {@code isAnswered()} still
+         * false, meaning none of this module's own paths ran first -- is therefore terminal the same as
+         * DEATH or DISCONNECT, not silently dismissed (UltiKits/UltiTrade#47 review).
+         */
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(value = InventoryCloseEvent.Reason.class, names = {"PLUGIN", "OPEN_NEW"})
+        @DisplayName("A PLUGIN/OPEN_NEW close this module did not already mark is terminal, the same as an unrecognised reason")
+        void unmarkedPluginOrOpenNewCloseCancelsTheTrade(InventoryCloseEvent.Reason reason) {
+            TradeConfirmPage confirmPage = mock(TradeConfirmPage.class);
+            when(confirmPage.isViewer(player1)).thenReturn(true);
+            when(confirmPage.isAnswered()).thenReturn(false);
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+
+            InventoryCloseEvent event = mock(InventoryCloseEvent.class);
+            when(event.getInventory()).thenReturn(mock(Inventory.class));
+            when(event.getInventory().getHolder()).thenReturn(confirmPage);
+            when(event.getPlayer()).thenReturn(player1);
+            when(event.getReason()).thenReturn(reason);
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+
+            listener.onInventoryClose(event);
+
+            verify(confirmPage).dismiss();
+            verify(confirmPage, never()).handleClose();
+            org.mockito.ArgumentCaptor<Runnable> cancel = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTaskLater(any(), cancel.capture(), eq(1L));
+            cancel.getValue().run();
+
+            verify(tradeService).cancelTrade(player1);
+        }
+
         @Test
         @DisplayName("Should not cancel if not a TradeGUI holder")
         void notTradeGUIHolder() {
@@ -1039,15 +1457,13 @@ class TradeListenerTest {
         @Test
         @DisplayName("Should not cancel trade when waiting for input")
         void dontCancelWhenWaitingForInput() throws Exception {
-            Map<UUID, ?> waitingForInput = UltiTradeTestHelper.getField(listener, "waitingForInput");
-            Class<?> inputTypeClass = Class.forName("com.ultikits.plugins.trade.listener.TradeListener$InputType");
-            Object moneyType = inputTypeClass.getEnumConstants()[0];
-            @SuppressWarnings("unchecked")
-            Map<UUID, Object> typedMap = (Map<UUID, Object>) waitingForInput;
-            typedMap.put(uuid1, moneyType);
+            Map<UUID, TradeListener.PendingPrompt> waitingForInput = UltiTradeTestHelper.getField(listener, "waitingForInput");
+            TradeSession session = new TradeSession(player1, player2);
+            // The prompt belongs to the trade whose window closes: only such a prompt suppresses the
+            // close's cancellation.
+            waitingForInput.put(uuid1, new TradeListener.PendingPrompt(TradeListener.InputType.MONEY, session));
 
             TradeGUI gui = mock(TradeGUI.class);
-            TradeSession session = new TradeSession(player1, player2);
             when(gui.getSession()).thenReturn(session);
             when(tradeService.getSession(uuid1)).thenReturn(session);
 
@@ -1098,6 +1514,55 @@ class TradeListenerTest {
 
             verify(tradeService, never()).cancelTrade(any(Player.class));
         }
+
+        /**
+         * Reproduces the exact ordering the P2 review described: the close-guard's deferred cancel
+         * check is registered (as it is the instant the money/experience prompt is opened, before the
+         * prompt itself is registered a moment later), then the player answers -- claimed immediately,
+         * applied only afterward on the server thread -- and only then does the deferred check run.
+         */
+        @Test
+        @DisplayName("An answer claimed but not yet applied still counts as answering for the close guard (UltiKits/UltiTrade#47 review)")
+        void claimedButNotYetAppliedAnswerStillCountsAsAnswering() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            TradeGUI gui = mock(TradeGUI.class);
+            when(gui.getSession()).thenReturn(session);
+
+            InventoryCloseEvent close = mock(InventoryCloseEvent.class);
+            Inventory top = mock(Inventory.class);
+            when(top.getHolder()).thenReturn(gui);
+            when(close.getInventory()).thenReturn(top);
+            when(close.getPlayer()).thenReturn(player1);
+
+            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
+            clearInvocations(scheduler);
+
+            // The window closes -- as it does the instant the prompt is opened, before the prompt
+            // itself is registered -- so isAnsweringPromptOf is false here and the deferred cancel
+            // check is scheduled.
+            listener.onInventoryClose(close);
+            org.mockito.ArgumentCaptor<Runnable> deferredCancelCheck =
+                    org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(scheduler).runTaskLater(any(), deferredCancelCheck.capture(), eq(1L));
+
+            // The prompt is registered, as production code does immediately after closeInventory().
+            Map<UUID, TradeListener.PendingPrompt> waitingForInput =
+                    UltiTradeTestHelper.getField(listener, "waitingForInput");
+            waitingForInput.put(uuid1, new TradeListener.PendingPrompt(TradeListener.InputType.MONEY, session));
+
+            // The player answers, asynchronously: onPlayerChat claims the prompt (removing it) and
+            // defers applying it to the server thread -- the deferred cancel check above has not run
+            // yet, so this is exactly the gap it has to survive.
+            AsyncPlayerChatEvent chat = new AsyncPlayerChatEvent(true, player1, "100", new HashSet<>());
+            listener.onPlayerChat(chat);
+            assertThat(waitingForInput).as("the prompt is claimed").doesNotContainKey(uuid1);
+
+            // The close-guard's deferred cancel check, registered before the answer arrived, now runs.
+            deferredCancelCheck.getValue().run();
+
+            verify(tradeService, never()).cancelTrade(any(Player.class));
+        }
     }
 
     @Nested
@@ -1127,6 +1592,32 @@ class TradeListenerTest {
             verify(player1).sendMessage(contains("\u53D6\u6D88\u8F93\u5165")); // "取消输入"
         }
 
+        /**
+         * UltiKits/UltiTrade#35: the window reopened after a {@code cancel} reply shows the staked
+         * items, not an empty trade.
+         */
+        @Test
+        @DisplayName("The window reopened after a cancel reply shows the stakes (UltiKits/UltiTrade#35)")
+        void cancelReplyReopensAWindowShowingTheStakes() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            ItemStack mine = new ItemStack(org.bukkit.Material.DIAMOND, 3);
+            session.setItem(uuid1, 0, mine);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            when(tradeService.isTrading(uuid1)).thenReturn(true);
+            when(tradeService.getConfig()).thenReturn(config);
+            addToWaitingForInput(uuid1, 0); // MONEY
+            org.bukkit.inventory.Inventory inventory = org.bukkit.Bukkit.createInventory(null, 54, "x");
+            clearInvocations(inventory);
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, "cancel", new HashSet<>()));
+            org.mockito.ArgumentCaptor<Runnable> reopen = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            verify(org.bukkit.Bukkit.getServer().getScheduler()).runTask(any(), reopen.capture());
+            reopen.getValue().run();
+
+            verify(player1).openInventory(inventory);
+            verify(inventory).setItem(TradeGUI.YOUR_SLOTS[0], mine);
+        }
+
         @Test
         @DisplayName("Should handle negative value input")
         void handleNegativeValue() throws Exception {
@@ -1138,6 +1629,76 @@ class TradeListenerTest {
 
             assertThat(event.isCancelled()).isTrue();
             verify(player1).sendMessage(contains("\u4E0D\u80FD\u4E3A\u8D1F\u6570")); // "不能为负数"
+        }
+
+        /**
+         * UltiKits/UltiTrade#29: {@code NaN} passed both the negative and the balance check and was
+         * stored as the offer, which then skipped the money transfer while the items still moved.
+         * Non-finite values are refused like any other invalid amount, at both prompts.
+         */
+        @org.junit.jupiter.params.ParameterizedTest(name = "{0} at the {1} prompt")
+        @org.junit.jupiter.params.provider.CsvSource({"NaN,0", "Infinity,0", "-Infinity,0", "NaN,1", "Infinity,1"})
+        @DisplayName("A non-finite amount is refused as invalid and leaves the offer unchanged (UltiKits/UltiTrade#29)")
+        void nonFiniteAmountIsRefused(String typed, int typeOrdinal) throws Exception {
+            addToWaitingForInput(uuid1, typeOrdinal);
+            TradeSession session = new TradeSession(player1, player2);
+            lenient().when(tradeService.getSession(uuid1)).thenReturn(session);
+            net.milkbowl.vault.economy.Economy economy = UltiTradeTestHelper.createMockEconomy();
+            lenient().when(economy.getBalance(any(Player.class))).thenReturn(Double.POSITIVE_INFINITY);
+            lenient().when(tradeService.getEconomy()).thenReturn(economy);
+            lenient().when(tradeService.getTotalExperience(player1)).thenReturn(Integer.MAX_VALUE);
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, typed, new HashSet<>()));
+
+            verify(player1).sendMessage(contains("\u65E0\u6548\u7684\u6570\u989D")); // "无效的数额"
+            assertThat(session.getPlayerMoney(uuid1)).isEqualTo(0.0);
+            assertThat(session.getPlayerExp(uuid1)).isEqualTo(0);
+        }
+
+        /**
+         * UltiKits/UltiTrade#28: with money or experience trading unavailable the prompt still accepts
+         * {@code 0}, so a player can withdraw an offer they made while it was available.
+         */
+        @Test
+        @DisplayName("With money trading unavailable the money prompt still accepts 0 and withdraws the offer (UltiKits/UltiTrade#28)")
+        void zeroWithdrawsAMoneyOfferWhileMoneyIsUnavailable() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            session.setMoney(uuid1, 50.0);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            lenient().when(tradeService.getEconomy()).thenReturn(null);
+            addToWaitingForInput(uuid1, 0); // MONEY
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, "0", new HashSet<>()));
+
+            assertThat(session.getPlayerMoney(uuid1)).isEqualTo(0.0);
+        }
+
+        @Test
+        @DisplayName("With experience trading off the experience prompt still accepts 0 and withdraws the offer (UltiKits/UltiTrade#28)")
+        void zeroWithdrawsAnExperienceOfferWhileExperienceIsOff() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            session.setExp(uuid1, 40);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            when(config.isEnableExpTrade()).thenReturn(false);
+            addToWaitingForInput(uuid1, 1); // EXPERIENCE
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, "0", new HashSet<>()));
+
+            assertThat(session.getPlayerExp(uuid1)).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("POSITIVE CONTROL: with money trading unavailable a non-zero amount is still refused")
+        void nonZeroIsStillRefusedWhileMoneyIsUnavailable() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            session.setMoney(uuid1, 50.0);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            lenient().when(tradeService.getEconomy()).thenReturn(null);
+            addToWaitingForInput(uuid1, 0); // MONEY
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, "10", new HashSet<>()));
+
+            assertThat(session.getPlayerMoney(uuid1)).isEqualTo(50.0);
         }
 
         @Test
@@ -1157,10 +1718,10 @@ class TradeListenerTest {
         @Test
         @DisplayName("Should handle valid money input")
         void handleValidMoneyInput() throws Exception {
-            addToWaitingForInput(uuid1, 0); // MONEY
 
             TradeSession session = new TradeSession(player1, player2);
             when(tradeService.getSession(uuid1)).thenReturn(session);
+            addToWaitingForInput(uuid1, 0); // MONEY
             when(tradeService.hasEconomy()).thenReturn(true);
             net.milkbowl.vault.economy.Economy mockEconomy = UltiTradeTestHelper.createMockEconomy();
             when(tradeService.getEconomy()).thenReturn(mockEconomy);
@@ -1177,10 +1738,10 @@ class TradeListenerTest {
         @Test
         @DisplayName("Should handle valid experience input")
         void handleValidExpInput() throws Exception {
-            addToWaitingForInput(uuid1, 1); // EXPERIENCE
 
             TradeSession session = new TradeSession(player1, player2);
             when(tradeService.getSession(uuid1)).thenReturn(session);
+            addToWaitingForInput(uuid1, 1); // EXPERIENCE
             when(tradeService.getTotalExperience(player1)).thenReturn(1000);
 
             AsyncPlayerChatEvent event = new AsyncPlayerChatEvent(false, player1, "500", new HashSet<>());
@@ -1195,10 +1756,10 @@ class TradeListenerTest {
         @Test
         @DisplayName("Should reject money input exceeding balance")
         void rejectInsufficientBalance() throws Exception {
-            addToWaitingForInput(uuid1, 0); // MONEY
 
             TradeSession session = new TradeSession(player1, player2);
             when(tradeService.getSession(uuid1)).thenReturn(session);
+            addToWaitingForInput(uuid1, 0); // MONEY
             when(tradeService.hasEconomy()).thenReturn(true);
             net.milkbowl.vault.economy.Economy mockEconomy = mock(net.milkbowl.vault.economy.Economy.class);
             when(mockEconomy.getBalance(player1)).thenReturn(100.0);
@@ -1215,10 +1776,10 @@ class TradeListenerTest {
         @Test
         @DisplayName("a reload that drops the provider while the money prompt is answered does not throw, keeps the amount and reopens the GUI (UltiKits/UltiTrade#26)")
         void moneyInputAfterProviderDroppedMidRead() throws Exception {
-            addToWaitingForInput(uuid1, 0); // MONEY
 
             TradeSession session = new TradeSession(player1, player2);
             when(tradeService.getSession(uuid1)).thenReturn(session);
+            addToWaitingForInput(uuid1, 0); // MONEY
             when(tradeService.isTrading(uuid1)).thenReturn(true);
             // The race: the availability check still sees the provider, the second read does not.
             when(tradeService.hasEconomy()).thenReturn(true);
@@ -1237,10 +1798,10 @@ class TradeListenerTest {
         @Test
         @DisplayName("provider still held but enable-money-trade already false in memory: the money amount is refused (UltiKits/UltiTrade#26)")
         void moneyInputRefusedWhenMoneyTradeOffButProviderHeld() throws Exception {
-            addToWaitingForInput(uuid1, 0); // MONEY
 
             TradeSession session = new TradeSession(player1, player2);
             when(tradeService.getSession(uuid1)).thenReturn(session);
+            addToWaitingForInput(uuid1, 0); // MONEY
             net.milkbowl.vault.economy.Economy heldEconomy = UltiTradeTestHelper.createMockEconomy();
             when(tradeService.getEconomy()).thenReturn(heldEconomy);
             when(config.isEnableMoneyTrade()).thenReturn(false);
@@ -1256,10 +1817,10 @@ class TradeListenerTest {
         @Test
         @DisplayName("experience prompt answered after a reload turned enable-exp-trade off: the amount is refused and the GUI reopens (UltiKits/UltiTrade#26)")
         void expInputRefusedWhenExpTradeOff() throws Exception {
-            addToWaitingForInput(uuid1, 1); // EXPERIENCE
 
             TradeSession session = new TradeSession(player1, player2);
             when(tradeService.getSession(uuid1)).thenReturn(session);
+            addToWaitingForInput(uuid1, 1); // EXPERIENCE
             when(tradeService.getTotalExperience(player1)).thenReturn(1000);
             when(config.isEnableExpTrade()).thenReturn(false);
 
@@ -1276,10 +1837,10 @@ class TradeListenerTest {
         @Test
         @DisplayName("Should reject exp input exceeding available exp")
         void rejectInsufficientExp() throws Exception {
-            addToWaitingForInput(uuid1, 1); // EXPERIENCE
 
             TradeSession session = new TradeSession(player1, player2);
             when(tradeService.getSession(uuid1)).thenReturn(session);
+            addToWaitingForInput(uuid1, 1); // EXPERIENCE
             when(tradeService.getTotalExperience(player1)).thenReturn(100);
 
             AsyncPlayerChatEvent event = new AsyncPlayerChatEvent(false, player1, "500", new HashSet<>());
@@ -1293,9 +1854,9 @@ class TradeListenerTest {
         @Test
         @DisplayName("Should handle trade ended during input")
         void tradeEndedDuringInput() throws Exception {
-            addToWaitingForInput(uuid1, 0); // MONEY
 
             when(tradeService.getSession(uuid1)).thenReturn(null);
+            addToWaitingForInput(uuid1, 0); // MONEY
 
             AsyncPlayerChatEvent event = new AsyncPlayerChatEvent(false, player1, "500", new HashSet<>());
 
@@ -1308,13 +1869,14 @@ class TradeListenerTest {
         /**
          * Helper to add a player to the waiting for input map.
          */
+        /**
+         * Opens a prompt for {@code uuid} in the trade the service currently reports for them, as the
+         * money and experience slot clicks do; call it after stubbing {@code getSession}.
+         */
         private void addToWaitingForInput(UUID uuid, int typeOrdinal) throws Exception {
-            Map<UUID, ?> waitingForInput = UltiTradeTestHelper.getField(listener, "waitingForInput");
-            Class<?> inputTypeClass = Class.forName("com.ultikits.plugins.trade.listener.TradeListener$InputType");
-            Object inputType = inputTypeClass.getEnumConstants()[typeOrdinal];
-            @SuppressWarnings("unchecked")
-            Map<UUID, Object> typedMap = (Map<UUID, Object>) waitingForInput;
-            typedMap.put(uuid, inputType);
+            Map<UUID, TradeListener.PendingPrompt> waitingForInput = UltiTradeTestHelper.getField(listener, "waitingForInput");
+            waitingForInput.put(uuid, new TradeListener.PendingPrompt(
+                    TradeListener.InputType.values()[typeOrdinal], tradeService.getSession(uuid)));
         }
     }
 

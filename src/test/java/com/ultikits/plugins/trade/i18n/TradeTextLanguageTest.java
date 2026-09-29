@@ -8,7 +8,7 @@ import com.ultikits.plugins.trade.entity.TradeSession;
 import com.ultikits.plugins.trade.gui.TradeConfirmPage;
 import com.ultikits.plugins.trade.gui.TradeGUI;
 import com.ultikits.plugins.trade.listener.TradeListener;
-import com.ultikits.plugins.trade.placeholder.TradePlaceholderExpansion;
+import com.ultikits.plugins.placeholderapi.trade.TradePlaceholderExpansion;
 import com.ultikits.plugins.trade.entity.PlayerTradeSettings;
 import com.ultikits.plugins.trade.service.TradeLogService;
 import com.ultikits.plugins.trade.service.TradeService;
@@ -407,7 +407,12 @@ class TradeTextLanguageTest {
             field.setAccessible(true);
             Class<?> inputType = Class.forName(TradeListener.class.getName() + "$InputType");
             Object money = Enum.valueOf((Class) inputType, "MONEY");
-            ((Map<UUID, Object>) field.get(listener)).put(uuid, money);
+            // A prompt records the trade it was opened in; this player has none.
+            Class<?> promptType = Class.forName(TradeListener.class.getName() + "$PendingPrompt");
+            java.lang.reflect.Constructor<?> constructor = promptType.getDeclaredConstructor(inputType,
+                    com.ultikits.plugins.trade.entity.TradeSession.class);
+            constructor.setAccessible(true); // NOPMD - the listener keeps its prompt type package-private
+            ((Map<UUID, Object>) field.get(listener)).put(uuid, constructor.newInstance(money, null));
         }
     }
 

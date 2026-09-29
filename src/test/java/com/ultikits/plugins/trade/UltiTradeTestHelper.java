@@ -14,6 +14,8 @@ import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.ItemFactory;
 import org.bukkit.inventory.PlayerInventory;
@@ -240,6 +242,15 @@ public final class UltiTradeTestHelper {
         // Mock Player.Spigot for sendMessage(TextComponent)
         Player.Spigot spigot = mock(Player.Spigot.class);
         lenient().when(player.spigot()).thenReturn(spigot);
+
+        // The realistic default: an ordinary, unblocked openInventory() call succeeds.
+        // HumanEntity#openInventory is @Nullable -- returning null (Mockito's own default for an
+        // unstubbed non-primitive method) simulates another plugin refusing the InventoryOpenEvent,
+        // which TradeService#openOrCancel (UltiKits/UltiTrade#47 review) now reacts to by cancelling
+        // the trade. A test that specifically wants to exercise a refused open should override this
+        // with a narrower stub, as LargeTradeConfirmationFlowTest#refusedConfirmPageOpenFallsBackToTheTradeWindow
+        // does.
+        lenient().when(player.openInventory(any(Inventory.class))).thenReturn(mock(InventoryView.class));
 
         return player;
     }

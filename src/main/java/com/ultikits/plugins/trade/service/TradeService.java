@@ -6,6 +6,7 @@ import com.ultikits.plugins.trade.entity.TradeRequest;
 import com.ultikits.plugins.trade.entity.TradeSession;
 import com.ultikits.plugins.trade.gui.TradeConfirmPage;
 import com.ultikits.plugins.trade.gui.TradeGUI;
+import com.ultikits.plugins.trade.util.Placeholders;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.Autowired;
 import com.ultikits.ultitools.annotations.Scheduled;
@@ -26,6 +27,7 @@ import org.bukkit.boss.BossBar;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
@@ -68,6 +70,9 @@ public class TradeService {
     private final Map<UUID, BossBar> requestBossBars = new ConcurrentHashMap<>();
     private final Map<UUID, BukkitTask> bossBarTasks = new ConcurrentHashMap<>();
     
+    /** Players between closing their trade window and seeing the confirmation page (UltiKits/UltiTrade#23). */
+    private final Set<UUID> confirmPageTransitions = ConcurrentHashMap.newKeySet();
+
     // Bukkit plugin instance for scheduler tasks
     private Plugin bukkitPlugin;
 
@@ -76,8 +81,14 @@ public class TradeService {
     private DataOperator<PendingStakeReturn> pendingReturns;
 
     // Economy integration. Volatile: a reload replaces it on the main thread while the async chat
-    // handler may read it; callers read it once per operation.
-    private volatile Economy economy;
+    // handler may read it; callers read it once per operation. Held as Object, not Economy: this
+    // module declares NEITHER a hard depend NOR a softdepend on Vault in plugin.yml, so nothing
+    // guarantees Vault is present when the framework autowires this @Service bean and scans it for
+    // @Scheduled methods (both walk Class#getDeclaredFields()/getDeclaredMethods(), which eagerly
+    // resolve every declared type) -- a field or method return type of Economy directly would throw
+    // NoClassDefFoundError and fail the whole module on a server without Vault, the same crash shape
+    // as UltiKits/UltiTrade#48's PlaceholderAPI field, just for a different soft dependency.
+    private volatile Object economy;
     
     /**
      * This module's language-file text for {@code key}, in the server's language. The GUIs, the
@@ -189,6 +200,50 @@ public class TradeService {
     }
 
     /**
+     * Withdraws, from every open trade, the money and experience offers a reload has made
+     * unavailable, and tells both players (UltiKits/UltiTrade#28).
+     * <p>
+     * Before, such an offer could not be withdrawn at all -- the money slot needs money trading, and
+     * the prompt refused every amount -- so the players could only cancel and start again; the trade
+     * was then cancelled at completion anyway. Withdrawing an offer takes nothing from anybody: money
+     * and experience move only when a trade completes. Setting an offer also resets both
+     * confirmations, and the windows are redrawn by {@link #refreshOpenTradeWindowsAfterReload()},
+     * which the reload runs after this. Called from {@link #resetConfirmationsAfterReload()}.
+     */
+    void withdrawUnavailableOffersAfterReload() {
+        boolean moneyAvailable = hasEconomy();
+        boolean expAvailable = config.isEnableExpTrade();
+        for (TradeSession session : activeSessions.values()) {
+            UUID first = session.getPlayer1();
+            UUID second = session.getPlayer2();
+            boolean moneyWithdrawn = false;
+            boolean expWithdrawn = false;
+            for (UUID participant : new UUID[] {first, second}) {
+                if (!moneyAvailable && session.getPlayerMoney(participant) != 0) {
+                    session.setMoney(participant, 0);
+                    moneyWithdrawn = true;
+                }
+                if (!expAvailable && session.getPlayerExp(participant) != 0) {
+                    session.setExp(participant, 0);
+                    expWithdrawn = true;
+                }
+            }
+            for (UUID participant : new UUID[] {first, second}) {
+                Player player = Bukkit.getPlayer(participant);
+                if (player == null) {
+                    continue;
+                }
+                if (moneyWithdrawn) {
+                    player.sendMessage(text(i18n("offer_withdrawn_money_unavailable")));
+                }
+                if (expWithdrawn) {
+                    player.sendMessage(text(i18n("offer_withdrawn_exp_unavailable")));
+                }
+            }
+        }
+    }
+
+    /**
      * Void every confirmation in open trades after a configuration reload (UltiKits/UltiTrade#26).
      * A reload can change the terms a confirmation was given for ({@code trade-tax},
      * {@code exp-tax-rate}, {@code confirm-threshold}, which offers are allowed), so a trade must never
@@ -196,6 +251,9 @@ public class TradeService {
      * confirm again.
      */
     public void resetConfirmationsAfterReload() {
+        // First withdraw the offers the reload made unavailable; that resets those trades'
+        // confirmations as well (UltiKits/UltiTrade#28).
+        withdrawUnavailableOffersAfterReload();
         for (TradeSession session : activeSessions.values()) {
             UUID first = session.getPlayer1();
             UUID second = session.getPlayer2();
@@ -254,10 +312,46 @@ public class TradeService {
             gui.update();
             retitle(view, gui.buildTitle());
         } else if (holder instanceof TradeConfirmPage) {
-            TradeGUI gui = new TradeGUI(this, session, player);
-            gui.update();
-            player.openInventory(gui.getInventory());
+            // A new window renders the session itself (UltiKits/UltiTrade#35). The page is retired first:
+            // this replacement is not the player closing it, so its Cancel ("back") must not run.
+            ((TradeConfirmPage) holder).dismiss();
+            try {
+                TradeGUI gui = new TradeGUI(this, session, player);
+                // The page is already dismissed and inert -- its buttons and Esc now do nothing -- so
+                // if opening the replacement is refused (openOrCancel's own null-return case) or
+                // building/opening it throws (caught below), the player would otherwise be left
+                // staring at a dead window while the trade keeps running with both stakes locked,
+                // recoverable only by someone noticing and cancelling it by hand. openOrCancel cancels
+                // the trade itself on a refusal; a thrown exception is cancelled here, then rethrown so
+                // the caller's own SEVERE log for this player's failed redraw still fires
+                // (UltiKits/UltiTrade#47 review).
+                openOrCancel(player, session, gui.getInventory());
+            } catch (RuntimeException | LinkageError e) {
+                cancelTrade(session, i18n("cancel_reason_reload_window_failed"));
+                throw e;
+            }
         }
+    }
+
+    /**
+     * Opens {@code inventory} for {@code player}, and cancels {@code session} instead of leaving the
+     * player with no trade UI at all if another plugin refuses the {@code InventoryOpenEvent} this
+     * fires. {@code HumanEntity#openInventory} is {@code @Nullable}: a refused open returns {@code
+     * null} rather than throwing, which is easy to miss because nothing crashes -- the trade would
+     * otherwise keep running with both stakes locked, recoverable only by someone noticing and
+     * cancelling it by hand (UltiKits/UltiTrade#47 review). Every place in this class and
+     * {@code TradeListener} that reopens or first opens a {@link TradeGUI} for a still-running session
+     * goes through this one method, rather than checking the return value itself.
+     *
+     * @return true if the inventory actually opened; false if another plugin refused it (in which case
+     *         {@code session} has already been cancelled)
+     */
+    public boolean openOrCancel(Player player, TradeSession session, Inventory inventory) {
+        if (player.openInventory(inventory) != null) {
+            return true;
+        }
+        cancelTrade(session, i18n("cancel_reason_window_refused"));
+        return false;
     }
 
     /**
@@ -274,17 +368,43 @@ public class TradeService {
     }
 
     /**
+     * Marks {@code player}'s large-trade confirmation page as answered, if one is currently open,
+     * before this service closes their inventory itself (in {@link #cancelTrade} or
+     * {@link #completeTrade}).
+     * <p>
+     * Paper reports the identical {@code InventoryCloseEvent.Reason.PLUGIN} whether this
+     * {@code closeInventory()} call causes the close or an unrelated plugin's does, so the listener
+     * cannot tell the two apart from the reason alone; {@link TradeConfirmPage#isAnswered()} lets it,
+     * because every close this service or the page itself causes marks the page first. Left unmarked,
+     * the listener would (correctly) treat an unexplained {@code PLUGIN} close as terminal and try to
+     * cancel a trade this call is already ending -- redundant here, since {@code isCurrentSession}-style
+     * checks make a second {@code cancelTrade} on an already-cleaned-up session a no-op, but worth
+     * avoiding rather than relying on (UltiKits/UltiTrade#47 review).
+     */
+    private static void dismissConfirmPageIfOpen(Player player) {
+        if (player == null) {
+            return;
+        }
+        InventoryView view = player.getOpenInventory();
+        if (view != null && view.getTopInventory() != null
+                && view.getTopInventory().getHolder() instanceof TradeConfirmPage) {
+            ((TradeConfirmPage) view.getTopInventory().getHolder()).dismiss();
+        }
+    }
+
+    /**
      * Check if economy is available.
      */
     public boolean hasEconomy() {
-        Economy current = economy;
+        Object current = economy;
         return current != null && config.isEnableMoneyTrade();
     }
     
     /**
-     * Get economy instance.
+     * Get economy instance. Returned as Object, not Economy -- see the field's own comment; the one
+     * production caller ({@code TradeListener}) casts it back after checking it is non-null.
      */
-    public Economy getEconomy() {
+    public Object getEconomy() {
         return economy;
     }
     
@@ -540,13 +660,21 @@ public class TradeService {
         playerSessionMap.put(player1.getUniqueId(), session.getSessionId());
         playerSessionMap.put(player2.getUniqueId(), session.getSessionId());
         
-        // Open trade GUI for both players
+        // Open trade GUI for both players. Neither has staked anything yet, so a refused open just
+        // cancels this freshly-created, still-empty session (UltiKits/UltiTrade#47 review) rather than
+        // leaving one player looking at a trade window for a trade the other side never really joined.
+        // player2's window is not even attempted once player1's is refused: cancelTrade already closes
+        // whichever of the two opened.
         TradeGUI gui1 = new TradeGUI(this, session, player1);
         TradeGUI gui2 = new TradeGUI(this, session, player2);
-        
-        player1.openInventory(gui1.getInventory());
-        player2.openInventory(gui2.getInventory());
-        
+
+        if (!openOrCancel(player1, session, gui1.getInventory())) {
+            return;
+        }
+        if (!openOrCancel(player2, session, gui2.getInventory())) {
+            return;
+        }
+
         // Play sound
         playSound(player1, Sound.BLOCK_CHEST_OPEN);
         playSound(player2, Sound.BLOCK_CHEST_OPEN);
@@ -590,36 +718,7 @@ public class TradeService {
         // If already confirmed once (in session), proceed
         if (!session.isConfirmed(player.getUniqueId()) && 
             (totalMoney >= threshold || totalExp >= threshold)) {
-            // Show confirmation page
-            player.closeInventory();
-            Bukkit.getScheduler().runTaskLater(bukkitPlugin, () -> {
-                TradeConfirmPage confirmPage = new TradeConfirmPage(
-                    this, session, player,
-                    () -> {
-                        // On confirm - mark as confirmed and reopen trade GUI
-                        session.setConfirmed(player.getUniqueId(), true);
-                        notifyConfirmation(session, player);
-                        
-                        // Reopen trade GUI
-                        Bukkit.getScheduler().runTaskLater(bukkitPlugin, () -> {
-                            if (isTrading(player.getUniqueId())) {
-                                TradeGUI gui = new TradeGUI(this, session, player);
-                                player.openInventory(gui.getInventory());
-                            }
-                        }, 1L);
-                    },
-                    () -> {
-                        // On cancel - reopen trade GUI
-                        Bukkit.getScheduler().runTaskLater(bukkitPlugin, () -> {
-                            if (isTrading(player.getUniqueId())) {
-                                TradeGUI gui = new TradeGUI(this, session, player);
-                                player.openInventory(gui.getInventory());
-                            }
-                        }, 1L);
-                    }
-                );
-                confirmPage.open();
-            }, 1L);
+            openConfirmPage(session, player);
             return;
         }
         
@@ -632,6 +731,116 @@ public class TradeService {
         }
     }
     
+    /**
+     * Whether {@code playerUuid} is between closing their trade window and seeing the large-trade
+     * confirmation page. Closing the trade window is what cancels a trade, so the listener skips that
+     * for this one close (UltiKits/UltiTrade#23).
+     *
+     * @param playerUuid the player
+     * @return true while the confirmation page is being opened for them
+     */
+    public boolean isOpeningConfirmPage(UUID playerUuid) {
+        return confirmPageTransitions.contains(playerUuid);
+    }
+
+    /**
+     * Replaces {@code player}'s trade window with the large-trade confirmation page.
+     * <p>
+     * The window has to be closed first, and closing a trade window cancels the trade; the close used
+     * to schedule that cancellation ahead of the page, so every large trade was cancelled the moment
+     * its player clicked Confirm (UltiKits/UltiTrade#23). The player is marked as opening the page
+     * before the close, and the mark is removed when the scheduled open runs -- whatever it then
+     * finds, so it never outlives this transition. The page opens only if the player is still in this
+     * same, running trade.
+     */
+    private void openConfirmPage(TradeSession session, Player player) {
+        UUID uuid = player.getUniqueId();
+        confirmPageTransitions.add(uuid);
+        player.closeInventory();
+        Bukkit.getScheduler().runTaskLater(bukkitPlugin, () -> {
+            confirmPageTransitions.remove(uuid);
+            if (!isCurrentSession(uuid, session)) {
+                return;
+            }
+            int shownRevision = session.getRevision();
+            boolean opened = new TradeConfirmPage(
+                this, session, player,
+                () -> confirmFromPage(session, player, shownRevision),
+                () -> reopenTradeWindow(session, player)
+            ).open();
+            if (!opened) {
+                // Another plugin refused the InventoryOpenEvent this fired: the trade window this page
+                // was meant to replace is already closed (above), so the player is otherwise left with
+                // no trade UI at all while the session keeps running with both stakes locked. Sent back
+                // to the trade window exactly as clicking the page's own Cancel would (UltiKits/UltiTrade
+                // #47 review) -- not cancelled outright, since the player did nothing wrong here and
+                // nothing about their offer changed.
+                reopenTradeWindow(session, player);
+            }
+        }, 1L);
+    }
+
+    /**
+     * The confirmation page's Confirm button: marks {@code player} confirmed on the offer the page
+     * showed. If either offer changed while the page was open, nothing is confirmed and the player is
+     * sent back to the trade window to look again, because the page's figures are no longer the trade.
+     */
+    private void confirmFromPage(TradeSession session, Player player, int shownRevision) {
+        UUID uuid = player.getUniqueId();
+        if (!isCurrentSession(uuid, session)) {
+            return;
+        }
+        if (session.getRevision() != shownRevision) {
+            player.sendMessage(text(i18n("confirm_page_offer_changed")));
+            reopenTradeWindow(session, player);
+            return;
+        }
+        session.setConfirmed(uuid, true);
+        notifyConfirmation(session, player);
+        // The same completion the below-threshold path performs: a large trade used to stop here with
+        // both players confirmed and never complete (UltiKits/UltiTrade#21).
+        if (session.isBothConfirmed()) {
+            completeTrade(session);
+            return;
+        }
+        reopenTradeWindow(session, player);
+        repaintOpenTradeWindows(session);
+    }
+
+    /** Opens a fresh trade window for {@code player} on the next tick, if they are still in this trade. */
+    private void reopenTradeWindow(TradeSession session, Player player) {
+        Bukkit.getScheduler().runTaskLater(bukkitPlugin, () -> {
+            if (isCurrentSession(player.getUniqueId(), session)) {
+                TradeGUI gui = new TradeGUI(this, session, player);
+                openOrCancel(player, session, gui.getInventory());
+            }
+        }, 1L);
+    }
+
+    /** Redraws every trade window of this trade that is currently open. */
+    private void repaintOpenTradeWindows(TradeSession session) {
+        for (UUID participant : new UUID[] {session.getPlayer1(), session.getPlayer2()}) {
+            Player participantPlayer = Bukkit.getPlayer(participant);
+            if (participantPlayer == null) {
+                continue;
+            }
+            InventoryView view = participantPlayer.getOpenInventory();
+            if (view != null && view.getTopInventory() != null
+                    && view.getTopInventory().getHolder() instanceof TradeGUI) {
+                ((TradeGUI) view.getTopInventory().getHolder()).update();
+            }
+        }
+    }
+
+    /**
+     * Whether {@code session} is still {@code playerUuid}'s running trade. A delayed task decides from
+     * this, never from whether the player is trading at all: by the time it runs the player may be in
+     * a different, newer trade.
+     */
+    private boolean isCurrentSession(UUID playerUuid, TradeSession session) {
+        return getSession(playerUuid) == session && session.getState() == TradeSession.TradeState.TRADING;
+    }
+
     /**
      * Notify other player of confirmation.
      */
@@ -673,7 +882,7 @@ public class TradeService {
         double money1 = session.getPlayerMoney(session.getPlayer1());
         double money2 = session.getPlayerMoney(session.getPlayer2());
         // Read the provider once: a reload may replace it at any time.
-        Economy currentEconomy = economy;
+        Economy currentEconomy = (Economy) economy;
         boolean moneyAvailable = currentEconomy != null && config.isEnableMoneyTrade();
 
         // Never move items or experience while silently dropping offered money (UltiKits/UltiTrade#26):
@@ -770,10 +979,15 @@ public class TradeService {
             }
         }
         
-        // Close inventories
+        // Close inventories. Dismissed first if a confirmation page is open: this closeInventory()
+        // call is what fires it, and unlike closing a TradeGUI, the confirmation page's own close
+        // handler cannot otherwise tell this deliberate close apart from an unrelated plugin closing
+        // it (UltiKits/UltiTrade#47 review).
+        dismissConfirmPageIfOpen(player1);
+        dismissConfirmPageIfOpen(player2);
         player1.closeInventory();
         player2.closeInventory();
-        
+
         session.setState(TradeSession.TradeState.COMPLETED);
         cleanupSession(session);
 
@@ -810,6 +1024,8 @@ public class TradeService {
                     giveOrDrop(player1, item);
                 }
             }
+            // Dismissed first if a confirmation page is open (see completeTrade's own comment on why).
+            dismissConfirmPageIfOpen(player1);
             player1.closeInventory();
             String msg = config.getTradeCancelledMessage();
             if (reason != null) {
@@ -829,6 +1045,8 @@ public class TradeService {
                     giveOrDrop(player2, item);
                 }
             }
+            // Dismissed first if a confirmation page is open (see completeTrade's own comment on why).
+            dismissConfirmPageIfOpen(player2);
             player2.closeInventory();
             String msg = config.getTradeCancelledMessage();
             if (reason != null) {
@@ -951,12 +1169,14 @@ public class TradeService {
             for (ItemStack item : stacks) {
                 where.getWorld().dropItemNaturally(where, item);
             }
-            logQuietly(() -> plugin.getLogger().error(e, i18n("log_pending_return_save_failed")
-                    .replace("{PLAYER}", ownerLabel)
-                    .replace("{COUNT}", String.valueOf(stacks.size()))
-                    .replace("{LOCATION}", where.getWorld().getName() + " "
-                            + where.getBlockX() + " " + where.getBlockY() + " " + where.getBlockZ())
-                    .replace("{ITEMS}", summary)));
+            // One pass: a world name is inserted exactly as it is, even when it contains a placeholder
+            // token (the class of UltiKits/UltiMail#37).
+            logQuietly(() -> plugin.getLogger().error(e, Placeholders.fill(i18n("log_pending_return_save_failed"),
+                    "{PLAYER}", ownerLabel,
+                    "{COUNT}", String.valueOf(stacks.size()),
+                    "{LOCATION}", where.getWorld().getName() + " "
+                            + where.getBlockX() + " " + where.getBlockY() + " " + where.getBlockZ(),
+                    "{ITEMS}", summary)));
         }
     }
 
@@ -1341,6 +1561,8 @@ public class TradeService {
         activeSessions.remove(session.getSessionId());
         playerSessionMap.remove(session.getPlayer1());
         playerSessionMap.remove(session.getPlayer2());
+        confirmPageTransitions.remove(session.getPlayer1());
+        confirmPageTransitions.remove(session.getPlayer2());
     }
     
     /**

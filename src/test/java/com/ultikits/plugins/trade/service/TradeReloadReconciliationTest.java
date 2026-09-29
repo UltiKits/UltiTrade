@@ -551,6 +551,53 @@ class TradeReloadReconciliationTest {
         }
 
         @Test
+        @DisplayName("a reload that fails to open the replacement window for an open confirmation page cancels that trade instead of leaving a dead, inert page (UltiKits/UltiTrade#47 review)")
+        void reloadCancelsTheTradeWhenReplacingTheConfirmationPageFails() throws Exception {
+            TradeConfirmPage page = mock(TradeConfirmPage.class);
+            when(offererTop.getHolder()).thenReturn(page);
+            openWindow(counterparty, counterpartyTop);
+
+            RuntimeException openFailure = new RuntimeException("boom");
+            doThrow(openFailure).when(offerer).openInventory(any(Inventory.class));
+
+            reload("enable-money-trade: true\ntrade-tax: 0.5\n");
+
+            // The page was dismissed before the failed replacement, as any redraw does; left alone,
+            // it would now be inert (its buttons and Esc all see answered == true) with the trade
+            // still running and both stakes locked. It is cancelled instead, and each stake -- the
+            // diamonds this test's offerer put up -- is returned rather than lost. dismiss() is
+            // idempotent and runs a second, harmless time from cancelTrade's own
+            // dismissConfirmPageIfOpen, since the page is still the offerer's open holder.
+            verify(page, atLeastOnce()).dismiss();
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+            verify(offererInventory).addItem(UltiTradeTestHelper.deliveredCopyOf(diamond));
+            verify(counterpartyInventory).addItem(UltiTradeTestHelper.deliveredCopyOf(emerald));
+            // The caller's own per-player SEVERE log for the failed redraw still fires -- the failure
+            // is rethrown after recovering the session, not swallowed.
+            verify(UltiTradeTestHelper.getMockLogger()).error(eq(openFailure), contains("Offerer"));
+        }
+
+        @Test
+        @DisplayName("a reload that has the replacement window's open refused (not thrown) also cancels rather than leaving a dead page (Codex, UltiKits/UltiTrade#47)")
+        void reloadCancelsTheTradeWhenTheReplacementOpenIsRefused() throws Exception {
+            TradeConfirmPage page = mock(TradeConfirmPage.class);
+            when(offererTop.getHolder()).thenReturn(page);
+            openWindow(counterparty, counterpartyTop);
+
+            // A refused InventoryOpenEvent does not throw -- openInventory(Inventory) is documented
+            // @Nullable and simply returns null. The prior fix only wrapped the call in try/catch,
+            // which a null return does not enter.
+            when(offerer.openInventory(any(Inventory.class))).thenReturn(null);
+
+            reload("enable-money-trade: true\ntrade-tax: 0.5\n");
+
+            verify(page, atLeastOnce()).dismiss();
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+            verify(offererInventory).addItem(UltiTradeTestHelper.deliveredCopyOf(diamond));
+            verify(counterpartyInventory).addItem(UltiTradeTestHelper.deliveredCopyOf(emerald));
+        }
+
+        @Test
         @DisplayName("redrawing the windows neither loses nor duplicates anything offered")
         void redrawKeepsOffersIntact() throws Exception {
             TradeGUI offererWindow = openWindow(offerer, offererTop);
@@ -668,48 +715,41 @@ class TradeReloadReconciliationTest {
             playerSessionMap.put(counterparty.getUniqueId(), session.getSessionId());
         }
 
+        /**
+         * UltiKits/UltiTrade#28: a reload that makes money trading unavailable withdraws the money
+         * already offered, tells both players, and leaves an item trade they can still complete. Before,
+         * the offer could not be withdrawn at all and the trade could only be cancelled.
+         */
         @Test
-        @DisplayName("A offers money, a reload turns money trading off, both confirm again: the trade is cancelled, nothing moves, no completed trade is logged")
-        void confirmAfterDisableCancelsTrade() throws Exception {
+        @DisplayName("A offers money, a reload turns money trading off: the money offer is withdrawn, both are told, and the item trade then completes (UltiKits/UltiTrade#28)")
+        void reloadThatDisablesMoneyWithdrawsTheMoneyOffer() throws Exception {
             reload("enable-money-trade: false\n");
-            // A reload voids earlier confirmations, so both players confirm again after it.
+
+            assertThat(session.getPlayerMoney(offerer.getUniqueId())).isEqualTo(0.0);
+            verify(offerer).sendMessage(contains(MONEY_OFFER_WITHDRAWN));
+            verify(counterparty).sendMessage(contains(MONEY_OFFER_WITHDRAWN));
+
             session.setConfirmed(offerer.getUniqueId(), true);
             tradeService.confirmTrade(counterparty);
 
-            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
-            // Balances unchanged: nothing was withdrawn or deposited.
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.COMPLETED);
             verify(vaultEconomy, never()).withdrawPlayer(any(Player.class), anyDouble());
             verify(vaultEconomy, never()).depositPlayer(any(Player.class), anyDouble());
-            // No item crossed sides; each side got back exactly its own offer.
-            verify(counterpartyInventory, never()).addItem(UltiTradeTestHelper.deliveredCopyOf(offererItem));
-            verify(offererInventory, never()).addItem(UltiTradeTestHelper.deliveredCopyOf(counterpartyItem));
-            verify(offererInventory, times(1)).addItem(UltiTradeTestHelper.deliveredCopyOf(offererItem));
-            verify(counterpartyInventory, times(1)).addItem(UltiTradeTestHelper.deliveredCopyOf(counterpartyItem));
-            // No completed-trade log entry and therefore no money statistic.
-            verify(sessionLog, never()).logCompletedTrade(any(), any(), any(), anyDouble(), anyInt());
-            // Both players are told why.
-            verify(offerer).sendMessage(contains(MONEY_UNAVAILABLE_REASON));
-            verify(counterparty).sendMessage(contains(MONEY_UNAVAILABLE_REASON));
-            assertThat(tradeService.isTrading(offerer.getUniqueId())).isFalse();
+            verify(counterpartyInventory).addItem(UltiTradeTestHelper.deliveredCopyOf(offererItem));
+            verify(offererInventory).addItem(UltiTradeTestHelper.deliveredCopyOf(counterpartyItem));
         }
 
         @Test
-        @DisplayName("the accepting player offered the money: a reload that turns money trading off still cancels the trade")
-        void counterpartyMoneyAfterDisableCancelsTrade() throws Exception {
+        @DisplayName("the accepting player offered the money: a reload that turns money trading off withdraws that offer too (UltiKits/UltiTrade#28)")
+        void counterpartyMoneyIsWithdrawnToo() throws Exception {
             session.setMoney(offerer.getUniqueId(), 0.0);
             session.setMoney(counterparty.getUniqueId(), 1000.0);
 
             reload("enable-money-trade: false\n");
-            session.setConfirmed(offerer.getUniqueId(), true);
-            tradeService.confirmTrade(counterparty);
 
-            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+            assertThat(session.getPlayerMoney(counterparty.getUniqueId())).isEqualTo(0.0);
+            verify(counterparty).sendMessage(contains(MONEY_OFFER_WITHDRAWN));
             verify(vaultEconomy, never()).withdrawPlayer(any(Player.class), anyDouble());
-            verify(vaultEconomy, never()).depositPlayer(any(Player.class), anyDouble());
-            verify(counterpartyInventory, never()).addItem(UltiTradeTestHelper.deliveredCopyOf(offererItem));
-            verify(offererInventory, never()).addItem(UltiTradeTestHelper.deliveredCopyOf(counterpartyItem));
-            verify(sessionLog, never()).logCompletedTrade(any(), any(), any(), anyDouble(), anyInt());
-            verify(counterparty).sendMessage(contains(MONEY_UNAVAILABLE_REASON));
         }
 
         @Test
@@ -744,22 +784,32 @@ class TradeReloadReconciliationTest {
         }
 
         @Test
-        @DisplayName("experience offered, then a reload turns enable-exp-trade off: the trade is cancelled instead of moving items without the experience")
-        void expOfferAfterExpTradeDisabledCancelsTrade() throws Exception {
+        @DisplayName("experience offered, then a reload turns enable-exp-trade off: the experience offer is withdrawn, both are told, and the item trade completes (UltiKits/UltiTrade#28)")
+        void reloadThatDisablesExperienceWithdrawsTheExperienceOffer() throws Exception {
             session.setMoney(offerer.getUniqueId(), 0.0);
             session.setExp(offerer.getUniqueId(), 100);
 
             reload("enable-money-trade: true\nenable-exp-trade: false\n");
+
+            assertThat(session.getPlayerExp(offerer.getUniqueId())).isEqualTo(0);
+            verify(offerer).sendMessage(contains(EXP_OFFER_WITHDRAWN));
+            verify(counterparty).sendMessage(contains(EXP_OFFER_WITHDRAWN));
+
             session.setConfirmed(offerer.getUniqueId(), true);
             tradeService.confirmTrade(counterparty);
 
-            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.COMPLETED);
             verify(counterparty, never()).giveExp(anyInt());
             verify(offerer, never()).setExp(anyFloat());
-            verify(counterpartyInventory, never()).addItem(UltiTradeTestHelper.deliveredCopyOf(offererItem));
-            verify(offererInventory, never()).addItem(UltiTradeTestHelper.deliveredCopyOf(counterpartyItem));
-            verify(sessionLog, never()).logCompletedTrade(any(), any(), any(), anyDouble(), anyInt());
-            verify(offerer).sendMessage(contains(EXP_UNAVAILABLE_REASON));
+        }
+
+        @Test
+        @DisplayName("POSITIVE CONTROL: a reload that keeps money trading on leaves the money offer alone")
+        void reloadThatKeepsMoneyLeavesTheOffer() throws Exception {
+            reload("enable-money-trade: true\n");
+
+            assertThat(session.getPlayerMoney(offerer.getUniqueId())).isEqualTo(1000.0);
+            verify(offerer, never()).sendMessage(contains(MONEY_OFFER_WITHDRAWN));
         }
 
         @Test
@@ -897,9 +947,11 @@ class TradeReloadReconciliationTest {
         }
     }
 
-    private static final String EXP_UNAVAILABLE_REASON = "\u7ECF\u9A8C\u4EA4\u6613\u5F53\u524D\u4E0D\u53EF\u7528"; // "经验交易当前不可用"
     private static final String RECONFIRM_AFTER_RELOAD = "\u8BF7\u91CD\u65B0\u786E\u8BA4"; // "请重新确认"
-    private static final String MONEY_UNAVAILABLE_REASON = "\u91D1\u5E01\u4EA4\u6613\u5F53\u524D\u4E0D\u53EF\u7528"; // "金币交易当前不可用"
+    private static final String MONEY_OFFER_WITHDRAWN = "\u91D1\u5E01\u4EA4\u6613\u5DF2\u4E0D\u53EF\u7528"; // "金币交易已不可用"
+
+    private static final String EXP_OFFER_WITHDRAWN = "\u7ECF\u9A8C\u4EA4\u6613\u5DF2\u4E0D\u53EF\u7528"; // "经验交易已不可用"
+
 
     /** Make the services manager return a registration for {@code provider}, built before the stub starts. */
     private static void stubProvider(Server server, Economy provider) {

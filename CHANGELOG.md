@@ -76,6 +76,128 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- An unrelated plugin refusing the large-trade confirmation page's own `InventoryOpenEvent` no longer
+  leaves the player with no trade UI at all while the trade keeps running with both stakes locked. The
+  trade window this page was meant to replace is already closed by the time it tries to open, and
+  `HumanEntity#openInventory` returns `null` for a refused open rather than throwing, so the failure
+  went unnoticed before. The player is now sent back to the trade window instead, exactly as clicking
+  the page's own Cancel would -- the trade is not cancelled outright, since nothing about the player's
+  offer changed (UltiKits/UltiTrade#47 review).
+- 现在有其他插件拒绝大额交易确认页面自身的 `InventoryOpenEvent` 时，不会再让玩家完全没有交易界面，同时交易仍在进行、
+  双方出价被一直占用。该页面原本要替换的交易窗口此时已经关闭，而 `HumanEntity#openInventory` 在打开被拒绝时会返回
+  `null` 而不是抛出异常，因此此前这一失败不会被察觉。现在会像点击该页面自身的取消按钮一样把玩家送回交易窗口——不会
+  直接取消交易，因为玩家的出价并未发生任何变化（UltiKits/UltiTrade#47 复查）。
+
+- A reload that fails to build or open the replacement trade window for an open large-trade
+  confirmation page now cancels that trade and returns both stakes, instead of leaving the page
+  dismissed and inert (its buttons and Esc now do nothing) while the trade keeps running with both
+  stakes locked, recoverable only by someone noticing and cancelling it by hand. The reload's own
+  per-player error log for the failed redraw is unchanged (UltiKits/UltiTrade#47 review).
+- 现在重载时若未能为已打开的大额交易确认页面构建或打开替换窗口，会取消该笔交易并返还双方出价，而不是让该页面
+  保持已失效状态（其按钮和 Esc 此时均不再产生任何效果），同时交易仍在进行、双方出价被一直占用，只能靠有人发现
+  后手动取消。重载原有的、按玩家记录的重绘失败错误日志保持不变（UltiKits/UltiTrade#47 复查）。
+
+- An unrelated plugin closing a player's large-trade confirmation page, or opening its own window over
+  it, no longer leaves the trade running with both stakes locked and no window until someone cancels
+  it by hand. Paper reports the identical `PLUGIN`/`OPEN_NEW` reason whether this module's own close
+  (a button click, completing or cancelling the trade, a reload redraw) caused it or an unrelated
+  plugin did, so those two could not be told apart by the reason alone; every one of this module's own
+  closes now marks the page first, and a `PLUGIN`/`OPEN_NEW` close that arrives unmarked is treated as
+  terminal, the same as death or disconnect already were (UltiKits/UltiTrade#47 review).
+- 现在其他插件关闭玩家的大额交易确认页面，或在其上打开自己的窗口时，不会再让交易悄悄保持进行、双方都没有窗口，
+  直到有人手动取消。此前无论是本模块自身的关闭（点击按钮、完成或取消交易、重载重绘）还是其他插件造成的关闭，
+  Paper 报告的都是同一个 `PLUGIN`/`OPEN_NEW` 原因，仅凭原因无法区分两者；现在本模块自身的每一次关闭都会先标记
+  该页面，一个未被标记就到达的 `PLUGIN`/`OPEN_NEW` 关闭会被当作终止性原因处理，与死亡、断线的处理方式一致
+  （UltiKits/UltiTrade#47 复查）。
+
+- A money or experience amount a player just typed can no longer be discarded by cancelling their
+  trade a tick later. Typing an answer claims it instantly (removed from the pending-prompt map) but
+  applies it only afterward, on the server thread; the close-guard's own deferred check -- scheduled
+  the instant the prompt itself closed the trade window, before the prompt was even registered -- could
+  run in that gap and, seeing no pending prompt, cancel the trade as though the player had never
+  answered. The claimed-but-not-yet-applied answer is now tracked separately so the close guard still
+  recognises it (UltiKits/UltiTrade#47 review).
+- 玩家刚输入的金额或经验数量，现在不会再因一个 tick 后交易被取消而丢失。输入答案会立即被认领（从待处理提示映射中移除），
+  但只会稍后在服务器线程上应用；而关闭守卫自身的延迟检查——在提示本身关闭交易窗口的那一刻就已排定，早于提示被登记之前——
+  可能恰好在这段间隙运行，看到没有待处理的提示，就会像玩家从未回答一样取消交易。现在会单独跟踪这个「已认领但尚未应用」
+  的答案，使关闭守卫仍能识别它（UltiKits/UltiTrade#47 复查）。
+
+- Two console lines name a file path or a world exactly as they are: the warning about a setting this
+  version no longer reads, and the error for staked items that could not be saved and were dropped. A path
+  or world name containing `{KEY}`, `{REASON}` or `{ITEMS}` used to be rewritten, because it was inserted
+  before those placeholders were filled. Every placeholder of the line is now filled in one pass (the same
+  fix as UltiKits/UltiMail#37).
+- 两条控制台日志现在按原样给出文件路径或世界名：已不再读取的配置项警告，以及无法保存而掉落的交易物品的错误。此前路径或世界名先于
+  `{KEY}`、`{REASON}`、`{ITEMS}` 占位符插入，含这些占位符时会被改写。现在同一行的所有占位符一次性替换（与 UltiKits/UltiMail#37 相同的修复）。
+
+- When `/ul reload UltiTrade` makes money trading unavailable (money trading turned off, or no economy
+  provider found), the money offered in every open trade is withdrawn and both players are told, so the
+  rest of the trade can still complete; experience offers are withdrawn the same way when experience trading
+  is turned off. While either is unavailable, its chat prompt accepts `0` to withdraw an offer. Before, such
+  an offer could not be withdrawn and the trade could only be cancelled (UltiKits/UltiTrade#28).
+- 当 `/ul reload UltiTrade` 使金币交易不可用（关闭金币交易或找不到经济提供者）时，所有进行中交易里出价的金币会被撤回并通知双方，交易的其余内容仍可完成；
+  关闭经验交易时，经验出价也同样撤回。不可用期间，对应的聊天提示接受 `0` 以撤回出价。此前这样的出价无法撤回，只能取消交易（UltiKits/UltiTrade#28）。
+
+- A money or experience prompt left over from a cancelled trade no longer affects a trade the player opens
+  afterwards: its 10-second timeout no longer reopens the old trade's window (which cancelled the new trade
+  and told both players so), no longer closes a prompt opened in the new trade, no longer stops closing the
+  new trade's window from cancelling it, and an amount typed for it is answered with `The trade has ended!`
+  instead of being applied to the new trade (UltiKits/UltiTrade#40).
+- 已取消交易遗留的金币或经验输入提示不再影响玩家之后开启的交易：其 10 秒超时不再重新打开旧交易的窗口（此前会导致新交易被取消并通知双方），
+  也不再关闭在新交易中打开的提示，也不再阻止关闭新交易窗口时取消新交易；为它输入的数额会提示「交易已结束」，不会被应用到新交易（UltiKits/UltiTrade#40）。
+
+- A trade whose money or experience meets `confirm-threshold` completes once both players have confirmed
+  through the confirmation page, exactly as a smaller trade does. Before, the page only recorded the
+  confirmation, so such a trade could never complete (UltiKits/UltiTrade#21).
+- 金币或经验达到 `confirm-threshold` 的交易，在双方都通过确认页面确认后即完成，与较小的交易一致。此前确认页面只记录确认，这样的交易永远无法完成（UltiKits/UltiTrade#21）。
+
+- Clicking Confirm on a trade whose money or experience meets `confirm-threshold` now opens the
+  confirmation page and leaves the trade running. Before, closing the trade window to open the page
+  cancelled the trade first, returning every item, and the page then opened on a trade that no longer
+  existed (UltiKits/UltiTrade#23). The page's Cancel button, or closing the page with Esc, returns to the
+  trade window; a page closed for the player (the trade cancelled or completed, a reload, another window
+  opened over it) is not treated as Cancel, and only the player the page was shown to can answer it. Its
+  Confirm button confirms only the offer the page showed — if either player changed an
+  offer while it was open, nothing is confirmed and the player is told to check the trade again. An amount
+  typed at the money or experience prompt is applied on the server thread, so it cannot land between
+  that check and the confirmation.
+- 当交易的金币或经验达到 `confirm-threshold` 时，点击确认现在会打开确认页面，交易继续进行。此前为打开该页面而关闭交易窗口时会先取消交易并退回全部物品，
+  页面随后打开的是已不存在的交易（UltiKits/UltiTrade#23）。确认页面的取消按钮或按 Esc 关闭页面会回到交易窗口；
+  因交易取消或完成、重载或其他窗口覆盖而被关闭的确认页不算作取消；只有该页面所属的玩家能作答。确认按钮只确认页面所显示的出价——
+  页面打开期间任一方改动了出价，则不会确认，并提示玩家重新检查交易。金币、经验输入提示中输入的数额在服务器主线程上生效，
+  不会插进这一检查与确认之间。
+
+- In the trade window, clicking one of your own empty slots with nothing in hand, or opening the money or
+  experience prompt, no longer clears both players' confirmations. Confirmations are cleared only when an
+  offer actually changes, and both windows are then redrawn; re-entering the amount already offered at
+  a prompt is not a change. Before, such a click cleared them without redrawing, so a player still looked
+  confirmed while the trade could not complete (UltiKits/UltiTrade#36).
+- 在交易窗口中，空手点击自己的空格子，或打开金币、经验输入提示，不再清除双方的确认。只有出价真正变化时才清除确认，并同时刷新双方窗口；
+  在输入提示中再次输入已出价的数额不算变化。此前这样的点击会清除确认却不刷新，玩家看起来仍已确认，交易却无法完成（UltiKits/UltiTrade#36）。
+
+- The money and experience chat prompts refuse `NaN` and `Infinity` with `Invalid amount!`. Before,
+  `NaN` was accepted as the money offer; the money transfer was then skipped while the items still moved,
+  and the other player saw `NaN` (UltiKits/UltiTrade#29).
+- 金币和经验的聊天输入提示会以「无效的数额」拒绝 `NaN` 和 `Infinity`。此前 `NaN` 会被接受为金币出价，完成交易时金币转账被跳过而物品照常交换，
+  对方看到的是 `NaN`（UltiKits/UltiTrade#29）。
+
+- On the large-trade confirmation page, a side offering four or more items shows three item previews
+  and the "N more items" count in a slot of its own; the count used to cover the third preview, so only
+  two items were visible (UltiKits/UltiTrade#22).
+- 大额交易确认页面上，一方放入四个及以上物品时，会显示三个物品预览，并在单独的格子中显示「还有 N 个物品」；
+  此前该提示覆盖了第三个预览，只能看到两个物品（UltiKits/UltiTrade#22）。
+
+- The large-trade confirmation page's item previews now carry the `---Trade item---` marker line in
+  their lore; it was built and then discarded (UltiKits/UltiTrade#43).
+- 大额交易确认页面中预览的物品现在在描述中带有「交易物品」标记行；此前该行被生成后又被丢弃（UltiKits/UltiTrade#43）。
+
+- A trade window always shows what both players have staked. Five of the seven ways a trade window
+  opens — after the money or experience prompt times out, after a `cancel` reply to the prompt, and on
+  the two large-trade confirmation paths — showed an empty trade while both stakes were still in it,
+  so a player could confirm a trade whose contents they could not see (UltiKits/UltiTrade#35).
+- 交易窗口始终显示双方已放入的内容。此前七种打开交易窗口的方式中有五种——金币或经验输入提示超时后、对提示回复 `cancel`
+  后，以及大额交易确认的两条路径——会显示空的交易，而双方的物品实际仍在交易中，玩家可能在看不到内容的情况下确认交易（UltiKits/UltiTrade#35）。
+
 - If a trade is cancelled while one participant cannot be found on the server, that participant's
   staked items are kept and handed back when they next join, instead of being destroyed. They are
   saved in a new table, `trade_pending_returns`; if they cannot be saved they are dropped at the
@@ -137,9 +259,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   experience amount while `enable-exp-trade` is off (UltiKits/UltiTrade#26).
 - `/ul reload UltiTrade` now redraws every open trade window from the reloaded configuration, so its
   title, money and experience availability and taxes match what the trade will charge. Every offer is
-  kept as it was. An open large-trade confirmation page is replaced with a trade window, although on
-  current builds that page does not stay open because of UltiKits/UltiTrade#23
-  (UltiKits/UltiTrade#27).
+  kept as it was. An open large-trade confirmation page is replaced with a trade window and the trade
+  keeps running; the player confirms again from that window (UltiKits/UltiTrade#27).
 - Players can no longer take the display item out of the money slot of the trade window while money
   trading is off, out of the experience slot while experience trading is off, or the glass pane out of
   an empty item slot, by clicking it. Every click in the trade window is now cancelled before its action
@@ -205,8 +326,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   经验，而交易完成时 `enable-exp-trade` 已关闭，该交易会被取消，而不是在不转移经验的情况下交换物品；
   `enable-exp-trade` 关闭时，聊天输入提示也会拒绝经验数额（UltiKits/UltiTrade#26）。
 - `/ul reload UltiTrade` 现在会按重载后的配置重绘所有已打开的交易界面，使其标题、金币与经验交易的可用状态和税率
-  与交易实际收取的一致；所有出价保持不变。已打开的大额交易确认页会被替换为交易界面，但在当前版本中该确认页因
-  UltiKits/UltiTrade#23 不会保持打开（UltiKits/UltiTrade#27）。
+  与交易实际收取的一致；所有出价保持不变。已打开的大额交易确认页会被替换为交易界面，交易继续进行，
+  玩家需在该界面重新确认（UltiKits/UltiTrade#27）。
 - 玩家不再能通过点击，在金币交易关闭时从交易界面的金币栏、在经验交易关闭时从经验栏取走展示物品，或从空物品栏
   取走玻璃板。交易界面中的每次点击现在都会先被取消，再执行对应操作（UltiKits/UltiTrade#25）。
 - `/upm uninstall UltiTrade` 现在会先执行本模块自身的清理（关闭交易服务、注销 PlaceholderAPI 扩展），
@@ -235,6 +356,75 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   玩家自身背包内进行的拖拽也因同样的原因（只是层级不同）被拒绝，使玩家在交易期间无法整理自己的背包。交易界面与确认
   预览界面现在只管辖各自窗口内的格位。以下三种操作从自身背包格发起时仍会被拒绝，因为它们并不局限于所点击的那一格，
   会伸进窗口内：Shift 点击、双击收集，以及服务器报告为未知的操作（UltiKits/UltiTrade#39）。
+- This module now loads on a server without PlaceholderAPI installed. The module main class carried
+  a field typed directly as `TradePlaceholderExpansion` (a PlaceholderAPI type), so the framework's
+  container threw `NoClassDefFoundError` while autowiring the module and the whole module failed to
+  load — trading, not just placeholders, was unavailable, present since the module's initial commit
+  (UltiKits/UltiTrade#48).
+- 本模块现在可以在没有安装 PlaceholderAPI 的服务器上加载。此前模块主类的一个字段直接以 `TradePlaceholderExpansion`
+  （一个 PlaceholderAPI 类型）声明，框架容器在自动装配本模块时会抛出 `NoClassDefFoundError`，导致整个模块加载失败——
+  不仅是变量功能，交易功能本身也一并不可用；此缺陷自本模块首个提交起就存在（UltiKits/UltiTrade#48）。
+- This module now loads on a server without Vault installed. `TradeService`'s economy field and
+  `getEconomy()`'s return type were typed directly as `net.milkbowl.vault.economy.Economy`, and this
+  module never declared Vault as a dependency (not even a soft one) in `plugin.yml`, so nothing
+  guaranteed Vault's absence was handled — the same crash shape as #48, for a different soft
+  dependency, found by a sweep for the same defect class (UltiKits/UltiTrade#49).
+- 本模块现在可以在没有安装 Vault 的服务器上加载。此前 `TradeService` 的经济字段与 `getEconomy()` 的返回值类型都直接
+  声明为 `net.milkbowl.vault.economy.Economy`，而本模块的 `plugin.yml` 从未把 Vault 声明为依赖（甚至连软依赖都没有），
+  因此没有任何机制保证缺少 Vault 时的行为——与 #48 崩溃形状相同，只是软依赖不同，由针对同一缺陷类的普查发现
+  （UltiKits/UltiTrade#49）。
+- Dying while viewing the large-trade confirmation page now cancels the trade, the same as closing
+  it any other way. Paper closes the page with `InventoryCloseEvent.Reason.DEATH`, which used to be
+  treated the same as the module's own close (reload, completion, cancellation) and silently left
+  the trade running with no window for either player, holding both stakes until someone ran the
+  cancel command by hand.
+- 现在在查看大额交易确认页面时死亡也会取消交易，与其他方式关闭该页面一致。此前 Paper 以 `InventoryCloseEvent.Reason.DEATH`
+  关闭该页面时，会被当作模块自身的关闭（重载、完成、取消）处理，交易会悄悄保持进行、双方都没有窗口，两方的出价也一直
+  被占用，直到有人手动运行取消命令。
+- Every other reason the server, not this module, can close the large-trade confirmation page for now
+  cancels the trade the same way `DEATH` already did: disconnecting, a teleport (on a server old enough
+  to still send it — deprecated since Paper 1.21.10, which no longer fires it for a normal teleport, but
+  this module's `plugin.yml` still declares `api-version: '1.19'`), the chunk unloading, the server
+  otherwise revoking access, or an unrecognised reason. Before this, only `DEATH` cancelled the trade;
+  every one of these left it running with both stakes locked and no window for either participant, until
+  someone ran the cancel command by hand. A close this module or a reload causes itself (`PLUGIN`,
+  `OPEN_NEW`) is unchanged — it never cancels the trade, since the code that caused it already owns the
+  session's next state.
+- 现在服务器（而非本模块）出于其他任何原因关闭大额交易确认页面时，都会像 `DEATH` 一样取消交易：断线、传送（仅限仍会
+  发送该原因的旧版本服务端——Paper 自 1.21.10 起已弃用该原因，普通传送不再触发关闭，但本模块 `plugin.yml` 仍声明
+  `api-version: '1.19'`）、所在区块被卸载、服务器出于其他原因收回了访问权限，或是一个未识别的原因。此前只有
+  `DEATH` 会取消交易；以上任何一种都会让交易悄悄保持进行、双方都没有窗口、两方出价被一直占用，直到有人手动运行
+  取消命令。本模块自身或重载引发的关闭（`PLUGIN`、`OPEN_NEW`）行为不变——它们从不取消交易，因为引发关闭的代码
+  本身已经掌管了会话的下一个状态。
+- Every other place this module opens a trade window now recovers the same way the large-trade
+  confirmation page already did: a refused `InventoryOpenEvent` returns `null` from
+  `HumanEntity#openInventory` rather than throwing, and none of the six other call sites checked for
+  it, so an unrelated plugin could leave a player with no window at all while their session kept
+  running and, in three of the six, before either side had staked anything, with no way back short
+  of a manual cancel. Starting a trade whose first player's own window is refused now cancels that
+  still-empty session immediately, without ever showing the second player a window for a trade the
+  first never really joined; a refused reopen after a timeout, after answering an amount prompt, or
+  after a session-move both-windows redraw all now fall back to cancelling that trade the same way
+  (UltiKits/UltiTrade#47 review).
+- 本模块中打开交易窗口的其余每一处，现在都采用大额交易确认页面已经使用的同一种恢复方式：`InventoryOpenEvent`
+  被拒绝时，`HumanEntity#openInventory` 返回的是 `null` 而不是抛出异常，此前其余六处调用均未检查这一点，导致其他
+  插件可能让玩家完全没有窗口，而其会话仍在继续运行——六处中有三处发生在双方都尚未压上任何出价时，且都只能靠手动
+  取消才能恢复。现在，若开始一笔交易时第一位玩家自己的窗口被拒绝，会立即取消这个仍为空的会话，不会再让第二位
+  玩家看到一个对方从未真正加入的交易窗口；超时后的重新打开、回答金额提示后的重新打开，以及会话转移后双方窗口的
+  重绘，若被拒绝也都会同样地取消该笔交易（UltiKits/UltiTrade#47 复查）。
+
+- `plugin.yml` now truthfully declares `softdepend: [ PlaceholderAPI, Vault ]` -- both are real, optional
+  integrations this module already handles the absence of at runtime (`UltiKits/UltiTrade#48`, `#49`),
+  but neither was ever declared. The framework is changing how it logs a module failing to load because
+  a plugin it declares as optional is missing (debug instead of SEVERE, maintainer decision of
+  2026-09-29); this module's PlaceholderAPI expansion would otherwise still trigger a misleadingly loud
+  SEVERE line under that change, for a dependency this module's own `plugin.yml` never admitted to
+  wanting in the first place.
+- `plugin.yml` 现在如实声明 `softdepend: [ PlaceholderAPI, Vault ]`——两者都是本模块已经在运行时妥善处理其缺失的真实、
+  可选集成（`UltiKits/UltiTrade#48`、`#49`），但此前都从未在文件中声明过。框架即将改变对「模块因其在 `plugin.yml`
+  中声明为可选依赖的插件缺失而加载失败」这一情形的日志方式（改为调试级而非 SEVERE，维护者 2026-09-29 的决定）；
+  若不声明，本模块的 PlaceholderAPI 扩展在该改动后仍会触发一条误导性的高调 SEVERE 日志——而这本是本模块自己的
+  `plugin.yml` 从未承认需要的依赖。
 
 ### Removed
 

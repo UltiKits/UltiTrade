@@ -280,6 +280,26 @@ class TradePendingReturnTest {
         }
     }
 
+    /**
+     * The placeholder class of UltiKits/UltiMail#37, swept into this module (maintainer decision to
+     * fix it as one class across the modules): the world name is inserted before {@code {ITEMS}}, so a
+     * world whose name contains that token had it replaced by the item summary, and the error named a
+     * place that does not exist.
+     */
+    @Test
+    @DisplayName("A world name containing a later placeholder's token is named exactly as it is (one-pass fill)")
+    void aWorldNameContainingAPlaceholderTokenIsNamedAsWritten() throws Exception {
+        store.failInsert = true;
+        server.addPlayer(away);
+        org.mockbukkit.mockbukkit.world.WorldMock odd = server.addSimpleWorld("farm{ITEMS}");
+        away.teleport(new org.bukkit.Location(odd, 10.5, 70, 10.5));
+        away.disconnect();
+
+        service.completeTrade(sessionWithStakes());
+
+        verify(logger).error(any(Throwable.class), argThat((String s) -> s.contains("farm{ITEMS} 10 70 10")));
+    }
+
     @Test
     @DisplayName("A saved stake whose log line then fails is not also dropped")
     void aFailingLogAfterTheSaveDoesNotDropTheStake() throws Exception {

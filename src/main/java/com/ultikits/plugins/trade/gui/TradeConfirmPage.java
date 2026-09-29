@@ -7,6 +7,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.enchantments.Enchantment;
+import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.Inventory;
@@ -33,6 +34,9 @@ public class TradeConfirmPage implements InventoryHolder {
     private final Inventory inventory;
     private final Runnable onConfirm;
     private final Runnable onCancel;
+
+    /** Set once the page has been answered by a button or by being closed, so it answers only once. */
+    private boolean answered;
     
     // GUI layout
     public static final int ROWS = 5;
@@ -46,6 +50,14 @@ public class TradeConfirmPage implements InventoryHolder {
     // Display positions
     public static final int YOUR_ITEMS_START = 10;
     public static final int THEIR_ITEMS_START = 14;
+    /**
+     * Where the "N more items" indicator goes for the viewer's side: the slot left of their three
+     * previews (the slot to their right is {@link #INFO_SLOT}). It used to overwrite the third
+     * preview, so a 4-item offer showed only two items (UltiKits/UltiTrade#22).
+     */
+    public static final int YOUR_MORE_ITEMS_SLOT = YOUR_ITEMS_START - 1;
+    /** Where the "N more items" indicator goes for the other side: the slot right of its three previews. */
+    public static final int THEIR_MORE_ITEMS_SLOT = THEIR_ITEMS_START + 3;
     public static final int YOUR_MONEY_SLOT = 28;
     public static final int YOUR_EXP_SLOT = 29;
     public static final int THEIR_MONEY_SLOT = 32;
@@ -117,10 +129,10 @@ public class TradeConfirmPage implements InventoryHolder {
         inventory.setItem(INFO_SLOT, infoItem);
         
         // Display your items (3 slots)
-        displayItems(session.getPlayerItems(viewerUuid), YOUR_ITEMS_START, text(tradeService.i18n("gui_your_items")));
+        displayItems(session.getPlayerItems(viewerUuid), YOUR_ITEMS_START, YOUR_MORE_ITEMS_SLOT, text(tradeService.i18n("gui_your_items")));
         
         // Display their items (3 slots)
-        displayItems(session.getOtherPlayerItems(viewerUuid), THEIR_ITEMS_START, text(tradeService.i18n("gui_their_items")));
+        displayItems(session.getOtherPlayerItems(viewerUuid), THEIR_ITEMS_START, THEIR_MORE_ITEMS_SLOT, text(tradeService.i18n("gui_their_items")));
         
         // Money display
         ItemStack yourMoneyItem = createItem(Material.GOLD_INGOT, 
@@ -178,9 +190,11 @@ public class TradeConfirmPage implements InventoryHolder {
     }
     
     /**
-     * Display items in the GUI.
+     * Shows up to three of a side's items from {@code startSlot}, and, when the side offers more,
+     * the "N more items" indicator in {@code moreSlot} -- a slot of its own, so all three previews
+     * stay visible (UltiKits/UltiTrade#22).
      */
-    private void displayItems(Map<Integer, ItemStack> items, int startSlot, String emptyName) {
+    private void displayItems(Map<Integer, ItemStack> items, int startSlot, int moreSlot, String emptyName) {
         int displaySlots = 3;
         List<ItemStack> itemList = new ArrayList<>(items.values());
         
@@ -193,6 +207,9 @@ public class TradeConfirmPage implements InventoryHolder {
                     List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
                     lore.add("");
                     lore.add(text(tradeService.i18n("confirm_item_marker")));
+                    // The marker lives on this copy's lore only once it is set back on the meta
+                    // (UltiKits/UltiTrade#43).
+                    meta.setLore(lore);
                     item.setItemMeta(meta);
                 }
                 inventory.setItem(startSlot + i, item);
@@ -207,7 +224,7 @@ public class TradeConfirmPage implements InventoryHolder {
             ItemStack moreItem = createItem(Material.CHEST,
                 filled(tradeService.i18n("confirm_more_items"), "{COUNT}", String.valueOf(itemList.size() - displaySlots)),
                 Arrays.asList(text(tradeService.i18n("confirm_more_items_lore"))));
-            inventory.setItem(startSlot + displaySlots - 1, moreItem);
+            inventory.setItem(moreSlot, moreItem);
         }
     }
     
@@ -219,19 +236,84 @@ public class TradeConfirmPage implements InventoryHolder {
         
         int slot = event.getRawSlot();
         
+        if (answered || !isViewer(event.getWhoClicked())) {
+            // Only the player the page was built for can answer it. Anyone else looking at this
+            // inventory -- which only another plugin can arrange -- would otherwise confirm, or complete,
+            // somebody else's trade; the trade window refuses non-participants the same way
+            // (UltiKits/UltiTrade#38).
+            return;
+        }
         if (slot == CONFIRM_SLOT) {
+            answered = true;
             viewer.closeInventory();
             if (onConfirm != null) {
                 onConfirm.run();
             }
         } else if (slot == CANCEL_SLOT) {
+            answered = true;
             viewer.closeInventory();
             if (onCancel != null) {
                 onCancel.run();
             }
         }
     }
+
+    /**
+     * Handles the player closing the page themselves (Esc): it counts as the Cancel ("back") button,
+     * so the player returns to the trade window rather than being left with no window while the trade
+     * keeps running. A close by a plugin goes to {@link #dismiss()} instead.
+     */
+    public void handleClose() {
+        if (answered) {
+            return;
+        }
+        answered = true;
+        if (onCancel != null) {
+            onCancel.run();
+        }
+    }
     
+    /**
+     * Whether {@code entity} is the player this page was built for.
+     *
+     * @param entity the player acting on or closing the page; may be {@code null}
+     * @return true only for the page's viewer
+     */
+    public boolean isViewer(HumanEntity entity) {
+        return entity != null && viewer.getUniqueId().equals(entity.getUniqueId());
+    }
+
+    /**
+     * Whether this page has already been answered or dismissed -- by a button click, the player's own
+     * Esc, or this module's own code retiring it ahead of a close it is about to cause itself
+     * (cancelling or completing the trade, or a reload redraw; see {@link #dismiss()}).
+     * <p>
+     * Used by the close listener to tell such a self-caused close apart from one this module did NOT
+     * cause: Paper reports the SAME {@code PLUGIN} or {@code OPEN_NEW} reason whether this module's own
+     * {@code closeInventory()}/{@code openInventory()} call triggered it or an unrelated plugin did
+     * (closing the page itself, or opening its own window over it), so the reason alone cannot tell
+     * them apart. A close this module causes always marks the page first (this method returns
+     * {@code true} by the time that close event fires); a close this method has not yet seen has to
+     * come from somewhere else, terminal for the trade the same way death or disconnect is
+     * (UltiKits/UltiTrade#47 review).
+     *
+     * @return true if a button click, Esc, or this module's own {@link #dismiss()} already ran
+     */
+    public boolean isAnswered() {
+        return answered;
+    }
+
+    /**
+     * Retires the page without answering it, for a close that is not the player's own: the reload
+     * redraw replacing it, a cancellation or completion closing it, another window opened over it.
+     * Such a close is not the player's "back"; running the Cancel callback there would schedule a
+     * trade window nobody asked for -- on a reload, one whose opening closes the replacement and so
+     * cancels the trade.
+     */
+    public void dismiss() {
+        answered = true;
+    }
+
     /**
      * Create an item with name and lore.
      */
@@ -265,9 +347,18 @@ public class TradeConfirmPage implements InventoryHolder {
     
     /**
      * Open the confirm page for a player.
+     * <p>
+     * {@code HumanEntity#openInventory} is {@code @Nullable}: another plugin refusing the
+     * {@code InventoryOpenEvent} this fires makes it return {@code null} rather than throwing, so this
+     * page never actually appears. The caller needs to know that happened -- by the time it calls this,
+     * the trade window this page was meant to replace has already been closed, so leaving the failure
+     * unreported would put the player in front of no trade UI at all, with the session still running
+     * and both stakes still locked (UltiKits/UltiTrade#47 review).
+     *
+     * @return true if the page actually opened; false if another plugin refused it
      */
-    public void open() {
-        viewer.openInventory(inventory);
+    public boolean open() {
+        return viewer.openInventory(inventory) != null;
     }
     
     @Override

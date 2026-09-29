@@ -3,7 +3,7 @@ package com.ultikits.plugins.trade;
 import com.ultikits.plugins.trade.config.RemovedConfigKeys;
 import com.ultikits.plugins.trade.config.ConfigTextDefaults;
 import com.ultikits.plugins.trade.config.TradeConfig;
-import com.ultikits.plugins.trade.placeholder.TradePlaceholderExpansion;
+import com.ultikits.plugins.placeholderapi.trade.TradePlaceholderExpansion;
 import com.ultikits.plugins.trade.service.TradeLogService;
 import com.ultikits.plugins.trade.service.TradeService;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
@@ -36,7 +36,18 @@ import java.io.IOException;
 @UltiToolsModule(scanBasePackages = {"com.ultikits.plugins.trade"})
 public class UltiTrade extends UltiToolsPlugin {
 
-    private TradePlaceholderExpansion placeholderExpansion;
+    // Created only when PlaceholderAPI is installed; unregistered again on unload
+    // (UltiKits/UltiTrade#48). Held as Object, not TradePlaceholderExpansion: the framework's
+    // container reflects over this class's declared fields (AutowireFactory#autowireBean), and
+    // Class#getDeclaredFields() eagerly resolves every field's declared type. A field typed
+    // TradePlaceholderExpansion forces the JVM to load that class, which forces loading its
+    // PlaceholderAPI supertype -- on a server without PlaceholderAPI this throws
+    // NoClassDefFoundError and the whole module fails to load, regardless of whether
+    // PlaceholderAPI is ever actually used. The concrete type is still used, and only used,
+    // inside the PlaceholderAPI-present branches of registerPlaceholderAPI()/onUnregister()
+    // below, where the cast is resolved lazily at first execution -- never on a server without
+    // PlaceholderAPI, because those branches never run there.
+    private Object placeholderExpansion;
 
     @Override
     public boolean registerSelf() {
@@ -62,7 +73,7 @@ public class UltiTrade extends UltiToolsPlugin {
 
         // Unregister PlaceholderAPI expansion
         if (placeholderExpansion != null) {
-            placeholderExpansion.unregister();
+            ((TradePlaceholderExpansion) placeholderExpansion).unregister();
             placeholderExpansion = null;
         }
 
@@ -215,8 +226,10 @@ public class UltiTrade extends UltiToolsPlugin {
         TradeService tradeService = getContext().getBean(TradeService.class);
         TradeLogService logService = getContext().getBean(TradeLogService.class);
 
-        placeholderExpansion = new TradePlaceholderExpansion(tradeService, logService);
-        if (placeholderExpansion.register()) {
+        TradePlaceholderExpansion expansion = new TradePlaceholderExpansion(tradeService, logService);
+        boolean registered = expansion.register();
+        placeholderExpansion = expansion;
+        if (registered) {
             getLogger().info(i18n("log_placeholderapi_registered"));
         }
     }

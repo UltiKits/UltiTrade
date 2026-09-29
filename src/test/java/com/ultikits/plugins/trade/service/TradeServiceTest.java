@@ -702,6 +702,33 @@ class TradeServiceTest {
         }
 
         @Test
+        @DisplayName("completeTrade dismisses an open confirmation page before closing it, so the close listener does not mistake this call for an unrelated plugin's (UltiKits/UltiTrade#47 review)")
+        void completeTradeDismissesAnOpenConfirmationPageFirst() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            com.ultikits.plugins.trade.gui.TradeConfirmPage confirmPage =
+                    mock(com.ultikits.plugins.trade.gui.TradeConfirmPage.class);
+            org.bukkit.inventory.Inventory topInventory = mock(org.bukkit.inventory.Inventory.class);
+            when(topInventory.getHolder()).thenReturn(confirmPage);
+            org.bukkit.inventory.InventoryView view = mock(org.bukkit.inventory.InventoryView.class);
+            when(view.getTopInventory()).thenReturn(topInventory);
+            when(player1.getOpenInventory()).thenReturn(view);
+
+            service.completeTrade(session);
+
+            verify(confirmPage).dismiss();
+        }
+
+        @Test
         @DisplayName("completeTrade should handle money transfer with tax")
         void moneyTransferWithTax() throws Exception {
             when(config.getTradeTax()).thenReturn(0.1);
@@ -959,6 +986,33 @@ class TradeServiceTest {
 
             // player1 should get their diamond back
             verify(player1.getInventory()).addItem(UltiTradeTestHelper.deliveredCopyOf(diamond));
+        }
+
+        @Test
+        @DisplayName("cancelTrade dismisses an open confirmation page before closing it, so the close listener does not mistake this call for an unrelated plugin's (UltiKits/UltiTrade#47 review)")
+        void cancelTradeDismissesAnOpenConfirmationPageFirst() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+
+            com.ultikits.plugins.trade.gui.TradeConfirmPage confirmPage =
+                    mock(com.ultikits.plugins.trade.gui.TradeConfirmPage.class);
+            org.bukkit.inventory.Inventory topInventory = mock(org.bukkit.inventory.Inventory.class);
+            when(topInventory.getHolder()).thenReturn(confirmPage);
+            org.bukkit.inventory.InventoryView view = mock(org.bukkit.inventory.InventoryView.class);
+            when(view.getTopInventory()).thenReturn(topInventory);
+            when(player1.getOpenInventory()).thenReturn(view);
+
+            service.cancelTrade(session, "test reason");
+
+            verify(confirmPage).dismiss();
         }
 
         @Test
@@ -1729,6 +1783,23 @@ class TradeServiceTest {
 
             verify(player1).playSound(any(Location.class), eq(org.bukkit.Sound.BLOCK_CHEST_OPEN), eq(1.0f), eq(1.0f));
             verify(player2).playSound(any(Location.class), eq(org.bukkit.Sound.BLOCK_CHEST_OPEN), eq(1.0f), eq(1.0f));
+        }
+
+        @Test
+        @DisplayName("startTrade cancels the freshly-created session rather than leaving one side in a phantom trade if the first player's own open is refused (Codex sweep, UltiKits/UltiTrade#47)")
+        void startTradeCancelsWhenTheFirstOpenIsRefused() throws Exception {
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+            when(player1.openInventory(any(org.bukkit.inventory.Inventory.class))).thenReturn(null);
+
+            service.startTrade(player1, player2);
+
+            assertThat(service.isTrading(uuid1)).isFalse();
+            assertThat(service.isTrading(uuid2)).isFalse();
+            // player2's own window is never attempted once player1's refusal cancels the session --
+            // there is nothing left to show them.
+            verify(player2, never()).openInventory(any(org.bukkit.inventory.Inventory.class));
         }
     }
 
