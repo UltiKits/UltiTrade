@@ -244,6 +244,13 @@ the replies they described now come from the language catalogue (`ultitrade.sett
 `.block`, `.unblock` above), so `UltiKits/UltiTrade#17` removed them. A copy of any of the seven
 left in an operator's file has no effect. Every key below is read.
 
+**Comments follow the server's `language`.** Every one of the 24 settings declares its comment as one
+`{config_comment_<path>}` language key (`lang/en.yml`, `lang/zh.yml`; `-` and `.` in the path become `_`),
+which the framework resolves in the server's `language` each time it writes the file (`UltiTools-Reborn#542`),
+so a fresh install under `language: en` writes English comments. On an existing file the comments on these
+settings switch at the next start, values untouched, and a hand-written comment there is replaced
+(`UltiKits/UltiTrade#51`).
+
 | ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
 |---|---|---|---|---|---|---|---|---|
 | ultitrade.config.trade.allow-cross-world | Whether a trade request may be sent across two different worlds. Only actually checked when `max-distance` is above 0 — the whole distance/cross-world block is nested inside `if (config.getMaxDistance() > 0)`, so setting `max-distance: 0` (which disables the distance check entirely, per that key's own row) ALSO silently disables this key's own cross-world restriction, allowing cross-world trades regardless of its value | config | `config/trade.yml: allow-cross-world (default: false, only enforced while max-distance is above 0)` | n/a | n/a | admin | brief | TradeService#sendRequest |
