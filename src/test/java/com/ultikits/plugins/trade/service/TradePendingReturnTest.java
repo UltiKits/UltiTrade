@@ -720,6 +720,8 @@ class TradePendingReturnTest {
 
         verify(logger).error(any(Throwable.class), argThat((String s) -> s.contains("Away")));
         assertThat(deliveriesOf(joined)).as("the marker is kept, as for any completion that did not land").isNotNull();
+        assertThat(count(joined, Material.DIAMOND)).as("the delivered part is neither taken back nor handed over again").isEqualTo(10);
+        assertThat(joined.getInventory().all(Material.DIAMOND_SWORD)).as("the part that stayed listed is not handed over").isEmpty();
     }
 
     @Test
