@@ -125,13 +125,16 @@ public class TradeLogService {
             cleanupTask = null;
         }
         
-        // Save all cached settings
+        // Save all cached settings. A write that matched no stored row (the row was deleted while the
+        // server ran) wrote nothing, so it is logged like a write that threw (UltiKits/UltiTrade#52).
         for (PlayerTradeSettings settings : settingsCache.values()) {
+            String failureLine = i18n("log_settings_save_failed").replace("{PLAYER}", String.valueOf(settings.getPlayerUuid()));
             try {
-                settingsOperator.update(settings);
+                if (settingsOperator.updateCounted(settings) == 0) {
+                    plugin.getLogger().warn(failureLine);
+                }
             } catch (Exception e) {
-                plugin.getLogger().warn(e,
-                    i18n("log_settings_save_failed").replace("{PLAYER}", String.valueOf(settings.getPlayerUuid())));
+                plugin.getLogger().warn(e, failureLine);
             }
         }
         settingsCache.clear();
@@ -399,12 +402,19 @@ public class TradeLogService {
     }
     
     /**
-     * Save player settings.
+     * Save player settings. A write that matched no stored row -- the row was deleted while the server
+     * ran, and this cached object still carries its id -- wrote nothing, so it is logged with the same
+     * line as a write that threw, instead of passing as saved (UltiKits/UltiTrade#52).
      *
      * @param settings Settings to save
      */
     public void saveSettings(PlayerTradeSettings settings) {
-        submitLogWrite(i18n("log_settings_write_failed"), () -> settingsOperator.update(settings));
+        String failureLine = i18n("log_settings_write_failed");
+        submitLogWrite(failureLine, () -> {
+            if (settingsOperator.updateCounted(settings) == 0 && plugin != null) {
+                plugin.getLogger().warn(failureLine);
+            }
+        });
     }
     
     /**

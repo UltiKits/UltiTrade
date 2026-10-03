@@ -76,6 +76,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A save of a player's trade settings whose stored row no longer exists is now reported as failed on every storage
+  type. The module keeps each player's settings in memory for the server's lifetime, so if their
+  `trade_player_settings` row was deleted while the server ran, the next toggle, block, unblock, post-trade
+  statistics update or the save at shutdown wrote nothing and passed as saved on SQLite and MySQL (only the JSON
+  backend reported it). It now logs `Failed to save player settings` (and, at shutdown, the player's UUID), the
+  same line a failed write logs (UltiKits/UltiTrade#52).
+- 玩家交易设置的存储行已不存在时，保存现在在所有存储类型上都报告为失败。模块在服务器运行期间一直缓存每位玩家的设置，因此若其 `trade_player_settings`
+  行在运行中被删除，之后的开关交易、拉黑、取消拉黑、交易后统计更新或关服时的保存在 SQLite 与 MySQL 上什么也没写却当作已保存（只有 JSON 后端会报告）。
+  现在会记录 `保存玩家设置失败`（关服时附带玩家 UUID），与写入出错时的日志行相同（UltiKits/UltiTrade#52）。
+
 - `/ul reload UltiTrade` (and a bare `/ul reload`) no longer reports a plain success when part of this module's
   reload failed. If rescheduling the trade-log cleanup task, applying `enable-money-trade`, or voiding open trades'
   confirmations and redrawing their windows fails, the module still logs that step's error and runs the other steps,
