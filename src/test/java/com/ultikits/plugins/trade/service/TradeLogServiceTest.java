@@ -45,6 +45,9 @@ class TradeLogServiceTest {
         UltiTradeTestHelper.setField(service, "config", config);
         UltiTradeTestHelper.setField(service, "logOperator", logOperator);
         UltiTradeTestHelper.setField(service, "settingsOperator", settingsOperator);
+        // A settings write lands on its stored row unless a test says otherwise. An unstubbed int method
+        // on a Mockito mock answers 0, which UltiKits/UltiTrade#52 treats as a write that matched no row.
+        lenient().when(settingsOperator.updateCounted(any())).thenReturn(1);
 
         playerUuid = UUID.randomUUID();
         player = UltiTradeTestHelper.createMockPlayer("TestPlayer", playerUuid);
@@ -616,7 +619,32 @@ class TradeLogServiceTest {
 
             service.shutdown();
 
-            verify(settingsOperator).update(settings);
+            verify(settingsOperator).updateCounted(settings);
+            verify(settingsOperator, never()).update(any(PlayerTradeSettings.class));
+            verify(UltiTradeTestHelper.getMockLogger(), never()).warn(anyString());
+            verify(UltiTradeTestHelper.getMockLogger(), never()).warn(any(Throwable.class), anyString());
+        }
+
+        @Test
+        @DisplayName("a cached settings object whose stored row is gone is logged as not saved at shutdown, naming the player (UltiKits/UltiTrade#52)")
+        void shutdownSaveOfAMissingRowIsLoggedAsFailed() throws Exception {
+            Map<UUID, PlayerTradeSettings> cache = UltiTradeTestHelper.getField(service, "settingsCache");
+            PlayerTradeSettings gone = new PlayerTradeSettings(playerUuid, "TestPlayer");
+            gone.setId("row-deleted-while-running");
+            cache.put(playerUuid, gone);
+            UUID otherUuid = UUID.randomUUID();
+            PlayerTradeSettings kept = new PlayerTradeSettings(otherUuid, "Other");
+            cache.put(otherUuid, kept);
+            when(settingsOperator.updateCounted(gone)).thenReturn(0);
+
+            service.shutdown();
+
+            verify(UltiTradeTestHelper.getMockLogger()).warn(
+                    zhLine("log_settings_save_failed").replace("{PLAYER}", playerUuid.toString()));
+            verify(UltiTradeTestHelper.getMockLogger(), never()).warn(
+                    zhLine("log_settings_save_failed").replace("{PLAYER}", otherUuid.toString()));
+            verify(settingsOperator).updateCounted(kept);
+            assertThat(cache).as("the cache is cleared whatever the writes returned").isEmpty();
         }
 
         @Test
@@ -637,12 +665,15 @@ class TradeLogServiceTest {
             PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, "TestPlayer");
             cache.put(playerUuid, settings);
 
-            doThrow(new RuntimeException("DB error")).when(settingsOperator).update(settings);
+            RuntimeException failure = new RuntimeException("DB error");
+            doThrow(failure).when(settingsOperator).updateCounted(settings);
 
             // Should not throw
             service.shutdown();
 
             assertThat(cache).isEmpty();
+            verify(UltiTradeTestHelper.getMockLogger()).warn(failure,
+                    zhLine("log_settings_save_failed").replace("{PLAYER}", playerUuid.toString()));
         }
 
         @Test
@@ -857,7 +888,8 @@ class TradeLogServiceTest {
             org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
             org.mockito.ArgumentCaptor<Runnable> captor = org.mockito.ArgumentCaptor.forClass(Runnable.class);
 
-            doThrow(new RuntimeException("DB error")).when(settingsOperator).update(any());
+            RuntimeException failure = new RuntimeException("DB error");
+            doThrow(failure).when(settingsOperator).updateCounted(any());
 
             service.saveSettings(settings);
 
@@ -865,6 +897,62 @@ class TradeLogServiceTest {
 
             // Should not throw
             captor.getValue().run();
+            verify(UltiTradeTestHelper.getMockLogger()).warn(failure, zhLine("log_settings_write_failed"));
+        }
+
+        @Test
+        @DisplayName("a settings save whose stored row is gone is logged as not saved, on the inline path (UltiKits/UltiTrade#52)")
+        void saveOfAMissingRowIsLoggedAsFailedInline() throws Exception {
+            // No enabled plugin to schedule through, so the write runs on the calling thread.
+            PlayerTradeSettings gone = new PlayerTradeSettings(playerUuid, "TestPlayer");
+            gone.setId("row-deleted-while-running");
+            when(settingsOperator.updateCounted(gone)).thenReturn(0);
+
+            service.saveSettings(gone);
+
+            verify(settingsOperator).updateCounted(gone);
+            verify(settingsOperator, never()).update(any(PlayerTradeSettings.class));
+            verify(UltiTradeTestHelper.getMockLogger()).warn(zhLine("log_settings_write_failed"));
+        }
+
+        @Test
+        @DisplayName("a settings save whose stored row is gone is logged as not saved, on the asynchronous path (UltiKits/UltiTrade#52)")
+        void saveOfAMissingRowIsLoggedAsFailedAsync() throws Exception {
+            UltiTradeTestHelper.setField(service, "bukkitPlugin", org.bukkit.Bukkit.getPluginManager().getPlugin("UltiTools"));
+            PlayerTradeSettings gone = new PlayerTradeSettings(playerUuid, "TestPlayer");
+            when(settingsOperator.updateCounted(gone)).thenReturn(0);
+            org.mockito.ArgumentCaptor<Runnable> captor = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+
+            service.saveSettings(gone);
+            verify(org.bukkit.Bukkit.getServer().getScheduler()).runTaskAsynchronously(any(), captor.capture());
+            captor.getValue().run();
+
+            verify(UltiTradeTestHelper.getMockLogger()).warn(zhLine("log_settings_write_failed"));
+        }
+
+        @Test
+        @DisplayName("control: a settings save that wrote its row logs nothing (UltiKits/UltiTrade#52)")
+        void saveThatWroteItsRowLogsNothing() throws Exception {
+            PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, "TestPlayer");
+
+            service.saveSettings(settings);
+
+            verify(settingsOperator).updateCounted(settings);
+            verify(UltiTradeTestHelper.getMockLogger(), never()).warn(anyString());
+            verify(UltiTradeTestHelper.getMockLogger(), never()).warn(any(Throwable.class), anyString());
+        }
+
+        @Test
+        @DisplayName("a toggle whose stored row is gone is logged as not saved (UltiKits/UltiTrade#52)")
+        void toggleOfAMissingRowIsLoggedAsFailed() throws Exception {
+            Map<UUID, PlayerTradeSettings> cache = UltiTradeTestHelper.getField(service, "settingsCache");
+            PlayerTradeSettings gone = new PlayerTradeSettings(playerUuid, "TestPlayer");
+            cache.put(playerUuid, gone);
+            when(settingsOperator.updateCounted(gone)).thenReturn(0);
+
+            service.toggleTrade(player);
+
+            verify(UltiTradeTestHelper.getMockLogger()).warn(zhLine("log_settings_write_failed"));
         }
     }
 
@@ -978,5 +1066,11 @@ class TradeLogServiceTest {
 
             verify(UltiTradeTestHelper.getMockLogger()).warn(any(Exception.class), anyString());
         }
+    }
+
+    /** The Chinese catalogue's console line for {@code key}, or a marker naming the missing key. */
+    private static String zhLine(String key) {
+        return com.ultikits.plugins.trade.i18n.CatalogueText.entries("zh")
+                .getOrDefault(key, "<lang/zh has no " + key + ">");
     }
 }
