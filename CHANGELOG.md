@@ -96,11 +96,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - `/ul reload UltiTrade` (and a bare `/ul reload`) no longer reports a plain success when part of this module's
   reload failed. If rescheduling the trade-log cleanup task, applying `enable-money-trade`, or voiding open trades'
-  confirmations and redrawing their windows fails, the module still logs that step's error and runs the other steps,
-  and the reply and the framework's reload log line now say the reload was partial and name each step that did not
-  reload, with its cause (UltiKits/UltiTrade#50).
+  confirmations and redrawing their windows fails, or one player's open trade window cannot be redrawn, the module
+  still logs that error and runs the rest, and the reply and the framework's reload log line now say the reload was
+  partial and name each step that did not reload, with its cause, or the players whose window still shows the
+  previous terms (UltiKits/UltiTrade#50).
 - 本模块的重载有部分失败时，`/ul reload UltiTrade`（以及不带参数的 `/ul reload`）不再回复单纯的成功。若重新安排交易日志清理任务、应用 `enable-money-trade`、
-  或作废进行中交易的确认并重绘其窗口失败，模块仍记录该步骤的错误并继续执行其余步骤，同时回复与框架的重载日志行会说明重载不完整，并列出未完成的每个步骤及其原因（UltiKits/UltiTrade#50）。
+  或作废进行中交易的确认并重绘其窗口失败，或某位玩家打开的交易窗口未能重绘，模块仍记录该错误并继续执行其余部分，同时回复与框架的重载日志行会说明重载不完整，并列出未完成的每个步骤及其原因，或窗口仍显示旧条款的玩家（UltiKits/UltiTrade#50）。
 
 - `config/trade.yml` now writes its comments in the server's language. All twenty-four comments (every setting
   in the file) used to be Chinese-only, so a fresh install under `language: en` got a file with Chinese comments.

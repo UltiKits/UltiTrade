@@ -178,6 +178,7 @@ log_confirmation_reset_failed: "Could not void the confirmations of open trades 
 reload_partial_cleanup_task: "the trade-log cleanup schedule (enable-trade-log, cleanup-interval-hours) was not applied and keeps its previous schedule: {ERROR}"
 reload_partial_economy: "money trading (enable-money-trade) was not applied and keeps its previous provider: {ERROR}"
 reload_partial_confirmation_reset: "the confirmations of open trades were not voided or their windows not redrawn: {ERROR}"
+reload_partial_window_redraw: "the open trade windows of {PLAYERS} were not redrawn and show the previous terms until reopened"
 log_removed_key_check_failed: "Could not check {FILE} for removed configuration keys; the module continues without that check."
 log_shutdown_cancel_failed: "Failed to cancel a trade during shutdown; continuing with the remaining trades."
 log_pending_return_saved: "A trade was cancelled while {PLAYER} could not be found on the server; their {COUNT} staked stack(s) were saved and will be returned when they next join: {ITEMS}"

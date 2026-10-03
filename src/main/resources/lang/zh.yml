@@ -178,6 +178,7 @@ log_confirmation_reset_failed: "重载后无法撤销进行中交易的确认或
 reload_partial_cleanup_task: "交易日志清理计划（enable-trade-log、cleanup-interval-hours）未应用，仍按原计划运行：{ERROR}"
 reload_partial_economy: "金币交易（enable-money-trade）未应用，仍使用原经济提供者：{ERROR}"
 reload_partial_confirmation_reset: "未能作废进行中交易的确认或重绘其窗口：{ERROR}"
+reload_partial_window_redraw: "{PLAYERS} 的交易窗口未能重绘，重新打开前仍显示重载前的条款"
 log_removed_key_check_failed: "无法检查 {FILE} 中已移除的配置项；模块在不做此检查的情况下继续运行。"
 log_shutdown_cancel_failed: "关闭时取消一笔交易失败；继续处理其余交易。"
 log_pending_return_saved: "交易取消时服务器找不到 {PLAYER}；其押入的 {COUNT} 组物品已保存，将在其下次进服时发还：{ITEMS}"

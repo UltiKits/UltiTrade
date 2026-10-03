@@ -15,6 +15,7 @@ import org.bukkit.Bukkit;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
 
 /**
  * UltiTrade - Player-to-player trading system.
@@ -127,7 +128,12 @@ public class UltiTrade extends UltiToolsPlugin {
             // windows show those terms: void the first, then redraw the second.
             try {
                 tradeService.resetConfirmationsAfterReload();
-                tradeService.refreshOpenTradeWindowsAfterReload();
+                // A window that could not be redrawn still shows the previous terms: that part did not reload.
+                List<String> notRedrawn = tradeService.refreshOpenTradeWindowsAfterReload();
+                if (notRedrawn != null && !notRedrawn.isEmpty()) {
+                    report.partial(Placeholders.fill(i18n("reload_partial_window_redraw"),
+                            "{PLAYERS}", String.join(", ", notRedrawn)));
+                }
             } catch (RuntimeException e) {
                 getLogger().error(e, i18n("log_confirmation_reset_failed"));
                 report.partial(partialReason(i18n("reload_partial_confirmation_reset"), e));

@@ -283,9 +283,14 @@ public class TradeService {
      * nothing offered is added, removed or returned.
      * <p>
      * Each player's window is redrawn in isolation: a failure is logged at SEVERE with the player's
-     * name and the remaining windows are still redrawn.
+     * name and the remaining windows are still redrawn. The players whose window could not be redrawn
+     * are returned, so the reload can report itself as partial (UltiKits/UltiTrade#50).
+     *
+     * @return the names of the players whose window still shows the previous terms, in the order tried;
+     *         empty when every open window was redrawn
      */
-    public void refreshOpenTradeWindowsAfterReload() {
+    public List<String> refreshOpenTradeWindowsAfterReload() {
+        List<String> notRedrawn = new ArrayList<>();
         for (TradeSession session : activeSessions.values()) {
             for (UUID participant : new UUID[] {session.getPlayer1(), session.getPlayer2()}) {
                 Player player = Bukkit.getPlayer(participant);
@@ -296,9 +301,11 @@ public class TradeService {
                     refreshOpenTradeWindow(session, player);
                 } catch (RuntimeException | LinkageError e) {
                     plugin.getLogger().error(e, i18n("log_window_redraw_failed").replace("{PLAYER}", player.getName()));
+                    notRedrawn.add(player.getName());
                 }
             }
         }
+        return notRedrawn;
     }
 
     private void refreshOpenTradeWindow(TradeSession session, Player player) {
