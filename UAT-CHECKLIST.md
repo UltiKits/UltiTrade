@@ -163,10 +163,12 @@ and messages written into `trade.yml` in the server's language: on an upgraded f
 a `language` switch (the last two run back to back, the second continuing from the first's state).
 
 `/ul reload <name>` calls that module's `reloadSelf()`, which as of 6.3.0 re-reads the module's
-config files into the running beans before logging the framework's own line `Module '<name>'
-reloaded.`, and then calls the module's `onReload()` hook, which for this module re-runs the Vault
-economy lookup and reschedules the old-log cleanup task when `enable-trade-log` or
-`cleanup-interval-hours` changed (`UltiKits/UltiTrade#26`); this module's
+config files into the running beans and then calls the module's `onReload(ReloadReport)` hook, which
+for this module re-runs the Vault economy lookup and reschedules the old-log cleanup task when
+`enable-trade-log` or `cleanup-interval-hours` changed (`UltiKits/UltiTrade#26`); only after the hook
+returns does the framework log its own line, `Module '<name>' reloaded.`, or `Module '<name>' reloaded
+partially; not reloaded: <reasons>` when a step did not reload (`ultitrade.lifecycle.reload.partial-report`,
+`UltiKits/UltiTrade#50`); this module's
 config file on a server is `plugins/UltiTools/pluginConfig/UltiTrade/config/trade.yml`. Before that
 work, the hook repeats the removed-key check the module makes when it is enabled
 (`ultitrade.lifecycle.removed-key-warning`, `UltiKits/UltiTrade#17`, `#18`). The two framework lines
