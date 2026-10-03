@@ -681,6 +681,48 @@ class TradePendingReturnTest {
     }
 
     @Test
+    @DisplayName("An entry whose row is deleted between the join's read and its mark is not handed over, and nothing arrives later (UltiKits/UltiTrade#53)")
+    void entryDeletedBeforeItsMarkIsNotHandedOver() throws Exception {
+        service.completeTrade(sessionWithStakes());
+        server.addPlayer(away);
+        away.getInventory().setItem(3, new ItemStack(Material.DIAMOND, 5));
+        PlayerMock joined = saving(away);
+        // Another writer (an administrator, or a second server on the same database) removes the entry
+        // after the join has read it and before the join's first write to it.
+        store.beforeUpdate = () -> store.rows.clear();
+
+        service.deliverPendingReturns(joined);
+
+        assertThat(count(joined, Material.DIAMOND)).as("nothing is handed over for an entry the list no longer holds; the player's own 5 stay").isEqualTo(5);
+        assertThat(joined.getInventory().all(Material.DIAMOND_SWORD)).as("nor the sword").isEmpty();
+        assertThat(deliveriesOf(joined)).as("no delivery marker is left for a mark that never landed").isNull();
+        verify(logger).error(any(Throwable.class), argThat((String s) -> s.contains("Away")));
+
+        store.beforeUpdate = () -> { };
+        service.deliverPendingReturns(joined);
+
+        assertThat(count(joined, Material.DIAMOND)).as("a later join finds nothing to deliver").isEqualTo(5);
+    }
+
+    @Test
+    @DisplayName("A partial completion whose row is deleted before the write is not taken as completed: the failure is logged (UltiKits/UltiTrade#53)")
+    void entryDeletedBeforeItsCompletionIsLoggedAsFailed() throws Exception {
+        service.completeTrade(sessionWithStakes());
+        server.addPlayer(away);
+        fillAllBut(away, 0);
+        PlayerMock joined = saving(away);
+        service.deliverPendingReturns(joined); // 10 diamonds handed over, the sword stays listed
+        assertThat(count(joined, Material.DIAMOND)).isEqualTo(10);
+        org.mockito.Mockito.clearInvocations(logger);
+        store.beforeUpdate = () -> store.rows.clear();
+
+        service.deliverPendingReturns(joined); // settling join: the completion write finds no row
+
+        verify(logger).error(any(Throwable.class), argThat((String s) -> s.contains("Away")));
+        assertThat(deliveriesOf(joined)).as("the marker is kept, as for any completion that did not land").isNotNull();
+    }
+
+    @Test
     @DisplayName("An entry whose completion fails at the settling join is completed later, not handed over twice")
     void completeFailureIsSettledWithoutDuplicating() throws Exception {
         service.completeTrade(sessionWithStakes());
@@ -814,6 +856,29 @@ class TradePendingReturnTest {
                 }
             }
             afterUpdate.run();
+        }
+
+        /**
+         * The framework's counted update (6.3.0): writes {@code entity} over the stored row with its id and
+         * returns how many rows that was -- {@code 0} when none has it, as the real backends do since
+         * UltiTools-Reborn#558, so a row deleted between a read and this write is visible to the caller
+         * (UltiKits/UltiTrade#53).
+         */
+        @Override
+        public int updateCounted(PendingStakeReturn entity) {
+            beforeUpdate.run();
+            if (failUpdate) {
+                throw new IllegalStateException("simulated update failure");
+            }
+            int written = 0;
+            for (int i = 0; i < rows.size(); i++) {
+                if (rows.get(i).getId().equals(entity.getId())) {
+                    rows.set(i, copyOf(entity));
+                    written++;
+                }
+            }
+            afterUpdate.run();
+            return written;
         }
 
         @Override
