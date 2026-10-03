@@ -973,12 +973,13 @@ class TradeReloadReconciliationTest {
     }
 
     /** Edit the file, re-initialise the same config instance, then run the module's reload hook. */
-    @SuppressWarnings("PMD.AvoidAccessibilityAlteration") // onReload() is protected on the framework base class
+    @SuppressWarnings("PMD.AvoidAccessibilityAlteration") // onReload(ReloadReport) is protected on the framework base class
     private void reload(String yaml) throws Exception {
         loadConfig(yaml);
-        Method hook = UltiToolsPlugin.class.getDeclaredMethod("onReload");
+        // The hook the framework calls, with a fresh report, as reloadSelf() does (UltiKits/UltiTrade#50).
+        Method hook = UltiToolsPlugin.class.getDeclaredMethod("onReload", com.ultikits.ultitools.abstracts.ReloadReport.class);
         hook.setAccessible(true);
-        hook.invoke(plugin);
+        hook.invoke(plugin, new com.ultikits.ultitools.abstracts.ReloadReport());
     }
 
     @SuppressWarnings("PMD.AvoidAccessibilityAlteration") // points the module's config folder at a temp directory

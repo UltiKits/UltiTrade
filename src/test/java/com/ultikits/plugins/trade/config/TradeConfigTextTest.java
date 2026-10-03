@@ -525,14 +525,16 @@ class TradeConfigTextTest {
         }
     }
 
-    /** The module's {@code onReload()} (protected), as the framework calls it after rebuilding the language. */
+    /** The module's reload hook (protected), as the framework calls it after rebuilding the language. */
     @SuppressWarnings("PMD.AvoidAccessibilityAlteration")
     private void reload() throws Exception {
-        java.lang.reflect.Method onReload = UltiTrade.class.getDeclaredMethod("onReload");
+        // The hook the framework calls, with a fresh report, as reloadSelf() does (UltiKits/UltiTrade#50).
+        java.lang.reflect.Method onReload = com.ultikits.ultitools.abstracts.UltiToolsPlugin.class
+                .getDeclaredMethod("onReload", com.ultikits.ultitools.abstracts.ReloadReport.class);
         onReload.setAccessible(true);
         try (MockedStatic<Bukkit> bukkit = mockStatic(Bukkit.class)) {
             bukkit.when(Bukkit::getPluginManager).thenReturn(mock(org.bukkit.plugin.PluginManager.class));
-            onReload.invoke(plugin);
+            onReload.invoke(plugin, new com.ultikits.ultitools.abstracts.ReloadReport());
         }
     }
 
