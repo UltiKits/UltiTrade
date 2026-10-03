@@ -6,6 +6,8 @@ import com.ultikits.plugins.trade.config.TradeConfig;
 import com.ultikits.plugins.placeholderapi.trade.TradePlaceholderExpansion;
 import com.ultikits.plugins.trade.service.TradeLogService;
 import com.ultikits.plugins.trade.service.TradeService;
+import com.ultikits.plugins.trade.util.Placeholders;
+import com.ultikits.ultitools.abstracts.ReloadReport;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.UltiToolsModule;
 
@@ -84,16 +86,21 @@ public class UltiTrade extends UltiToolsPlugin {
      * Reconcile the services with configuration values they capture at startup. The framework
      * calls this after it has re-read {@code config/trade.yml}, so both services see the new
      * values (UltiKits/UltiTrade#26). Each reconciliation is isolated: a failure is logged at
-     * SEVERE and the other one still runs, because the framework does not catch an exception
-     * thrown from this hook.
+     * SEVERE, recorded in {@code report} as a part that did not reload, and the other steps still
+     * run, so {@code /ul reload UltiTrade} replies that the reload was partial and names the step
+     * instead of an unconditional success (UltiKits/UltiTrade#50, UltiTools-Reborn#529).
      * <p>
      * It runs on every reload of this module -- a bare {@code /ul reload} as well as
      * {@code /ul reload UltiTrade} -- and first repeats the removed-key warning, so an operator who
      * edits a key this version no longer reads and reloads is told it has no effect
-     * (UltiKits/UltiTrade#17, #18).
+     * (UltiKits/UltiTrade#17, #18). That warning and the rewrite of built-in text into the file are
+     * not reload steps: the first is advisory, and the second only persists text the module already
+     * uses this session, so neither failure marks the reload partial.
+     *
+     * @param report where each step that did not reload is recorded
      */
     @Override
-    protected void onReload() {
+    protected void onReload(ReloadReport report) {
         warnAboutRemovedConfigKeys();
         writeConfigTextInServerLanguage();
 
@@ -103,6 +110,7 @@ public class UltiTrade extends UltiToolsPlugin {
                 logService.reloadCleanupTask();
             } catch (RuntimeException e) {
                 getLogger().error(e, i18n("log_cleanup_reconcile_failed"));
+                report.partial(partialReason(i18n("reload_partial_cleanup_task"), e));
             }
         }
 
@@ -112,6 +120,7 @@ public class UltiTrade extends UltiToolsPlugin {
                 tradeService.reloadEconomy();
             } catch (RuntimeException e) {
                 getLogger().error(e, i18n("log_economy_reconcile_failed"));
+                report.partial(partialReason(i18n("reload_partial_economy"), e));
             }
 
             // Confirmations given before the reload may cover terms the reload changed, and open
@@ -121,8 +130,20 @@ public class UltiTrade extends UltiToolsPlugin {
                 tradeService.refreshOpenTradeWindowsAfterReload();
             } catch (RuntimeException e) {
                 getLogger().error(e, i18n("log_confirmation_reset_failed"));
+                report.partial(partialReason(i18n("reload_partial_confirmation_reset"), e));
             }
         }
+    }
+
+    /**
+     * The reason recorded for one reload step that failed: {@code line}, the step's language-file line in
+     * the server's language, with {@code {ERROR}} filled in one pass by the cause's message, or by its type
+     * when it has none, so text inside the message is never expanded again.
+     */
+    private static String partialReason(String line, RuntimeException cause) {
+        String message = cause.getMessage();
+        return Placeholders.fill(line, "{ERROR}",
+                message == null || message.trim().isEmpty() ? cause.getClass().getName() : message);
     }
 
     private void warnAboutRemovedConfigKeys() {
@@ -139,7 +160,7 @@ public class UltiTrade extends UltiToolsPlugin {
      * text in the server's language and saves the file once, so the file holds what the module sends;
      * any other value is the operator's and is kept (maintainer decision 2026-09-25,
      * UltiKits/UltiTrade#16). Runs from {@link #registerSelf()} before any service reads the texts and
-     * from {@link #onReload()}, both after the module's language is loaded -- never from a configuration
+     * from {@link #onReload(ReloadReport)}, both after the module's language is loaded -- never from a configuration
      * change listener, which the framework fires before it reloads the language. A value already in the
      * current language matches nothing to replace, so a second start writes nothing.
      * The text comes from this jar's own catalogue for the server's language, not from {@code i18n} (which
