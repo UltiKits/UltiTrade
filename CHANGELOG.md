@@ -76,6 +76,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A stake waiting to be returned to a player is no longer handed over when its stored entry was deleted after the
+  player's join read it (by an administrator, or by another server sharing the database). The write that marks the
+  entry for hand-over matched no row and wrote nothing, but the items were given anyway and the entry was treated as
+  updated. Such a write now fails like any other failed write: the hand-over is undone and an ERROR names the player,
+  or a settling join logs it and tries again (UltiKits/UltiTrade#53).
+- 待返还给玩家的物品条目若在玩家加入时被读取后、写入前被删除（管理员删除，或共享数据库的另一台服务器删除），不再照常交付。此前标记交付的写入没有命中任何行、
+  什么也没写，物品却仍交给玩家，条目也被当作已更新。现在这种写入与其他写入失败一样处理：撤销本次交付并记录指名该玩家的 ERROR，或在结算时记录并稍后重试（UltiKits/UltiTrade#53）。
+
 - A save of a player's trade settings whose stored row no longer exists is now reported as failed on every storage
   type. The module keeps each player's settings in memory for the server's lifetime, so if their
   `trade_player_settings` row was deleted while the server ran, the next toggle, block, unblock, post-trade

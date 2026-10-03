@@ -1289,7 +1289,7 @@ public class TradeService {
                 write(entry, unmarked);
             }
             return true;
-        } catch (RuntimeException | IllegalAccessException e) {
+        } catch (RuntimeException e) {
             plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
                     .replace("{PLAYER}", player.getName())
                     .replace("{ID}", String.valueOf(entry.getId())));
@@ -1334,7 +1334,7 @@ public class TradeService {
         marked.setAfterDelivery(remaining.isEmpty() ? "" : serializeStacks(remaining));
         try {
             write(entry, marked);
-        } catch (RuntimeException | IllegalAccessException e) {
+        } catch (RuntimeException e) {
             player.getInventory().removeItem(given.toArray(new ItemStack[0]));
             plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
                     .replace("{PLAYER}", player.getName())
@@ -1355,7 +1355,7 @@ public class TradeService {
             try {
                 complete(entry);
                 forgetDelivery(player, token);
-            } catch (RuntimeException | IllegalAccessException e) {
+            } catch (RuntimeException e) {
                 plugin.getLogger().error(e, i18n("log_pending_return_remove_failed")
                         .replace("{PLAYER}", player.getName())
                         .replace("{ID}", String.valueOf(entry.getId())));
@@ -1391,7 +1391,7 @@ public class TradeService {
     }
 
     /** Keep only the part that did not fit, or remove the entry (its id is then cleared). */
-    private void complete(PendingStakeReturn entry) throws IllegalAccessException {
+    private void complete(PendingStakeReturn entry) {
         String after = entry.getAfterDelivery();
         if (after == null || after.isEmpty()) {
             pendingReturns.delById(entry.getId());
@@ -1410,9 +1410,18 @@ public class TradeService {
      * Write {@code next} over the stored entry, and only once that write committed, make {@code entry}
      * (the in-memory copy the rest of the join reads, marker pruning included) say the same. A failed
      * write leaves {@code entry} as the table still holds it.
+     * <p>
+     * A write that matched no stored row -- the entry was deleted after this join read it, by an
+     * administrator or by another server on the same database -- wrote nothing, so it fails like a write
+     * that threw, and each caller takes the failure path it already has: a hand-over is undone, a
+     * settling join logs and retries (UltiKits/UltiTrade#53).
+     *
+     * @throws IllegalStateException if no stored row has {@code next}'s id
      */
-    private void write(PendingStakeReturn entry, PendingStakeReturn next) throws IllegalAccessException {
-        pendingReturns.update(next);
+    private void write(PendingStakeReturn entry, PendingStakeReturn next) {
+        if (pendingReturns.updateCounted(next) == 0) {
+            throw new IllegalStateException("no stored pending return has id " + next.getId() + "; nothing was written");
+        }
         entry.setItems(next.getItems());
         entry.setStackCount(next.getStackCount());
         entry.setDeliveryToken(next.getDeliveryToken());
