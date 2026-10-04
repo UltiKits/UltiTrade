@@ -52,4 +52,21 @@ public class PendingStakeReturn extends BaseDataEntity<String> {
     /** When the stake was saved, in epoch milliseconds. */
     @Column("created_at")
     private long createdAt;
+
+    /**
+     * Legacy, read only for upgrades: set by UltiTrade builds before UltiKits/UltiTrade#55 while one of
+     * their hand-overs was in progress; the same token was written into the player's persistent data
+     * with the handed-over items. A join settles such an entry from that data before claiming it, and
+     * clears the token; this version never sets it.
+     */
+    @Column("delivery_token")
+    private String deliveryToken;
+
+    /**
+     * Legacy, read only for upgrades: while {@link #deliveryToken} is set, the stacks that stay listed
+     * once that earlier hand-over is confirmed (the part that did not fit), in the form of
+     * {@link #items}; blank when everything fitted.
+     */
+    @Column(value = "after_delivery", type = "LONGTEXT")
+    private String afterDelivery;
 }

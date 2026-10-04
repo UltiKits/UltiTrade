@@ -658,6 +658,75 @@ class TradePendingReturnTest {
         assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
     }
 
+    // ==================== Upgrade from the delivery-token protocol (Codex run 2 on UltiKits/UltiTrade#56) ====================
+
+    private static final org.bukkit.NamespacedKey LEGACY_DELIVERIES =
+            org.bukkit.NamespacedKey.fromString("ultitrade:pending_return_deliveries");
+
+    /**
+     * The state an earlier build leaves after a hand-over at the player's previous join: the entry still
+     * lists the whole stake, carries a token and the part that stays listed; the player's saved data
+     * holds the token (if {@code reachedDisk}) and the handed-over items.
+     */
+    private PendingStakeReturn legacyMarkedEntry(String afterDelivery, boolean reachedDisk) throws Exception {
+        service.completeTrade(sessionWithStakes());
+        PendingStakeReturn row = store.rows.get(0);
+        row.setDeliveryToken("legacy-token");
+        row.setAfterDelivery(afterDelivery);
+        if (reachedDisk) {
+            away.getPersistentDataContainer().set(LEGACY_DELIVERIES,
+                    org.bukkit.persistence.PersistentDataType.STRING, "legacy-token");
+        }
+        return row;
+    }
+
+    @Test
+    @DisplayName("Upgrade: an entry an earlier build handed over whole, whose token is in the player's data, is not handed over again")
+    void legacyEntryHandedOverWholeIsNotHandedOverAgain() throws Exception {
+        legacyMarkedEntry("", true);
+        server.addPlayer(away);
+        PlayerMock joined = saving(away);
+
+        service.deliverPendingReturns(joined);
+        service.deliverPendingReturns(joined);
+
+        assertThat(count(joined, Material.DIAMOND)).as("the earlier build already handed these over").isZero();
+        assertThat(joined.getInventory().all(Material.DIAMOND_SWORD)).isEmpty();
+        assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
+        assertThat(joined.getPersistentDataContainer().has(LEGACY_DELIVERIES)).as("the old marker is cleared").isFalse();
+    }
+
+    @Test
+    @DisplayName("Upgrade: an entry an earlier build handed over in part hands over only the part that stayed listed")
+    void legacyEntryHandedOverInPartHandsOverOnlyTheRest() throws Exception {
+        String swordOnly = TradeService.serializeStacks(java.util.Collections.singletonList(namedSword()));
+        legacyMarkedEntry(swordOnly, true);
+        server.addPlayer(away);
+        PlayerMock joined = saving(away);
+
+        service.deliverPendingReturns(joined);
+        service.deliverPendingReturns(joined);
+
+        assertThat(count(joined, Material.DIAMOND)).as("the diamonds were handed over by the earlier build").isZero();
+        assertThat(joined.getInventory().all(Material.DIAMOND_SWORD)).as("the sword, once").hasSize(1);
+        assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Upgrade: an entry whose earlier hand-over never reached the player's data is handed over once")
+    void legacyEntryNotOnDiskIsHandedOverOnce() throws Exception {
+        legacyMarkedEntry("", false);
+        server.addPlayer(away);
+        PlayerMock joined = saving(away);
+
+        service.deliverPendingReturns(joined);
+        service.deliverPendingReturns(joined);
+
+        assertThat(count(joined, Material.DIAMOND)).isEqualTo(10);
+        assertThat(joined.getInventory().all(Material.DIAMOND_SWORD)).hasSize(1);
+        assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
+    }
+
     @Test
     @DisplayName("An unreadable entry is kept and reported; a readable one beside it is still handed over")
     void unreadableEntryIsKept() throws Exception {
@@ -709,6 +778,8 @@ class TradePendingReturnTest {
             c.setItems(row.getItems());
             c.setStackCount(row.getStackCount());
             c.setCreatedAt(row.getCreatedAt());
+            c.setDeliveryToken(row.getDeliveryToken());
+            c.setAfterDelivery(row.getAfterDelivery());
             return c;
         }
 
