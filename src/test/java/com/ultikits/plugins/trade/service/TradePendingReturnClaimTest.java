@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.atLeastOnce;
@@ -261,6 +262,121 @@ class TradePendingReturnClaimTest {
         org.mockito.InOrder order = org.mockito.Mockito.inOrder(loggerOf(1));
         order.verify(loggerOf(1)).warn(argThat((String line) -> line.contains(rowId) && line.contains("DIAMOND x10")));
         order.verify(loggerOf(1)).warn(argThat((String line) -> line.contains(rowId) && line.contains("nothing from it was handed over")));
+    }
+
+    @Test
+    @DisplayName("A hand-over whose player save returned writes one line naming the player, UUID, row and items; one whose save crashed writes none (gate-1 top-up F1)")
+    void aSavedHandOverIsConfirmedPerEntry() throws Exception {
+        TradeService serverA = server();
+        stakeIsPending(serverA);
+        String rowId = rows().get(0).getId();
+        PlayerMock onA = awayOn();
+
+        serverA.deliverPendingReturns(onA);
+
+        verify(loggerOf(0)).info(argThat((String line) -> line.contains(rowId) && line.contains("Away")
+                && line.contains(awayId.toString()) && line.contains("DIAMOND x10") && line.contains("saved")));
+    }
+
+    @Test
+    @DisplayName("A crash inside the player save leaves no saved line for the entry, so the operator's record says to give the items back (gate-1 top-up F1)")
+    void aCrashInsideTheSaveLeavesNoSavedLine() throws Exception {
+        TradeService serverA = server();
+        stakeIsPending(serverA);
+        String rowId = rows().get(0).getId();
+        PlayerMock onA = org.mockito.Mockito.spy(new PlayerMock(server, "Away", awayId));
+        org.mockito.Mockito.doThrow(new SimulatedCrash()).when(onA).saveData();
+
+        try {
+            serverA.deliverPendingReturns(onA);
+        } catch (SimulatedCrash expected) {
+            // the server died here
+        }
+
+        verify(loggerOf(0), org.mockito.Mockito.never()).info(argThat((String line) -> line.contains(rowId) && line.contains("saved")));
+    }
+
+    @Test
+    @DisplayName("Order: the hand-over line precedes the claim, the claim precedes the player save, and the saved line follows the save (gate-1 top-up F4)")
+    void theRecordBracketsTheClaimAndTheSave() throws Exception {
+        List<String> events = new ArrayList<>();
+        DataOperator<PendingStakeReturn> recording = recordingClaims(database.openAs(PendingStakeReturn.class), events);
+        TradeService serverA = serverWith(recording);
+        org.mockito.Mockito.doAnswer(inv -> events.add("warn:" + inv.getArgument(0))).when(loggerOf(0)).warn(anyString());
+        org.mockito.Mockito.doAnswer(inv -> events.add("info:" + inv.getArgument(0))).when(loggerOf(0)).info(anyString());
+        stakeIsPending(serverA);
+        String rowId = rows().get(0).getId();
+        PlayerMock onA = org.mockito.Mockito.spy(new PlayerMock(server, "Away", awayId));
+        org.mockito.Mockito.doAnswer(inv -> events.add("save")).when(onA).saveData();
+        events.clear();
+
+        serverA.deliverPendingReturns(onA);
+
+        int handing = indexOf(events, e -> e.startsWith("warn:") && e.contains(rowId) && e.contains("DIAMOND x10"));
+        int claim = events.indexOf("claim");
+        int save = events.indexOf("save");
+        int saved = indexOf(events, e -> e.startsWith("info:") && e.contains(rowId) && e.contains("saved"));
+        assertThat(handing).as("hand-over line written").isNotNegative();
+        assertThat(claim).as("claim made").isGreaterThan(handing);
+        assertThat(save).as("player saved after the claim").isGreaterThan(claim);
+        assertThat(saved).as("saved line after the save").isGreaterThan(save);
+    }
+
+    @Test
+    @DisplayName("A claim that committed but whose call threw is not reported as 'tried again': the line says the outcome is unknown, naming row and items (gate-1 top-up F2)")
+    void aClaimThatCommittedThenThrewIsReportedAsUnknown() throws Exception {
+        DataOperator<PendingStakeReturn> real = database.openAs(PendingStakeReturn.class);
+        @SuppressWarnings("unchecked")
+        DataOperator<PendingStakeReturn> throwingAfterCommit = (DataOperator<PendingStakeReturn>) java.lang.reflect.Proxy.newProxyInstance(
+                DataOperator.class.getClassLoader(), new Class<?>[] {DataOperator.class}, (proxy, method, args) -> {
+                    Object result;
+                    try {
+                        result = method.invoke(real, args);
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                    if (method.getName().equals("updateIf")) {
+                        throw new IllegalStateException("connection lost after the statement was applied");
+                    }
+                    return result;
+                });
+        TradeService serverA = serverWith(throwingAfterCommit);
+        stakeIsPending(serverA);
+        String rowId = rows().get(0).getId();
+        PlayerMock onA = awayOn();
+
+        serverA.deliverPendingReturns(onA);
+
+        verify(loggerOf(0), org.mockito.Mockito.never()).error(any(Throwable.class),
+                argThat((String line) -> line.contains("tried again")));
+        verify(loggerOf(0)).error(any(Throwable.class), argThat((String line) -> line.contains(rowId)
+                && line.contains("unknown") && line.contains("DIAMOND x10")));
+        assertThat(count(onA, Material.DIAMOND)).as("items taken back: whether they were claimed is not known").isZero();
+    }
+
+    private static int indexOf(List<String> events, java.util.function.Predicate<String> match) {
+        for (int i = 0; i < events.size(); i++) {
+            if (match.test(events.get(i))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** {@code operator}, recording "claim" in {@code events} at each conditional update. */
+    @SuppressWarnings("unchecked")
+    private static DataOperator<PendingStakeReturn> recordingClaims(DataOperator<PendingStakeReturn> operator, List<String> events) {
+        return (DataOperator<PendingStakeReturn>) java.lang.reflect.Proxy.newProxyInstance(
+                DataOperator.class.getClassLoader(), new Class<?>[] {DataOperator.class}, (proxy, method, args) -> {
+                    if (method.getName().equals("updateIf")) {
+                        events.add("claim");
+                    }
+                    try {
+                        return method.invoke(operator, args);
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                });
     }
 
     /** A process death at a chosen point; nothing after it runs. */
