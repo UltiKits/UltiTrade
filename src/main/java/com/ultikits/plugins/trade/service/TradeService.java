@@ -1102,7 +1102,7 @@ public class TradeService {
                 "{UUID}", holder.getUniqueId().toString(),
                 "{OTHER}", other.getName(),
                 "{OTHER_UUID}", other.getUniqueId().toString(),
-                "{AMOUNT}", String.format("%.2f", amount),
+                "{AMOUNT}", java.math.BigDecimal.valueOf(amount).toPlainString(), // exact: the operator restores this by hand
                 "{CURRENCY}", String.valueOf(currency));
         logQuietly(() -> plugin.getLogger().error(line));
     }
