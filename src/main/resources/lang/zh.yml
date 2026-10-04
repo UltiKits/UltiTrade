@@ -205,6 +205,7 @@ log_pending_return_held_lookup_failed: "无法读取保存的交易物品以统�
 log_pending_return_held_count: "有 {COUNT} 笔保存的交易物品已被占用发还但从未确认（崩溃或保存失败）。它们不会自动发还：请先检查各玩家，再用 /trade pending list、/trade pending redeliver <id> 或 /trade pending void <id> 处理"
 log_pending_return_held_skipped: "{PLAYER} 保存的交易物品 {ID} 被一次未确认的发还暂扣；进服时不会发还（见 /trade pending list）"
 log_pending_return_handed_over: "保存的交易物品 {ID} 已发还给 {PLAYER}（{UUID}），玩家数据已保存，条目已确认：{ITEMS}"
+log_pending_return_resolved_meanwhile: "{PLAYER} 已收到保存的交易物品 {ID}，但服主在发还过程中已处理该条目；以服主的处理为准，该条目保持其设定的状态"
 log_pending_return_claim_lost: "{PLAYER} 保存的交易物品 {ID} 在本次进服读取后已被另一台服务器占用或被删除；本服务器未发还其中任何物品"
 log_pending_return_kept: "{PLAYER} 有 {COUNT} 个已保存的交易物品因背包已满未能发还；继续保留在列表中，待其之后进服发还"
 message_pending_return_partial: "&e已取消交易中还有 {COUNT} 个物品因背包已满未能发还，仍为你保留。请腾出背包空间后重新进服领取。"

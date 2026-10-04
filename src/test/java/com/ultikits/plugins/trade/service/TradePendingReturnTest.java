@@ -539,18 +539,16 @@ class TradePendingReturnTest {
         Runnable crash = () -> {
             throw new SimulatedCrash();
         };
+        final int[] updates = {0};
         store.beforeUpdate = () -> {
-            if (point.equals("before-claim")) {
+            updates[0]++;
+            // update 1 is the claim, update 2 the confirm
+            if ((updates[0] == 1 && point.equals("before-claim")) || (updates[0] == 2 && point.equals("after-save"))) {
                 crash.run();
             }
         };
-        store.beforeDelete = () -> {
-            if (point.equals("after-save")) {
-                crash.run();
-            }
-        };
-        store.afterDelete = () -> {
-            if (point.equals("after-confirm")) {
+        store.afterUpdate = () -> {
+            if (updates[0] == 2 && point.equals("after-confirm")) {
                 crash.run();
             }
         };
@@ -571,8 +569,7 @@ class TradePendingReturnTest {
                 .isLessThanOrEqualTo(10);
 
         store.beforeUpdate = () -> { };
-        store.beforeDelete = () -> { };
-        store.afterDelete = () -> { };
+        store.afterUpdate = () -> { };
         PlayerMock restarted = new PlayerMock(server, "Away", away.getUniqueId());
         restarted.getInventory().setContents(copy(savedContents));
         restarted.getInventory().remove(Material.DIRT); // room for the rest
@@ -643,7 +640,12 @@ class TradePendingReturnTest {
         service.completeTrade(sessionWithStakes());
         server.addPlayer(away);
         PlayerMock joined = saving(away);
-        store.failDelete = true;
+        final int[] updates = {0};
+        store.beforeUpdate = () -> {
+            if (++updates[0] == 2) { // update 1 is the claim, update 2 the confirm
+                throw new IllegalStateException("simulated confirm failure");
+            }
+        };
 
         service.deliverPendingReturns(joined);
 
@@ -651,7 +653,7 @@ class TradePendingReturnTest {
         assertThat(service.heldClaims()).as("the claimed entry stays, held").hasSize(1);
         verify(logger).warn(any(Throwable.class), argThat((String s) -> s.contains("Away")));
 
-        store.failDelete = false;
+        store.beforeUpdate = () -> { };
         service.deliverPendingReturns(joined);
 
         assertThat(count(joined, Material.DIAMOND)).as("not handed over twice").isEqualTo(10);

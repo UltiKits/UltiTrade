@@ -207,6 +207,30 @@ class TradePendingReturnClaimStateTest {
                 });
     }
 
+    /** {@code operator}, with {@code before}/{@code after} run around the {@code n}-th call (1-based) of the named method. */
+    @SuppressWarnings("unchecked")
+    private static DataOperator<PendingStakeReturn> aroundNth(DataOperator<PendingStakeReturn> operator, String methodName, int n,
+                                                             Runnable before, Runnable after) {
+        int[] calls = {0};
+        return (DataOperator<PendingStakeReturn>) java.lang.reflect.Proxy.newProxyInstance(
+                DataOperator.class.getClassLoader(), new Class<?>[] {DataOperator.class}, (proxy, method, args) -> {
+                    boolean hook = method.getName().equals(methodName) && ++calls[0] == n;
+                    if (hook) {
+                        before.run();
+                    }
+                    Object result;
+                    try {
+                        result = method.invoke(operator, args);
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                    if (hook) {
+                        after.run();
+                    }
+                    return result;
+                });
+    }
+
     private static final Runnable NOTHING = () -> { };
     private static final Runnable CRASH = () -> {
         throw new SimulatedCrash();
@@ -281,7 +305,8 @@ class TradePendingReturnClaimStateTest {
     @Test
     @DisplayName("Crash after the player save, before the row is removed: the row is held and the file holds the items, so a join hands nothing over again")
     void crashAfterTheSaveBeforeTheConfirm() throws Exception {
-        TradeService serverA = serverWith(around(database.openAs(PendingStakeReturn.class), "delById", CRASH, NOTHING));
+        // updateIf call 1 is the claim (inside the transaction), call 2 the confirm.
+        TradeService serverA = serverWith(aroundNth(database.openAs(PendingStakeReturn.class), "updateIf", 2, CRASH, NOTHING));
         stakeIsPending(server());
         untilCrash(() -> serverA.deliverPendingReturns(joining()));
 
@@ -296,7 +321,7 @@ class TradePendingReturnClaimStateTest {
     @Test
     @DisplayName("Crash after the row was removed: nothing is held and nothing is handed over again")
     void crashAfterTheConfirm() throws Exception {
-        TradeService serverA = serverWith(around(database.openAs(PendingStakeReturn.class), "delById", NOTHING, CRASH));
+        TradeService serverA = serverWith(aroundNth(database.openAs(PendingStakeReturn.class), "updateIf", 2, NOTHING, CRASH));
         stakeIsPending(server());
         untilCrash(() -> serverA.deliverPendingReturns(joining()));
 

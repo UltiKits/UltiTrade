@@ -205,6 +205,7 @@ log_pending_return_held_lookup_failed: "Could not read the saved trade stakes to
 log_pending_return_held_count: "{COUNT} saved trade stake(s) were claimed for hand-over but never confirmed (a crash or a failed save). They are not handed over automatically: check each player, then resolve them with /trade pending list, /trade pending redeliver <id> or /trade pending void <id>"
 log_pending_return_held_skipped: "{PLAYER}'s saved trade stake {ID} is held by a hand-over that was never confirmed; a join does not hand it over (see /trade pending list)"
 log_pending_return_handed_over: "Saved trade stake {ID} handed over to {PLAYER} ({UUID}), their data saved and the entry confirmed: {ITEMS}"
+log_pending_return_resolved_meanwhile: "{PLAYER} received saved trade stake {ID}, but an operator resolved that entry while it was being handed over; the operator's decision stands and the entry was left as they set it"
 log_pending_return_claim_lost: "{PLAYER}'s saved trade stake {ID} was claimed by another server or removed after this join read it; nothing from it was handed over here"
 log_pending_return_kept: "{PLAYER} has {COUNT} saved trade item(s) that did not fit in their inventory; they stay in the list for a later join"
 message_pending_return_partial: "&e{COUNT} item(s) from a cancelled trade did not fit in your inventory and are still kept for you. Free some space and rejoin to receive them."

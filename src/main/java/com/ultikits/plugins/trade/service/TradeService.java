@@ -1702,9 +1702,23 @@ public class TradeService {
                     .replace("{PLAYER}", player.getName()));
             return new int[] {givenCount, keptCount, 0};
         }
-        // Confirm: the player's data save returned, so the entry is removed. A failure leaves it held.
+        // Confirm: the player's data save returned, so the entry is removed -- only while it still carries
+        // this claim's marker: an operator may have resolved it meanwhile from another server, and that
+        // decision stands (Codex run 1 P2). A failure leaves it held.
         try {
-            pendingReturns.delById(entry.getId());
+            PendingStakeReturn confirmed = copyOf(entry);
+            confirmed.setItems("");
+            confirmed.setStackCount(0);
+            confirmed.setAfterDelivery(null);
+            confirmed.setDeliveryToken(null);
+            if (!pendingReturns.updateIf(confirmed, WhereCondition.builder()
+                    .column("delivery_token").value(marker).build())) {
+                plugin.getLogger().warn(i18n("log_pending_return_resolved_meanwhile")
+                        .replace("{PLAYER}", player.getName())
+                        .replace("{ID}", String.valueOf(entry.getId())));
+                return new int[] {givenCount, keptCount, 0};
+            }
+            removeEmpty(player, confirmed);
             logQuietly(() -> plugin.getLogger().info(Placeholders.fill(i18n("log_pending_return_handed_over"),
                     "{ID}", String.valueOf(entry.getId()),
                     "{PLAYER}", player.getName(),

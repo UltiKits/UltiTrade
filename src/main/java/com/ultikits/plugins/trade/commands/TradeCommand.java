@@ -21,7 +21,10 @@ import org.bukkit.entity.Player;
  * @author wisdomme
  * @version 2.0.0
  */
-@CmdTarget(CmdTarget.CmdTargetType.PLAYER)
+// BOTH at class level so the console-usable /trade pending subcommands do not widen it (the framework
+// refuses a method that widens its class's target and would reject the whole class); every player
+// subcommand narrows itself back to PLAYER (UltiKits/UltiTrade#55, Codex run 1 P1).
+@CmdTarget(CmdTarget.CmdTargetType.BOTH)
 @CmdExecutor(
     alias = {"trade", "t"},
     permission = "ultitrade.use",
@@ -57,6 +60,7 @@ public class TradeCommand extends BaseCommandExecutor {
         return ChatColor.translateAlternateColorCodes('&', languageText);
     }
     
+    @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "<player>")
     public void sendRequest(@CmdSender Player sender, @CmdParam("player") String targetName) {
         Player target = Bukkit.getPlayerExact(targetName);
@@ -73,16 +77,19 @@ public class TradeCommand extends BaseCommandExecutor {
         tradeService.sendRequest(sender, target);
     }
     
+    @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "accept")
     public void accept(@CmdSender Player player) {
         tradeService.acceptRequest(player);
     }
     
+    @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "deny")
     public void deny(@CmdSender Player player) {
         tradeService.denyRequest(player);
     }
     
+    @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "cancel")
     public void cancel(@CmdSender Player player) {
         if (!tradeService.isTrading(player.getUniqueId())) {
@@ -92,6 +99,7 @@ public class TradeCommand extends BaseCommandExecutor {
         tradeService.cancelTrade(player);
     }
     
+    @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "toggle")
     public void toggle(@CmdSender Player player) {
         boolean newState = logService.toggleTrade(player);
@@ -100,6 +108,7 @@ public class TradeCommand extends BaseCommandExecutor {
             : plugin.i18n("trade_toggle_off"), player.getName()));
     }
     
+    @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "block <player>")
     public void blockPlayer(@CmdSender Player player, @CmdParam("player") String targetName) {
         Player target = Bukkit.getPlayerExact(targetName);
@@ -124,6 +133,7 @@ public class TradeCommand extends BaseCommandExecutor {
         player.sendMessage(text(plugin.i18n("block_success_hint")));
     }
     
+    @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "unblock <player>")
     public void unblockPlayer(@CmdSender Player player, @CmdParam("player") String targetName) {
         Player target = Bukkit.getPlayerExact(targetName);
@@ -191,6 +201,7 @@ public class TradeCommand extends BaseCommandExecutor {
         return text(line.replace("{ID}", id));
     }
 
+    @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "")
     public void help(@CmdSender Player player) {
         player.sendMessage(text(plugin.i18n("help_header")));
