@@ -127,8 +127,9 @@ class TradePendingReturnClaimStateTest {
         session.setItem(awayId, 1, new ItemStack(Material.EMERALD, 1));
         Map<UUID, TradeSession> active = UltiTradeTestHelper.getField(service, "activeSessions");
         active.put(session.getSessionId(), session);
+        int before = rows().size();
         service.cancelTrade(session, "test");
-        assertThat(rows()).hasSize(1);
+        assertThat(rows()).hasSize(before + 1);
     }
 
     /** The away player as a join sees them: built from the saved file; saveData writes the file, with hooks around it. */
@@ -441,6 +442,46 @@ class TradePendingReturnClaimStateTest {
 
         assertThat(rows()).as("the released row is still there for the operator's redelivery").hasSize(1);
         assertThat(rows().get(0).getId()).isEqualTo(heldId[0]);
+    }
+
+    private static List<String> messages(PlayerMock player) {
+        List<String> out = new ArrayList<>();
+        String next;
+        while ((next = player.nextMessage()) != null) {
+            out.add(next);
+        }
+        return out;
+    }
+
+    @Test
+    @DisplayName("A join with held entries tells the player once that a return is waiting for an administrator's check, with the count (maintainer, 2026-10-04: 告诉玩家正在核对)")
+    void aJoinWithHeldEntriesTellsThePlayerOnce() throws Exception {
+        crashLeavesAHeldRow();
+        // A second held entry for the same player.
+        TradeService serverB = serverWith(around(database.openAs(PendingStakeReturn.class), "transaction", NOTHING, CRASH));
+        stakeIsPending(server());
+        untilCrash(() -> serverB.deliverPendingReturns(joining()));
+        TradeService restarted = server();
+        assertThat(restarted.heldClaims()).hasSize(2);
+        PlayerMock rejoined = joining();
+
+        restarted.deliverPendingReturns(rejoined);
+
+        List<String> told = messages(rejoined);
+        assertThat(told).filteredOn(m -> m.contains("administrator")).as("one message, whatever the count").hasSize(1);
+        assertThat(told).filteredOn(m -> m.contains("administrator")).first().asString().contains("2");
+    }
+
+    @Test
+    @DisplayName("Control: a join with no held entry says nothing about an administrator's check")
+    void aJoinWithoutHeldEntriesSaysNothingAboutAChecks() throws Exception {
+        TradeService serverA = server();
+        stakeIsPending(serverA);
+        PlayerMock player = joining();
+
+        serverA.deliverPendingReturns(player);
+
+        assertThat(messages(player)).noneMatch(m -> m.contains("administrator"));
     }
 
     @Test
