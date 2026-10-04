@@ -26,6 +26,7 @@ import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.InventoryView;
@@ -1229,6 +1230,10 @@ public class TradeService {
         int kept = 0;
         boolean retry = false;
         for (PendingStakeReturn entry : entries) {
+            if (entry.getDeliveryToken() != null && !settleLegacy(player, entry)) {
+                retry = true;
+                continue;
+            }
             if (entry.getItems() == null || entry.getItems().isEmpty()) {
                 removeEmpty(player, entry); // claimed whole earlier; only its removal had failed
                 continue;
@@ -1247,6 +1252,7 @@ public class TradeService {
             kept += outcome[1];
             retry |= outcome[2] > 0;
         }
+        pruneLegacyDeliveries(player, entries);
         if (retry) {
             player.sendMessage(text(i18n("message_pending_return_retry")));
         }
@@ -1264,6 +1270,87 @@ public class TradeService {
                     .replace("{PLAYER}", player.getName())
                     .replace("{COUNT}", String.valueOf(delivered)));
         }
+    }
+
+    /** The persistent-data key in which builds before UltiKits/UltiTrade#55 recorded their hand-overs. */
+    private static final NamespacedKey LEGACY_DELIVERIES = NamespacedKey.fromString("ultitrade:pending_return_deliveries");
+
+    /**
+     * Settle an entry a build before UltiKits/UltiTrade#55 marked for hand-over, so an upgrade neither
+     * hands it over again nor loses it. Such a build marked the entry with a token, gave the items and
+     * saved the token into the player's data, and completed the entry only at the next join. If the token
+     * is in the player's data, that hand-over reached it: the entry keeps only the part that stayed listed
+     * ({@code afterDelivery}); otherwise it never did, and the entry keeps everything. Either way the token
+     * is cleared with a conditional write on the items this join read, the same claim as a hand-over, and
+     * the entry then goes through the normal hand-over. Returns whether it may; a write that fails or does
+     * not apply leaves the entry for a later join.
+     * <p>
+     * A token is in the data of the server that wrote it only, so an entry marked on one server and
+     * settled on another is handed over again there once: the defect UltiKits/UltiTrade#55 removes, left
+     * only for entries an earlier build had marked and not yet completed when the server was upgraded.
+     */
+    private boolean settleLegacy(Player player, PendingStakeReturn entry) {
+        String token = entry.getDeliveryToken();
+        boolean reachedDisk = legacyDeliveries(player).contains(token);
+        PendingStakeReturn settled = copyOf(entry);
+        settled.setDeliveryToken(null);
+        settled.setAfterDelivery(null);
+        boolean won;
+        try {
+            if (reachedDisk) {
+                String after = entry.getAfterDelivery() == null ? "" : entry.getAfterDelivery();
+                settled.setItems(after);
+                settled.setStackCount(after.isEmpty() ? 0 : deserializeStacks(after).size());
+            }
+            won = pendingReturns.updateIf(settled, WhereCondition.builder()
+                    .column("items").value(entry.getItems()).build());
+        } catch (RuntimeException e) {
+            plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{ID}", String.valueOf(entry.getId())));
+            return false;
+        }
+        if (!won) {
+            plugin.getLogger().warn(i18n("log_pending_return_claim_lost")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{ID}", String.valueOf(entry.getId())));
+            return false;
+        }
+        entry.setItems(settled.getItems());
+        entry.setStackCount(settled.getStackCount());
+        entry.setDeliveryToken(null);
+        entry.setAfterDelivery(null);
+        return true;
+    }
+
+    /** Drop every legacy marker from the player's data that no entry still carries. */
+    private static void pruneLegacyDeliveries(Player player, List<PendingStakeReturn> entries) {
+        Set<String> tokens = legacyDeliveries(player);
+        if (tokens.isEmpty()) {
+            return;
+        }
+        Set<String> live = new HashSet<>();
+        for (PendingStakeReturn entry : entries) {
+            if (entry.getDeliveryToken() != null) {
+                live.add(entry.getDeliveryToken());
+            }
+        }
+        if (tokens.retainAll(live)) {
+            if (tokens.isEmpty()) {
+                player.getPersistentDataContainer().remove(LEGACY_DELIVERIES);
+            } else {
+                player.getPersistentDataContainer().set(LEGACY_DELIVERIES, PersistentDataType.STRING, String.join(",", tokens));
+            }
+        }
+    }
+
+    private static Set<String> legacyDeliveries(Player player) {
+        String value = player.getPersistentDataContainer().get(LEGACY_DELIVERIES, PersistentDataType.STRING);
+        Set<String> tokens = new LinkedHashSet<>();
+        if (value != null && !value.isEmpty()) {
+            tokens.addAll(Arrays.asList(value.split(",")));
+        }
+        return tokens;
     }
 
     /**
@@ -1363,6 +1450,8 @@ public class TradeService {
         copy.setItems(entry.getItems());
         copy.setStackCount(entry.getStackCount());
         copy.setCreatedAt(entry.getCreatedAt());
+        copy.setDeliveryToken(entry.getDeliveryToken());
+        copy.setAfterDelivery(entry.getAfterDelivery());
         return copy;
     }
 
