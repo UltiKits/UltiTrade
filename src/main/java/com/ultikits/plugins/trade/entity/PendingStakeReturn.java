@@ -41,26 +41,15 @@ public class PendingStakeReturn extends BaseDataEntity<String> {
     @Column(value = "items", type = "LONGTEXT")
     private String items;
 
-    /** How many stacks {@link #items} holds, for an operator reading the table directly. */
+    /**
+     * How many stacks {@link #items} holds, for an operator reading the table directly. A join claims
+     * an entry by replacing {@link #items} with the part that did not fit, and removes it once that is
+     * empty (UltiKits/UltiTrade#55).
+     */
     @Column("stack_count")
     private int stackCount;
 
     /** When the stake was saved, in epoch milliseconds. */
     @Column("created_at")
     private long createdAt;
-
-    /**
-     * Set while a hand-over of this entry is in progress: the same token is written into the player's
-     * persistent data together with the handed-over items, so the next join can tell whether that
-     * hand-over reached the player's saved data. {@code null} when no hand-over is in progress.
-     */
-    @Column("delivery_token")
-    private String deliveryToken;
-
-    /**
-     * While {@link #deliveryToken} is set: the stacks that stay listed once the hand-over is confirmed
-     * (the part that did not fit), in the form of {@link #items}; blank when everything fitted.
-     */
-    @Column(value = "after_delivery", type = "LONGTEXT")
-    private String afterDelivery;
 }

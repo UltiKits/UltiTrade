@@ -25,7 +25,6 @@ import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
 import org.bukkit.configuration.file.YamlConfiguration;
-import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
@@ -1187,33 +1186,29 @@ public class TradeService {
         }
     }
 
-    /** The player's persistent-data key that lists the hand-overs their saved data already holds. */
-    private static final NamespacedKey DELIVERIES = NamespacedKey.fromString("ultitrade:pending_return_deliveries");
-
     /**
      * Hand a joining player what fits of every stake saved for them by {@link #holdStakeForReturn}, and
      * keep the rest listed for a later join (maintainer answers of 2026-09-24, amended 2026-09-25 for
      * this step: 「只发装得下的，其余留在列表」).
      * <p>
-     * The list and the player's saved data cannot be written together, so each entry is handed over in
-     * three writes, ordered so that a crash at any point leaves every item either in the list (as the
-     * next join reads it) or in the player's saved data, never both and never neither:
-     * <ol>
-     *   <li>the entry is marked with a fresh token and the part that stays listed afterwards; its items
-     *       are unchanged, so until step 2 is on disk it still lists everything;</li>
-     *   <li>the items that fit go into the inventory, the token into the player's persistent data, and
-     *       the player's data is saved: inventory and token reach the disk in one write;</li>
-     *   <li>at the player's next join, the entry is completed: it keeps only the part that did not fit,
-     *       or is removed.</li>
-     * </ol>
-     * Step 3 is taken from what the disk says, not from what this session did: at a join the player's
-     * persistent data has just been read from their saved file, so a marked entry whose token is in it
-     * reached the disk and is completed, and one whose token is not never did and is unmarked and handed
-     * over again. Completing in the same session would trust that {@code saveData} wrote the file, and
-     * Paper's {@code saveData} logs a failed write and returns normally. The one exception is a server
-     * with player-data saving disabled ({@code players.disable-saving} in {@code spigot.yml}), where no
-     * token can ever reach the disk: there the entry is completed at once, as the player's inventory
-     * itself is never kept either. Nothing is dropped at the join.
+     * <b>Claim before handing over</b> (maintainer decision of 2026-10-04, UltiKits/UltiTrade#55). Servers
+     * sharing one database share the list, but each keeps its own player files, so nothing a server
+     * writes into a player's data can tell another server whether a hand-over happened. Each entry is
+     * therefore claimed in the list itself before anything from it is handed over: one conditional write
+     * ({@code DataOperator#updateIf}) replaces the entry's items with the part that did not fit (nothing,
+     * when everything fitted), and applies only while the entry still holds exactly the items this join
+     * read. That write is one statement on SQLite and MySQL, so of two servers claiming the same entry
+     * only one succeeds; on JSON it runs under the operator's lock. Only the server whose claim succeeded
+     * hands the items over; a claim that did not apply (the entry was claimed by another server, or
+     * removed, after this join read it) hands nothing over, and a later join reads what is still listed.
+     * An entry left with no items is removed.
+     * <p>
+     * <b>Accepted cost.</b> Once claimed, the items are no longer listed; they reach the player's saved
+     * data when the player is saved, which is done straight after. A crash between the claim and that
+     * save leaves them undelivered. So that an operator can act on it, each hand-over is logged at WARNING
+     * naming the player, the entry and the items before the claim is written; a claim that then does not
+     * apply or fails is followed by a line saying that nothing from that entry was handed over. Nothing is dropped at the
+     * join, and nothing is ever handed over twice.
      *
      * @param player the player who joined
      */
@@ -1234,12 +1229,9 @@ public class TradeService {
         int kept = 0;
         boolean retry = false;
         for (PendingStakeReturn entry : entries) {
-            if (entry.getDeliveryToken() != null && !settle(player, entry)) {
-                retry = true;
+            if (entry.getItems() == null || entry.getItems().isEmpty()) {
+                removeEmpty(player, entry); // claimed whole earlier; only its removal had failed
                 continue;
-            }
-            if (entry.getId() == null) {
-                continue; // settled by removal: everything had been handed over
             }
             List<ItemStack> stacks;
             try {
@@ -1255,7 +1247,6 @@ public class TradeService {
             kept += outcome[1];
             retry |= outcome[2] > 0;
         }
-        pruneDeliveries(player, entries);
         if (retry) {
             player.sendMessage(text(i18n("message_pending_return_retry")));
         }
@@ -1276,38 +1267,12 @@ public class TradeService {
     }
 
     /**
-     * Settle an entry an earlier hand-over marked. Returns whether the entry may be handed over now; a
-     * removed entry comes back with a {@code null} id.
-     */
-    private boolean settle(Player player, PendingStakeReturn entry) {
-        String token = entry.getDeliveryToken();
-        boolean reachedDisk = savedDeliveries(player).contains(token);
-        try {
-            if (reachedDisk) {
-                complete(entry);
-                forgetDelivery(player, token);
-            } else {
-                plugin.getLogger().info(i18n("log_pending_return_redeliver")
-                        .replace("{PLAYER}", player.getName())
-                        .replace("{ID}", String.valueOf(entry.getId())));
-                PendingStakeReturn unmarked = copyOf(entry);
-                unmarked.setDeliveryToken(null);
-                unmarked.setAfterDelivery(null);
-                write(entry, unmarked);
-            }
-            return true;
-        } catch (RuntimeException e) {
-            plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
-                    .replace("{PLAYER}", player.getName())
-                    .replace("{ID}", String.valueOf(entry.getId())));
-            return false;
-        }
-    }
-
-    /**
-     * Steps 1 and 2 for one entry (step 3 follows at the next join, or at once when player-data saving is
-     * disabled). Returns {items handed over, items kept listed because they did not fit, 1 if the entry
-     * could not be handed over for a storage failure and waits for a later join}.
+     * Claim one entry and hand over what fits. Returns {items handed over, items kept listed because they
+     * did not fit, 1 if the entry could not be claimed and waits for a later join}.
+     * <p>
+     * The items go into the inventory first, in memory, to learn what fits; nothing can reach the
+     * player's saved data before the claim below, as this all runs on the main thread. If the claim does
+     * not apply or fails, they are taken back out.
      */
     private int[] handOver(Player player, PendingStakeReturn entry, List<ItemStack> stacks) {
         List<ItemStack> given = new ArrayList<>();
@@ -1334,13 +1299,22 @@ public class TradeService {
         if (given.isEmpty()) {
             return new int[] {0, keptCount, 0};
         }
-        // Step 1: mark. On failure nothing may stay handed over, so the in-memory hand-over is undone.
-        String token = UUID.randomUUID().toString();
-        PendingStakeReturn marked = copyOf(entry);
-        marked.setDeliveryToken(token);
-        marked.setAfterDelivery(remaining.isEmpty() ? "" : serializeStacks(remaining));
+        PendingStakeReturn claimed = copyOf(entry);
+        claimed.setItems(remaining.isEmpty() ? "" : serializeStacks(remaining));
+        claimed.setStackCount(remaining.size());
+        // Written before the claim, so it is on record whatever happens after the claim commits: once it
+        // has, these items are listed nowhere until the player's data is saved below (the accepted cost
+        // of UltiKits/UltiTrade#55). A claim that does not apply is followed by a line saying so.
+        String summary = summarize(given);
+        logQuietly(() -> plugin.getLogger().warn(Placeholders.fill(i18n("log_pending_return_handing_over"),
+                "{PLAYER}", player.getName(),
+                "{UUID}", player.getUniqueId().toString(),
+                "{ID}", String.valueOf(entry.getId()),
+                "{ITEMS}", summary)));
+        boolean won;
         try {
-            write(entry, marked);
+            won = pendingReturns.updateIf(claimed, WhereCondition.builder()
+                    .column("items").value(entry.getItems()).build());
         } catch (RuntimeException e) {
             player.getInventory().removeItem(given.toArray(new ItemStack[0]));
             plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
@@ -1348,9 +1322,16 @@ public class TradeService {
                     .replace("{ID}", String.valueOf(entry.getId())));
             return new int[] {0, 0, 1};
         }
-        // Step 2: inventory and token reach the disk together. Saved now so that the window before the
-        // next autosave closes; whether the write landed is read back at the next join (step 3).
-        rememberDelivery(player, token);
+        if (!won) {
+            player.getInventory().removeItem(given.toArray(new ItemStack[0]));
+            plugin.getLogger().warn(i18n("log_pending_return_claim_lost")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{ID}", String.valueOf(entry.getId())));
+            return new int[] {0, 0, 1};
+        }
+        if (remaining.isEmpty()) {
+            removeEmpty(player, claimed);
+        }
         try {
             player.saveData();
         } catch (RuntimeException e) {
@@ -1358,81 +1339,21 @@ public class TradeService {
                     .replace("{COUNT}", String.valueOf(givenCount))
                     .replace("{PLAYER}", player.getName()));
         }
-        if (playerDataSavingDisabled()) {
-            try {
-                complete(entry);
-                forgetDelivery(player, token);
-            } catch (RuntimeException e) {
-                plugin.getLogger().error(e, i18n("log_pending_return_remove_failed")
-                        .replace("{PLAYER}", player.getName())
-                        .replace("{ID}", String.valueOf(entry.getId())));
-            }
-        }
         return new int[] {givenCount, keptCount, 0};
     }
 
     /**
-     * Whether the server never writes player data ({@code players.disable-saving} in {@code spigot.yml}).
-     * Read on each hand-over, so a changed setting applies at the next join.
+     * Remove an entry that lists no items any more. Any server may do this: the entry holds nothing, so
+     * removing it cannot take or duplicate an item. A failure leaves it for a later join.
      */
-    boolean playerDataSavingDisabled() {
+    private void removeEmpty(Player player, PendingStakeReturn entry) {
         try {
-            return Bukkit.spigot().getSpigotConfig().getBoolean("players.disable-saving", false);
-        } catch (RuntimeException | LinkageError e) {
-            return false;
-        }
-    }
-
-    /** Drop every saved marker that no entry of this player carries any more. */
-    private static void pruneDeliveries(Player player, List<PendingStakeReturn> entries) {
-        Set<String> live = new HashSet<>();
-        for (PendingStakeReturn entry : entries) {
-            if (entry.getId() != null && entry.getDeliveryToken() != null) {
-                live.add(entry.getDeliveryToken());
-            }
-        }
-        Set<String> tokens = savedDeliveries(player);
-        if (tokens.retainAll(live)) {
-            writeDeliveries(player, tokens);
-        }
-    }
-
-    /** Keep only the part that did not fit, or remove the entry (its id is then cleared). */
-    private void complete(PendingStakeReturn entry) {
-        String after = entry.getAfterDelivery();
-        if (after == null || after.isEmpty()) {
             pendingReturns.delById(entry.getId());
-            entry.setId(null);
-            return;
+        } catch (RuntimeException e) {
+            plugin.getLogger().warn(e, i18n("log_pending_return_remove_failed")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{ID}", String.valueOf(entry.getId())));
         }
-        PendingStakeReturn completed = copyOf(entry);
-        completed.setItems(after);
-        completed.setStackCount(deserializeStacks(after).size());
-        completed.setDeliveryToken(null);
-        completed.setAfterDelivery(null);
-        write(entry, completed);
-    }
-
-    /**
-     * Write {@code next} over the stored entry, and only once that write committed, make {@code entry}
-     * (the in-memory copy the rest of the join reads, marker pruning included) say the same. A failed
-     * write leaves {@code entry} as the table still holds it.
-     * <p>
-     * A write that matched no stored row -- the entry was deleted after this join read it, by an
-     * administrator or by another server on the same database -- wrote nothing, so it fails like a write
-     * that threw, and each caller takes the failure path it already has: a hand-over is undone, a
-     * settling join logs and retries (UltiKits/UltiTrade#53).
-     *
-     * @throws IllegalStateException if no stored row has {@code next}'s id
-     */
-    private void write(PendingStakeReturn entry, PendingStakeReturn next) {
-        if (pendingReturns.updateCounted(next) == 0) {
-            throw new IllegalStateException("no stored pending return has id " + next.getId() + "; nothing was written");
-        }
-        entry.setItems(next.getItems());
-        entry.setStackCount(next.getStackCount());
-        entry.setDeliveryToken(next.getDeliveryToken());
-        entry.setAfterDelivery(next.getAfterDelivery());
     }
 
     private static PendingStakeReturn copyOf(PendingStakeReturn entry) {
@@ -1442,8 +1363,6 @@ public class TradeService {
         copy.setItems(entry.getItems());
         copy.setStackCount(entry.getStackCount());
         copy.setCreatedAt(entry.getCreatedAt());
-        copy.setDeliveryToken(entry.getDeliveryToken());
-        copy.setAfterDelivery(entry.getAfterDelivery());
         return copy;
     }
 
@@ -1453,36 +1372,6 @@ public class TradeService {
             n += stack.getAmount();
         }
         return n;
-    }
-
-    private static Set<String> savedDeliveries(Player player) {
-        String value = player.getPersistentDataContainer().get(DELIVERIES, PersistentDataType.STRING);
-        Set<String> tokens = new LinkedHashSet<>();
-        if (value != null && !value.isEmpty()) {
-            tokens.addAll(Arrays.asList(value.split(",")));
-        }
-        return tokens;
-    }
-
-    private static void writeDeliveries(Player player, Set<String> tokens) {
-        if (tokens.isEmpty()) {
-            player.getPersistentDataContainer().remove(DELIVERIES);
-        } else {
-            player.getPersistentDataContainer().set(DELIVERIES, PersistentDataType.STRING, String.join(",", tokens));
-        }
-    }
-
-    private static void rememberDelivery(Player player, String token) {
-        Set<String> tokens = savedDeliveries(player);
-        tokens.add(token);
-        writeDeliveries(player, tokens);
-    }
-
-    private static void forgetDelivery(Player player, String token) {
-        Set<String> tokens = savedDeliveries(player);
-        if (tokens.remove(token)) {
-            writeDeliveries(player, tokens);
-        }
     }
 
     /**

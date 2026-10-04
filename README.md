@@ -214,6 +214,24 @@ private String guiTitle = "&6与 {PLAYER} 交易";
 | `SerializedItemStack` | 物品序列化 (JSON) |
 | `TradeSession` | 活跃交易会话 |
 
+## ⚠️ Known limitations / 已知限制
+
+- **A crash while a saved stake is being returned can lose that return.** When a trade is cancelled
+  while one participant cannot be found, their staked items are kept in `trade_pending_returns` and
+  handed back at their next join. On servers sharing one database, a join first claims the entry in
+  that table and only the server whose claim succeeds hands the items over, so a stake is never
+  returned twice (UltiKits/UltiTrade#55). If the server crashes after the claim and before the
+  player's data is saved (which follows at once), the claimed items reach neither the table nor the
+  player. Each hand-over is logged at WARNING before it is claimed, naming the player, their UUID, the
+  entry and the items (`Handing saved trade stake <id> over to <player> ...`); after a crash, give
+  the items in such a line back by hand unless a following line for the same entry says nothing was
+  handed over.
+- **服务器在发还保存的押入物品时崩溃，可能导致这次发还丢失。** 交易取消时若服务器找不到一方，其押入物品保存在
+  `trade_pending_returns` 中，并在其下次进服时发还。多台服务器共享数据库时，进服会先在该表中占用条目，只有占用成功的服务器才发还物品，
+  因此同一份物品不会被发还两次（UltiKits/UltiTrade#55）。若服务器在占用之后、玩家数据保存之前（保存紧随其后）崩溃，被占用的物品既不在表中也不在玩家身上。
+  每次发还都会在占用前记录一条 WARNING，写明玩家、其 UUID、条目与物品（`正在将保存的交易物品 <id> 发还给 <玩家> ...`）；崩溃后，
+  请按这样的日志行手动发还物品，除非其后有一条关于同一条目的说明表明未发还任何物品。
+
 ## 📜 许可证
 
 本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件

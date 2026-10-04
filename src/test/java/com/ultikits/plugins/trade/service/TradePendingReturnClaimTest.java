@@ -36,7 +36,6 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 /**
@@ -226,7 +225,7 @@ class TradePendingReturnClaimTest {
     }
 
     @Test
-    @DisplayName("The server whose claim succeeds logs a WARNING naming the player, the items and the row before the items can reach the player's saved data")
+    @DisplayName("A hand-over is logged at WARNING naming the player, the items and the row before the items can reach the player's saved data")
     void theWinningClaimIsLoggedForTheOperator() throws Exception {
         TradeService serverA = server();
         stakeIsPending(serverA);
@@ -247,8 +246,8 @@ class TradePendingReturnClaimTest {
     }
 
     @Test
-    @DisplayName("A claim that lost hands nothing over and does not log a claim")
-    void aLostClaimLogsNoClaim() throws Exception {
+    @DisplayName("A claim that lost: the hand-over line it wrote is followed by one saying nothing from that entry was handed over")
+    void aLostClaimIsLoggedAsNothingHandedOver() throws Exception {
         TradeService serverB = server();
         PlayerMock onB = awayOn();
         DataOperator<PendingStakeReturn> aOperator = beforeFirstWrite(database.openAs(PendingStakeReturn.class),
@@ -259,7 +258,9 @@ class TradePendingReturnClaimTest {
 
         serverA.deliverPendingReturns(awayOn());
 
-        verify(loggerOf(1), never()).warn(argThat((String line) -> line.contains(rowId) && line.contains("DIAMOND x10")));
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(loggerOf(1));
+        order.verify(loggerOf(1)).warn(argThat((String line) -> line.contains(rowId) && line.contains("DIAMOND x10")));
+        order.verify(loggerOf(1)).warn(argThat((String line) -> line.contains(rowId) && line.contains("nothing from it was handed over")));
     }
 
     /** A process death at a chosen point; nothing after it runs. */

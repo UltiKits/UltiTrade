@@ -76,13 +76,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- On servers sharing one database, a stake waiting to be returned to a player is handed over once, not again at every
+  server hop. A join used to decide whether an earlier hand-over had reached the player by looking in the player's
+  data on its own server, which another server cannot see, so a player who moved between servers was given the same
+  items on each. A join now first claims the entry in `trade_pending_returns` with one conditional write, and only
+  the server whose claim succeeds hands the items over; a claim that finds the entry changed or removed hands nothing
+  over and logs it. Each hand-over is logged at WARNING before it is claimed, naming the player, their UUID, the entry
+  and the items. Accepted cost: if the server crashes after the claim and before the player's data is saved (which
+  follows at once), those items are not delivered; that WARNING line is the record for returning them by hand (see
+  the README's known limitations) (UltiKits/UltiTrade#55).
+- 多台服务器共享数据库时，待返还给玩家的物品只会发还一次，不再在每次换服时重复发还。此前进服时通过本服务器上的玩家数据判断之前的发还是否已送达，
+  而另一台服务器看不到这份数据，因此在服务器之间移动的玩家会在每台服务器上再次收到同样的物品。现在进服会先用一次条件写入在 `trade_pending_returns`
+  中占用条目，只有占用成功的服务器才发还物品；占用时发现条目已被修改或删除则不发还任何物品并记录日志。每次发还都会在占用前记录一条 WARNING，
+  写明玩家、其 UUID、条目与物品。接受的代价：若服务器在占用之后、玩家数据保存之前（保存紧随其后）崩溃，这些物品不会送达；该 WARNING
+  日志行就是手动发还的依据（见 README 的已知限制）（UltiKits/UltiTrade#55）。
+
 - A stake waiting to be returned to a player is no longer handed over when its stored entry was deleted after the
-  player's join read it (by an administrator, or by another server sharing the database). The write that marks the
-  entry for hand-over matched no row and wrote nothing, but the items were given anyway and the entry was treated as
-  updated. Such a write now fails like any other failed write: the hand-over is undone and an ERROR names the player,
-  or a settling join logs it and tries again (UltiKits/UltiTrade#53).
-- 待返还给玩家的物品条目若在玩家加入时被读取后、写入前被删除（管理员删除，或共享数据库的另一台服务器删除），不再照常交付。此前标记交付的写入没有命中任何行、
-  什么也没写，物品却仍交给玩家，条目也被当作已更新。现在这种写入与其他写入失败一样处理：撤销本次交付并记录指名该玩家的 ERROR，或在结算时记录并稍后重试（UltiKits/UltiTrade#53）。
+  player's join read it (by an administrator, or by another server sharing the database). The write for the entry
+  matched no row and wrote nothing, but the items were given anyway and the entry was treated as updated. The join's
+  claim of the entry now does not apply to a deleted row: the hand-over is undone and a line names the player and the
+  entry (UltiKits/UltiTrade#53).
+- 待返还给玩家的物品条目若在玩家加入时被读取后、写入前被删除（管理员删除，或共享数据库的另一台服务器删除），不再照常交付。此前对该条目的写入没有命中任何行、
+  什么也没写，物品却仍交给玩家，条目也被当作已更新。现在进服对条目的占用不会作用于已删除的行：撤销本次交付，并记录一条写明玩家与条目的日志（UltiKits/UltiTrade#53）。
 
 - A save of a player's trade settings whose stored row no longer exists is now reported as failed on every storage
   type. The module keeps each player's settings in memory for the server's lifetime, so if their
@@ -251,13 +266,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   player's last known location, and the console names the player and the items in both cases.
   At the join only what fits in the inventory is handed over; the rest stays saved, the player is
   told how many items are still kept and to free some space and rejoin, and nothing is dropped. With
-  SQLite or MySQL storage a server crash during the hand-over neither loses nor duplicates an item;
-  with JSON storage the list reaches the disk only at the next flush (`datasource.flushRate`), so a
-  crash within that window can hand a stake over a second time (UltiKits/UltiTrade#32).
+  SQLite or MySQL storage a server crash during the hand-over never duplicates an item, but can lose
+  the items being handed over (see the UltiKits/UltiTrade#55 entry above); with JSON storage the list
+  reaches the disk only at the next flush (`datasource.flushRate`), so a crash within that window can
+  hand a stake over a second time (UltiKits/UltiTrade#32).
 - 修复：交易取消时若服务器找不到一方，其押入的物品会被保存，并在其下次进服时发还，不再被销毁。物品保存在新表
   `trade_pending_returns` 中；无法保存时掉落在该玩家最后所在的位置，两种情况下控制台都会写明玩家与物品。
   进服发还时只发背包装得下的部分，其余继续保存，并告知玩家还有多少物品保留、腾出空间后重新进服领取，不会掉落在地。
-  使用 SQLite 或 MySQL 存储时，发还过程中服务器崩溃既不会丢失也不会重复物品；使用 JSON 存储时列表要到下次写盘
+  使用 SQLite 或 MySQL 存储时，发还过程中服务器崩溃不会重复物品，但可能丢失正在发还的物品（见上文 UltiKits/UltiTrade#55 条目）；使用 JSON 存储时列表要到下次写盘
   （`datasource.flushRate`）才落盘，在此窗口内崩溃可能导致重复发还（UltiKits/UltiTrade#32）。
 - `language: en` now applies to everything this module shows or logs: every `/trade` reply and its
   help, the trade request (clickable buttons, their hover text and the countdown BossBar), the
