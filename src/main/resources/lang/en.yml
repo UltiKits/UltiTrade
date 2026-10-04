@@ -210,6 +210,7 @@ log_pending_return_claim_lost: "{PLAYER}'s saved trade stake {ID} was claimed by
 log_pending_return_kept: "{PLAYER} has {COUNT} saved trade item(s) that did not fit in their inventory; they stay in the list for a later join"
 message_pending_return_partial: "&e{COUNT} item(s) from a cancelled trade did not fit in your inventory and are still kept for you. Free some space and rejoin to receive them."
 message_pending_return_retry: "&eItems from a cancelled trade are kept for you but could not be handed over right now. Rejoin to receive them."
+message_pending_return_held: "&e{COUNT} return(s) of items from a cancelled trade are waiting for an administrator to check them; you will receive them once that check is done."
 message_pending_return_delivered: "&aItems you staked in a trade that was cancelled while you were away have been returned to you."
 log_vault_missing: "Vault not found! Money trading disabled."
 log_no_economy_provider: "No Vault economy provider is registered! Money trading disabled."

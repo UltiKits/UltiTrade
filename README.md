@@ -226,8 +226,8 @@ private String guiTitle = "&6与 {PLAYER} 交易";
   entries. Check the player's inventory and ender chest, then resolve each entry with
   `/trade pending list`, `/trade pending redeliver <id>` (handed over at the player's next join, or at once
   if they are online on that server) or `/trade pending void <id>` (removed, not handed over). The
-  commands need `ultitrade.admin` and work from the console. While an entry is held, the player is not
-  told anything about it.
+  commands need `ultitrade.admin` and work from the console. While an entry is held, the player is told
+  at each join that a return of items is waiting for an administrator's check (with the count).
 - **All servers sharing one database must run the same UltiTrade version.** Stop them all, upgrade, then
   start them: a server still running a build from before UltiKits/UltiTrade#55 does not know the CLAIMED
   state and can hand over an entry that an upgraded server holds.
@@ -236,7 +236,7 @@ private String guiTitle = "&6与 {PLAYER} 交易";
   玩家数据保存完成后再删除条目（UltiKits/UltiTrade#55）。因崩溃（或保存失败）而停留在「已占用」状态的条目不会再自动发还，因为仅凭该表无法判断物品是否已送达。
   服务器启动及每次重载时，控制台会提示此类条目的数量。请先检查玩家背包与末影箱，再用 `/trade pending list`、`/trade pending redeliver <id>`
   （在玩家下次进服时发还，若其正在该服在线则立即发还）或 `/trade pending void <id>`（删除，不发还）逐条处理。这些命令需要 `ultitrade.admin` 权限，可在控制台使用。
-  条目被暂扣期间不会通知玩家。
+  条目被暂扣期间，玩家每次进服都会收到一条提示：有待返还物品正在等待管理员核对（含笔数）。
 - **共享同一数据库的所有服务器必须运行同一版本的 UltiTrade。** 请全部停服、升级后再启动：仍运行 UltiKits/UltiTrade#55 之前版本的服务器不认识「已占用」状态，
   可能发还已被暂扣的条目。
 

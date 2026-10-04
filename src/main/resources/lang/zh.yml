@@ -210,6 +210,7 @@ log_pending_return_claim_lost: "{PLAYER} 保存的交易物品 {ID} 在本次进
 log_pending_return_kept: "{PLAYER} 有 {COUNT} 个已保存的交易物品因背包已满未能发还；继续保留在列表中，待其之后进服发还"
 message_pending_return_partial: "&e已取消交易中还有 {COUNT} 个物品因背包已满未能发还，仍为你保留。请腾出背包空间后重新进服领取。"
 message_pending_return_retry: "&e已取消交易中的物品仍为你保留，但暂时无法发还。请重新进服领取。"
+message_pending_return_held: "&e已取消交易中有 {COUNT} 笔待返还物品正在等待管理员核对；核对完成后会发放给你。"
 message_pending_return_delivered: "&a你离线期间被取消的交易中押入的物品已归还给你。"
 log_vault_missing: "未找到 Vault！金币交易已禁用。"
 log_no_economy_provider: "没有注册任何 Vault 经济服务！金币交易已禁用。"

@@ -85,7 +85,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   save is never handed over again automatically: the console warns at start-up and on every reload with the number of
   such entries, and the new `/trade pending list`, `/trade pending redeliver <id>` and `/trade pending void <id>`
   commands (permission `ultitrade.admin`, console-usable) list each one (player name and UUID, items, claim time,
-  server) and let the operator, after checking the player, hand it over again or discard it. All servers sharing the
+  server) and let the operator, after checking the player, hand it over again or discard it; meanwhile the player is
+  told at each join that a return is waiting for an administrator's check. All servers sharing the
   database must be upgraded together (see the README's known limitations). An entry that an earlier build had marked
   for hand-over when the server was upgraded is settled from the player's data first, so a single server neither hands
   it over again nor loses it (UltiKits/UltiTrade#55).
@@ -94,7 +95,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   中记录每次发还的状态：进服先以一次条件写入将条目标记为「已占用」（只有一台服务器能成功），玩家数据保存完成后再删除条目；装不下的部分在同一事务中成为新的未占用条目。
   因崩溃或保存失败而停留在「已占用」状态的条目不会再自动发还：服务器启动及每次重载时控制台会提示此类条目的数量，新增的 `/trade pending list`、
   `/trade pending redeliver <id>` 与 `/trade pending void <id>` 命令（权限 `ultitrade.admin`，可在控制台使用）会列出每个条目（玩家名与 UUID、物品、占用时间、服务器），
-  供服主检查玩家后选择重新发还或作废。共享数据库的所有服务器必须一起升级（见 README 的已知限制）。升级时，旧版本已标记为发还中的条目会先依据玩家数据结算，单台服务器上既不会重复发还也不会丢失（UltiKits/UltiTrade#55）。
+  供服主检查玩家后选择重新发还或作废；在此期间玩家每次进服都会收到正在等待管理员核对的提示。共享数据库的所有服务器必须一起升级（见 README 的已知限制）。升级时，旧版本已标记为发还中的条目会先依据玩家数据结算，单台服务器上既不会重复发还也不会丢失（UltiKits/UltiTrade#55）。
 
 - A stake waiting to be returned to a player is no longer handed over when its stored entry was deleted after the
   player's join read it (by an administrator, or by another server sharing the database). The write for the entry

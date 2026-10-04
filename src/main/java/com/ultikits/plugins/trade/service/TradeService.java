@@ -1224,9 +1224,11 @@ public class TradeService {
         }
         int delivered = 0;
         int kept = 0;
+        int held = 0;
         boolean retry = false;
         for (PendingStakeReturn entry : entries) {
             if (isClaimMarker(entry.getDeliveryToken())) {
+                held++;
                 // Claimed by a hand-over that was never confirmed (a crash, or a failed save): never
                 // handed over by a join; the operator resolves it with /trade pending (maintainer
                 // decision of 2026-10-04).
@@ -1258,6 +1260,10 @@ public class TradeService {
             retry |= outcome[2] > 0;
         }
         pruneLegacyDeliveries(player, entries);
+        if (held > 0) {
+            // Once per join, with the count of held entries (maintainer decision of 2026-10-04: 告诉玩家正在核对).
+            player.sendMessage(text(i18n("message_pending_return_held").replace("{COUNT}", String.valueOf(held))));
+        }
         if (retry) {
             player.sendMessage(text(i18n("message_pending_return_retry")));
         }
