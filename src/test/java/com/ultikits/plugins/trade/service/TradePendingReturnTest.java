@@ -601,7 +601,7 @@ class TradePendingReturnTest {
 
         assertThat(count(joined, Material.DIAMOND)).as("nothing handed over while the entry cannot be marked; the player's own 5 stay").isEqualTo(5);
         assertThat(countListed(Material.DIAMOND)).isEqualTo(10);
-        verify(logger).error(any(Throwable.class), argThat((String s) -> s.contains("Away")));
+        verify(logger).error(any(Throwable.class), argThat((String s) -> s.contains("Away") && s.contains("tried again")));
         assertThat(away.nextMessage()).as("a storage failure is not reported as a full inventory")
                 .contains("could not be handed over right now").doesNotContain("did not fit");
 
@@ -914,7 +914,12 @@ class TradePendingReturnTest {
 
         @Override
         public PendingStakeReturn getById(Object id) {
-            throw new UnsupportedOperationException();
+            for (PendingStakeReturn row : rows) {
+                if (row.getId().equals(id)) {
+                    return copyOf(row);
+                }
+            }
+            return null;
         }
 
         @Override

@@ -82,16 +82,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   items on each. A join now first claims the entry in `trade_pending_returns` with one conditional write, and only
   the server whose claim succeeds hands the items over; a claim that finds the entry changed or removed hands nothing
   over and logs it. Each hand-over is logged at WARNING before it is claimed, naming the player, their UUID, the entry
-  and the items. Accepted cost: if the server crashes after the claim and before the player's data is saved (which
-  follows at once), those items are not delivered; that WARNING line is the record for returning them by hand (see
-  the README's known limitations). An entry that an earlier build had marked for hand-over when the server was
+  and the items, and an INFO line for the same entry confirms it once the player's data is saved. Accepted cost: if the
+  server crashes after the claim and before the player's data is saved (which follows at once), those items are not
+  delivered; a WARNING followed by neither that saved line nor a "nothing was handed over" line is the record for
+  returning them by hand. All servers sharing the database must be upgraded together (see the README's known
+  limitations). An entry that an earlier build had marked for hand-over when the server was
   upgraded is settled from the player's data first, so a single server neither hands it over again nor loses it
   (UltiKits/UltiTrade#55).
 - 多台服务器共享数据库时，待返还给玩家的物品只会发还一次，不再在每次换服时重复发还。此前进服时通过本服务器上的玩家数据判断之前的发还是否已送达，
   而另一台服务器看不到这份数据，因此在服务器之间移动的玩家会在每台服务器上再次收到同样的物品。现在进服会先用一次条件写入在 `trade_pending_returns`
   中占用条目，只有占用成功的服务器才发还物品；占用时发现条目已被修改或删除则不发还任何物品并记录日志。每次发还都会在占用前记录一条 WARNING，
-  写明玩家、其 UUID、条目与物品。接受的代价：若服务器在占用之后、玩家数据保存之前（保存紧随其后）崩溃，这些物品不会送达；该 WARNING
-  日志行就是手动发还的依据（见 README 的已知限制）。升级时，旧版本已标记为发还中的条目会先依据玩家数据结算，单台服务器上既不会重复发还也不会丢失（UltiKits/UltiTrade#55）。
+  写明玩家、其 UUID、条目与物品，玩家数据保存后再为同一条目记录一条 INFO 确认。接受的代价：若服务器在占用之后、玩家数据保存之前（保存紧随其后）崩溃，
+  这些物品不会送达；其后既无该确认、也无「未发还任何物品」说明的 WARNING 就是手动发还的依据。共享数据库的所有服务器必须一起升级（见 README 的已知限制）。升级时，旧版本已标记为发还中的条目会先依据玩家数据结算，单台服务器上既不会重复发还也不会丢失（UltiKits/UltiTrade#55）。
 
 - A stake waiting to be returned to a player is no longer handed over when its stored entry was deleted after the
   player's join read it (by an administrator, or by another server sharing the database). The write for the entry
