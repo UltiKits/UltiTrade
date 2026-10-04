@@ -137,6 +137,21 @@ public class TradeCommand extends BaseCommandExecutor {
         player.sendMessage(withPlayer(plugin.i18n("unblock_success"), target.getName()));
     }
     
+    @CmdTarget(CmdTarget.CmdTargetType.BOTH)
+    @CmdMapping(format = "pending list", permission = "ultitrade.admin")
+    public void pendingList(@CmdSender CommandSender sender) {
+    }
+
+    @CmdTarget(CmdTarget.CmdTargetType.BOTH)
+    @CmdMapping(format = "pending redeliver <id>", permission = "ultitrade.admin")
+    public void pendingRedeliver(@CmdSender CommandSender sender, @CmdParam("id") String id) {
+    }
+
+    @CmdTarget(CmdTarget.CmdTargetType.BOTH)
+    @CmdMapping(format = "pending void <id>", permission = "ultitrade.admin")
+    public void pendingVoid(@CmdSender CommandSender sender, @CmdParam("id") String id) {
+    }
+
     @CmdMapping(format = "")
     public void help(@CmdSender Player player) {
         player.sendMessage(text(plugin.i18n("help_header")));

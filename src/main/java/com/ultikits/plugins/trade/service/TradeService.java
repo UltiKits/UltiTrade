@@ -1272,6 +1272,51 @@ public class TradeService {
         }
     }
 
+    /** A pending return a crash left claimed (stub, implemented in the next commit). */
+    public static final class HeldClaim {
+        private final String id;
+        private final String ownerUuid;
+        private final String ownerName;
+        private final String items;
+        private final long claimedAt;
+        private final String server;
+
+        public HeldClaim(String id, String ownerUuid, String ownerName, String items, long claimedAt, String server) {
+            this.id = id;
+            this.ownerUuid = ownerUuid;
+            this.ownerName = ownerName;
+            this.items = items;
+            this.claimedAt = claimedAt;
+            this.server = server;
+        }
+
+        public String getId() { return id; }
+        public String getOwnerUuid() { return ownerUuid; }
+        public String getOwnerName() { return ownerName; }
+        public String getItems() { return items; }
+        public long getClaimedAt() { return claimedAt; }
+        public String getServer() { return server; }
+    }
+
+    /** The outcome of resolving a held row. */
+    public enum HeldResolution { DONE, NOT_HELD, FAILED }
+
+    public List<HeldClaim> heldClaims() {
+        return new ArrayList<>();
+    }
+
+    public HeldResolution redeliverHeld(String id) {
+        return HeldResolution.NOT_HELD;
+    }
+
+    public HeldResolution voidHeld(String id) {
+        return HeldResolution.NOT_HELD;
+    }
+
+    public int warnAboutHeldClaims() {
+        return 0;
+    }
+
     /** The persistent-data key in which builds before UltiKits/UltiTrade#55 recorded their hand-overs. */
     private static final NamespacedKey LEGACY_DELIVERIES = NamespacedKey.fromString("ultitrade:pending_return_deliveries");
 

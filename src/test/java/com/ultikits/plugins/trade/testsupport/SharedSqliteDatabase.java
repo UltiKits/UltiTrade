@@ -3,6 +3,7 @@ package com.ultikits.plugins.trade.testsupport;
 import com.ultikits.ultitools.abstracts.data.BaseDataEntity;
 import com.ultikits.ultitools.interfaces.DataOperator;
 import com.ultikits.ultitools.interfaces.impl.data.sqlite.SQLiteDataOperator;
+import com.ultikits.ultitools.manager.DataSourceTransactionManager;
 
 import org.sqlite.SQLiteDataSource;
 
@@ -17,7 +18,9 @@ import java.nio.file.Path;
  * Two operators on one file stand in for two servers sharing one MySQL database: each statement is
  * its own auto-committed transaction, the table has the framework's {@code PRIMARY KEY (id)}, and
  * {@code updateCounted} / {@code updateIf} are the framework's own single-statement writes whose
- * affected-row count decides the result -- the properties the module's cross-server code relies on.
+ * affected-row count decides the result, and {@code transaction} is a real database transaction through
+ * the framework's {@code DataSourceTransactionManager} -- the properties the module's cross-server code
+ * relies on.
  */
 public final class SharedSqliteDatabase {
 
@@ -36,6 +39,9 @@ public final class SharedSqliteDatabase {
     public <T extends BaseDataEntity<String>> DataOperator<T> openAs(Class<T> type) {
         SQLiteDataSource source = new SQLiteDataSource();
         source.setUrl("jdbc:sqlite:" + file.toAbsolutePath());
-        return new SQLiteDataOperator<>(source, type);
+        SQLiteDataOperator<T> operator = new SQLiteDataOperator<>(source, type);
+        // As SQLiteDataStore wires it, so DataOperator#transaction is a real database transaction.
+        operator.setTransactionManager(new DataSourceTransactionManager(source));
+        return operator;
     }
 }
