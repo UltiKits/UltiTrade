@@ -79,21 +79,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - On servers sharing one database, a stake waiting to be returned to a player is handed over once, not again at every
   server hop. A join used to decide whether an earlier hand-over had reached the player by looking in the player's
   data on its own server, which another server cannot see, so a player who moved between servers was given the same
-  items on each. A join now first claims the entry in `trade_pending_returns` with one conditional write, and only
-  the server whose claim succeeds hands the items over; a claim that finds the entry changed or removed hands nothing
-  over and logs it. Each hand-over is logged at WARNING before it is claimed, naming the player, their UUID, the entry
-  and the items, and an INFO line for the same entry confirms it once the player's data is saved. Accepted cost: if the
-  server crashes after the claim and before the player's data is saved (which follows at once), those items are not
-  delivered; a WARNING followed by neither that saved line nor a "nothing was handed over" line is the record for
-  returning them by hand. All servers sharing the database must be upgraded together (see the README's known
-  limitations). An entry that an earlier build had marked for hand-over when the server was
-  upgraded is settled from the player's data first, so a single server neither hands it over again nor loses it
-  (UltiKits/UltiTrade#55).
+  items on each. The table now records each hand-over's state: a join first marks the entry CLAIMED with one
+  conditional write (only one server can), and the entry is removed once the player's data save returns; the part
+  that did not fit becomes a new, unclaimed entry in the same transaction. An entry left CLAIMED by a crash or a failed
+  save is never handed over again automatically: the console warns at start-up and on every reload with the number of
+  such entries, and the new `/trade pending list`, `/trade pending redeliver <id>` and `/trade pending void <id>`
+  commands (permission `ultitrade.admin`, console-usable) list each one (player name and UUID, items, claim time,
+  server) and let the operator, after checking the player, hand it over again or discard it. All servers sharing the
+  database must be upgraded together (see the README's known limitations). An entry that an earlier build had marked
+  for hand-over when the server was upgraded is settled from the player's data first, so a single server neither hands
+  it over again nor loses it (UltiKits/UltiTrade#55).
 - 多台服务器共享数据库时，待返还给玩家的物品只会发还一次，不再在每次换服时重复发还。此前进服时通过本服务器上的玩家数据判断之前的发还是否已送达，
   而另一台服务器看不到这份数据，因此在服务器之间移动的玩家会在每台服务器上再次收到同样的物品。现在进服会先用一次条件写入在 `trade_pending_returns`
-  中占用条目，只有占用成功的服务器才发还物品；占用时发现条目已被修改或删除则不发还任何物品并记录日志。每次发还都会在占用前记录一条 WARNING，
-  写明玩家、其 UUID、条目与物品，玩家数据保存后再为同一条目记录一条 INFO 确认。接受的代价：若服务器在占用之后、玩家数据保存之前（保存紧随其后）崩溃，
-  这些物品不会送达；其后既无该确认、也无「未发还任何物品」说明的 WARNING 就是手动发还的依据。共享数据库的所有服务器必须一起升级（见 README 的已知限制）。升级时，旧版本已标记为发还中的条目会先依据玩家数据结算，单台服务器上既不会重复发还也不会丢失（UltiKits/UltiTrade#55）。
+  中记录每次发还的状态：进服先以一次条件写入将条目标记为「已占用」（只有一台服务器能成功），玩家数据保存完成后再删除条目；装不下的部分在同一事务中成为新的未占用条目。
+  因崩溃或保存失败而停留在「已占用」状态的条目不会再自动发还：服务器启动及每次重载时控制台会提示此类条目的数量，新增的 `/trade pending list`、
+  `/trade pending redeliver <id>` 与 `/trade pending void <id>` 命令（权限 `ultitrade.admin`，可在控制台使用）会列出每个条目（玩家名与 UUID、物品、占用时间、服务器），
+  供服主检查玩家后选择重新发还或作废。共享数据库的所有服务器必须一起升级（见 README 的已知限制）。升级时，旧版本已标记为发还中的条目会先依据玩家数据结算，单台服务器上既不会重复发还也不会丢失（UltiKits/UltiTrade#55）。
 
 - A stake waiting to be returned to a player is no longer handed over when its stored entry was deleted after the
   player's join read it (by an administrator, or by another server sharing the database). The write for the entry
@@ -270,14 +271,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   player's last known location, and the console names the player and the items in both cases.
   At the join only what fits in the inventory is handed over; the rest stays saved, the player is
   told how many items are still kept and to free some space and rejoin, and nothing is dropped. With
-  SQLite or MySQL storage a server crash during the hand-over never duplicates an item, but can lose
-  the items being handed over (see the UltiKits/UltiTrade#55 entry above); with JSON storage the list
+  SQLite or MySQL storage a server crash during the hand-over never duplicates an item; the hand-over is
+  held for the operator (see the UltiKits/UltiTrade#55 entry above); with JSON storage the list
   reaches the disk only at the next flush (`datasource.flushRate`), so a crash within that window can
   hand a stake over a second time (UltiKits/UltiTrade#32).
 - 修复：交易取消时若服务器找不到一方，其押入的物品会被保存，并在其下次进服时发还，不再被销毁。物品保存在新表
   `trade_pending_returns` 中；无法保存时掉落在该玩家最后所在的位置，两种情况下控制台都会写明玩家与物品。
   进服发还时只发背包装得下的部分，其余继续保存，并告知玩家还有多少物品保留、腾出空间后重新进服领取，不会掉落在地。
-  使用 SQLite 或 MySQL 存储时，发还过程中服务器崩溃不会重复物品，但可能丢失正在发还的物品（见上文 UltiKits/UltiTrade#55 条目）；使用 JSON 存储时列表要到下次写盘
+  使用 SQLite 或 MySQL 存储时，发还过程中服务器崩溃不会重复物品，该次发还会被暂扣交由服主处理（见上文 UltiKits/UltiTrade#55 条目）；使用 JSON 存储时列表要到下次写盘
   （`datasource.flushRate`）才落盘，在此窗口内崩溃可能导致重复发还（UltiKits/UltiTrade#32）。
 - `language: en` now applies to everything this module shows or logs: every `/trade` reply and its
   help, the trade request (clickable buttons, their hover text and the countdown BossBar), the

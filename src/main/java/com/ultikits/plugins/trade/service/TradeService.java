@@ -118,6 +118,7 @@ public class TradeService {
 
         // Saved stakes of cancelled trades (UltiKits/UltiTrade#32)
         this.pendingReturns = plugin.getDataOperator(PendingStakeReturn.class);
+        warnAboutHeldClaims();
 
         // Setup economy
         if (config.isEnableMoneyTrade()) {
@@ -1193,23 +1194,18 @@ public class TradeService {
      * this step: 「只发装得下的，其余留在列表」).
      * <p>
      * <b>Claim before handing over</b> (maintainer decision of 2026-10-04, UltiKits/UltiTrade#55). Servers
-     * sharing one database share the list, but each keeps its own player files, so nothing a server
-     * writes into a player's data can tell another server whether a hand-over happened. Each entry is
-     * therefore claimed in the list itself before anything from it is handed over: one conditional write
-     * ({@code DataOperator#updateIf}) replaces the entry's items with the part that did not fit (nothing,
-     * when everything fitted), and applies only while the entry still holds exactly the items this join
-     * read. That write is one statement on SQLite and MySQL, so of two servers claiming the same entry
-     * only one succeeds; on JSON it runs under the operator's lock. Only the server whose claim succeeded
-     * hands the items over; a claim that did not apply (the entry was claimed by another server, or
-     * removed, after this join read it) hands nothing over, and a later join reads what is still listed.
-     * An entry left with no items is removed.
+     * sharing one database share the list, but each keeps its own player files, so the hand-over's state is
+     * kept in the list itself. Before anything is handed over, one transaction marks the entry CLAIMED --
+     * conditioned on the entry still holding exactly the items this join read, so of two servers only one
+     * applies -- and lists the part that did not fit as a new, unclaimed entry. Only the server whose claim
+     * applied hands the items over; once the player's data save returns, the entry is removed.
      * <p>
-     * <b>Accepted cost.</b> Once claimed, the items are no longer listed; they reach the player's saved
-     * data when the player is saved, which is done straight after. A crash between the claim and that
-     * save leaves them undelivered. So that an operator can act on it, each hand-over is logged at WARNING
-     * naming the player, the entry and the items before the claim is written; a claim that then does not
-     * apply or fails is followed by a line saying that nothing from that entry was handed over. Nothing is dropped at the
-     * join, and nothing is ever handed over twice.
+     * <b>Held entries</b> (maintainer decision of 2026-10-04, "pending-return crash reconciliation": 数据库记状态，
+     * 用命令交给服主). An entry left CLAIMED -- a crash anywhere between the claim and the removal, or a failed
+     * save -- is never handed over by a join: whether its items reached the player cannot be known from the
+     * database alone. Start-up and every reload warn with the count, and {@code /trade pending} lists such
+     * entries and lets the operator, after checking the player, redeliver or void each one. Nothing is
+     * dropped at the join, and nothing is ever handed over twice by the module itself.
      *
      * @param player the player who joined
      */
@@ -1230,12 +1226,21 @@ public class TradeService {
         int kept = 0;
         boolean retry = false;
         for (PendingStakeReturn entry : entries) {
+            if (isClaimMarker(entry.getDeliveryToken())) {
+                // Claimed by a hand-over that was never confirmed (a crash, or a failed save): never
+                // handed over by a join; the operator resolves it with /trade pending (maintainer
+                // decision of 2026-10-04).
+                plugin.getLogger().info(i18n("log_pending_return_held_skipped")
+                        .replace("{PLAYER}", player.getName())
+                        .replace("{ID}", String.valueOf(entry.getId())));
+                continue;
+            }
             if (entry.getDeliveryToken() != null && !settleLegacy(player, entry)) {
                 retry = true;
                 continue;
             }
             if (entry.getItems() == null || entry.getItems().isEmpty()) {
-                removeEmpty(player, entry); // claimed whole earlier; only its removal had failed
+                removeEmpty(player, entry); // an unclaimed entry left with nothing to hand over
                 continue;
             }
             List<ItemStack> stacks;
@@ -1272,7 +1277,38 @@ public class TradeService {
         }
     }
 
-    /** A pending return a crash left claimed (stub, implemented in the next commit). */
+    // ==================== Hand-over state in the database (maintainer decision of 2026-10-04) ====================
+    //
+    // 数据库记状态，用命令交给服主: a hand-over's state lives in the entry itself, never in a log an
+    // operator has to pair up. The existing columns carry it, because the framework creates a table once
+    // and never adds a column to it (measured on SQLite: an insert naming a column the table lacks fails),
+    // so a new column would break every table an earlier build created:
+    //   delivery_token  NULL                      unclaimed: the next join may hand it over
+    //                   "claimed|<claim id>|<epoch ms>|<server>"
+    //                                             CLAIMED by a hand-over not yet confirmed; never handed
+    //                                             over by a join; listed and resolved by /trade pending
+    //                   anything else             a legacy token of a build before UltiKits/UltiTrade#55
+    //   items           what may still be handed over; empty while CLAIMED
+    //   after_delivery  while CLAIMED: the stacks that hand-over gave (legacy rows: the part that stays)
+
+    private static final String CLAIM_PREFIX = "claimed|";
+
+    static boolean isClaimMarker(String token) {
+        return token != null && token.startsWith(CLAIM_PREFIX);
+    }
+
+    private static String newClaimMarker() {
+        String server;
+        try {
+            String ip = Bukkit.getIp();
+            server = ((ip == null || ip.isEmpty()) ? "*" : ip) + ":" + Bukkit.getPort();
+        } catch (RuntimeException e) {
+            server = "?";
+        }
+        return CLAIM_PREFIX + UUID.randomUUID() + "|" + System.currentTimeMillis() + "|" + server;
+    }
+
+    /** A hand-over that was claimed and never confirmed, as {@code /trade pending list} shows it. */
     public static final class HeldClaim {
         private final String id;
         private final String ownerUuid;
@@ -1290,31 +1326,203 @@ public class TradeService {
             this.server = server;
         }
 
-        public String getId() { return id; }
-        public String getOwnerUuid() { return ownerUuid; }
-        public String getOwnerName() { return ownerName; }
-        public String getItems() { return items; }
-        public long getClaimedAt() { return claimedAt; }
-        public String getServer() { return server; }
+        public String getId() {
+            return id;
+        }
+
+        public String getOwnerUuid() {
+            return ownerUuid;
+        }
+
+        public String getOwnerName() {
+            return ownerName;
+        }
+
+        public String getItems() {
+            return items;
+        }
+
+        public long getClaimedAt() {
+            return claimedAt;
+        }
+
+        public String getServer() {
+            return server;
+        }
     }
 
     /** The outcome of resolving a held row. */
-    public enum HeldResolution { DONE, NOT_HELD, FAILED }
+    public enum HeldResolution {
+        /** Resolved as asked. */
+        DONE,
+        /** No such entry, or it is not held (already resolved, possibly from another server). */
+        NOT_HELD,
+        /** A storage error; nothing was changed, or the console names what was. */
+        FAILED
+    }
 
+    /**
+     * Every entry a hand-over claimed and never confirmed, on every server sharing the database.
+     */
     public List<HeldClaim> heldClaims() {
-        return new ArrayList<>();
+        List<HeldClaim> held = new ArrayList<>();
+        if (pendingReturns == null) {
+            return held;
+        }
+        for (PendingStakeReturn entry : pendingReturns.getAll()) {
+            if (isClaimMarker(entry.getDeliveryToken())) {
+                held.add(describeHeld(entry));
+            }
+        }
+        return held;
     }
 
+    private HeldClaim describeHeld(PendingStakeReturn entry) {
+        String[] parts = entry.getDeliveryToken().split("\\|", 4);
+        long claimedAt = 0;
+        try {
+            claimedAt = parts.length > 2 ? Long.parseLong(parts[2]) : 0;
+        } catch (NumberFormatException ignored) {
+            // shown as 0: the marker was written by this class, so this does not happen in practice
+        }
+        String server = parts.length > 3 ? parts[3] : "?";
+        String name;
+        try {
+            name = Bukkit.getOfflinePlayer(UUID.fromString(entry.getOwnerUuid())).getName();
+        } catch (RuntimeException e) {
+            name = null;
+        }
+        String items;
+        try {
+            items = summarize(deserializeStacks(entry.getAfterDelivery()));
+        } catch (RuntimeException e) {
+            items = "?";
+        }
+        return new HeldClaim(entry.getId(), entry.getOwnerUuid(), name == null ? "?" : name, items, claimedAt, server);
+    }
+
+    /**
+     * Release a held entry for redelivery: it becomes unclaimed and lists the items that hand-over had
+     * claimed, so the owner's next join hands them over through the normal claim. If the owner is online on
+     * this server, that join's hand-over runs now: the operator has just checked the player, and the
+     * normal claim still guarantees a single hand-over. Conditional on the entry still carrying the marker
+     * that was read, so two operators (or two servers) cannot both resolve it.
+     */
     public HeldResolution redeliverHeld(String id) {
-        return HeldResolution.NOT_HELD;
+        PendingStakeReturn entry = readHeld(id);
+        if (entry == null) {
+            return HeldResolution.NOT_HELD;
+        }
+        PendingStakeReturn released = copyOf(entry);
+        String claimedItems = entry.getAfterDelivery() == null ? "" : entry.getAfterDelivery();
+        released.setItems(claimedItems);
+        released.setStackCount(claimedItems.isEmpty() ? 0 : deserializeStacksQuietly(claimedItems));
+        released.setAfterDelivery(null);
+        released.setDeliveryToken(null);
+        HeldResolution outcome = resolve(entry, released);
+        if (outcome != HeldResolution.DONE) {
+            return outcome;
+        }
+        HeldClaim described = describeHeld(entry);
+        logQuietly(() -> plugin.getLogger().warn(Placeholders.fill(i18n("log_pending_return_released"),
+                "{ID}", String.valueOf(entry.getId()),
+                "{PLAYER}", described.getOwnerName(),
+                "{UUID}", described.getOwnerUuid(),
+                "{ITEMS}", described.getItems())));
+        Player online = onlineOwner(entry);
+        if (online != null) {
+            deliverPendingReturns(online);
+        }
+        return HeldResolution.DONE;
     }
 
+    /**
+     * Void a held entry: it is removed and the items it had claimed are not handed over again. The
+     * removal is logged at WARNING naming the entry, the player and the items. Conditional like
+     * {@link #redeliverHeld}.
+     */
     public HeldResolution voidHeld(String id) {
-        return HeldResolution.NOT_HELD;
+        PendingStakeReturn entry = readHeld(id);
+        if (entry == null) {
+            return HeldResolution.NOT_HELD;
+        }
+        PendingStakeReturn emptied = copyOf(entry);
+        emptied.setItems("");
+        emptied.setStackCount(0);
+        emptied.setAfterDelivery(null);
+        emptied.setDeliveryToken(null);
+        HeldResolution outcome = resolve(entry, emptied);
+        if (outcome != HeldResolution.DONE) {
+            return outcome;
+        }
+        HeldClaim described = describeHeld(entry);
+        logQuietly(() -> plugin.getLogger().warn(Placeholders.fill(i18n("log_pending_return_voided"),
+                "{ID}", String.valueOf(entry.getId()),
+                "{PLAYER}", described.getOwnerName(),
+                "{UUID}", described.getOwnerUuid(),
+                "{ITEMS}", described.getItems())));
+        try {
+            pendingReturns.delById(entry.getId());
+        } catch (RuntimeException e) {
+            // The entry is now unclaimed and empty: a later join removes it.
+            plugin.getLogger().warn(e, i18n("log_pending_return_void_remove_failed")
+                    .replace("{ID}", String.valueOf(entry.getId())));
+        }
+        return HeldResolution.DONE;
     }
 
+    private PendingStakeReturn readHeld(String id) {
+        if (pendingReturns == null || id == null) {
+            return null;
+        }
+        PendingStakeReturn entry = pendingReturns.getById(id);
+        return entry != null && isClaimMarker(entry.getDeliveryToken()) ? entry : null;
+    }
+
+    private HeldResolution resolve(PendingStakeReturn entry, PendingStakeReturn next) {
+        try {
+            return pendingReturns.updateIf(next, WhereCondition.builder()
+                    .column("delivery_token").value(entry.getDeliveryToken()).build())
+                    ? HeldResolution.DONE : HeldResolution.NOT_HELD;
+        } catch (RuntimeException e) {
+            plugin.getLogger().error(e, i18n("log_pending_return_resolve_failed")
+                    .replace("{ID}", String.valueOf(entry.getId())));
+            return HeldResolution.FAILED;
+        }
+    }
+
+    private static Player onlineOwner(PendingStakeReturn entry) {
+        try {
+            return Bukkit.getPlayer(UUID.fromString(entry.getOwnerUuid()));
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static int deserializeStacksQuietly(String items) {
+        try {
+            return deserializeStacks(items).size();
+        } catch (RuntimeException e) {
+            return 0;
+        }
+    }
+
+    /**
+     * Warn once, naming the count, when hand-overs are held (claimed and never confirmed); run at start-up
+     * and on every reload. Returns the count.
+     */
     public int warnAboutHeldClaims() {
-        return 0;
+        int count;
+        try {
+            count = heldClaims().size();
+        } catch (RuntimeException e) {
+            plugin.getLogger().warn(e, i18n("log_pending_return_held_lookup_failed"));
+            return 0;
+        }
+        if (count > 0) {
+            plugin.getLogger().warn(i18n("log_pending_return_held_count").replace("{COUNT}", String.valueOf(count)));
+        }
+        return count;
     }
 
     /** The persistent-data key in which builds before UltiKits/UltiTrade#55 recorded their hand-overs. */
@@ -1431,26 +1639,50 @@ public class TradeService {
         if (given.isEmpty()) {
             return new int[] {0, keptCount, 0};
         }
+        // The claim (maintainer decision of 2026-10-04): one transaction marks this entry CLAIMED -- its
+        // items replaced by nothing, the stacks handed over recorded beside the marker -- conditioned on the
+        // items this join read, and lists the part that did not fit as a new, unclaimed entry. Of two servers
+        // claiming one entry only one applies; the remainder exists exactly when the claim does.
+        String marker = newClaimMarker();
         PendingStakeReturn claimed = copyOf(entry);
-        claimed.setItems(remaining.isEmpty() ? "" : serializeStacks(remaining));
-        claimed.setStackCount(remaining.size());
-        // Written before the claim, so it is on record whatever happens after the claim commits: once it
-        // has, these items are listed nowhere until the player's data is saved below (the accepted cost
-        // of UltiKits/UltiTrade#55). A claim that does not apply is followed by a line saying so.
+        claimed.setItems("");
+        claimed.setStackCount(given.size());
+        claimed.setAfterDelivery(serializeStacks(given));
+        claimed.setDeliveryToken(marker);
         String summary = summarize(given);
-        logQuietly(() -> plugin.getLogger().warn(Placeholders.fill(i18n("log_pending_return_handing_over"),
+        logQuietly(() -> plugin.getLogger().info(Placeholders.fill(i18n("log_pending_return_handing_over"),
+                "{ID}", String.valueOf(entry.getId()),
                 "{PLAYER}", player.getName(),
                 "{UUID}", player.getUniqueId().toString(),
-                "{ID}", String.valueOf(entry.getId()),
                 "{ITEMS}", summary)));
         boolean won;
         try {
-            won = pendingReturns.updateIf(claimed, WhereCondition.builder()
-                    .column("items").value(entry.getItems()).build());
-        } catch (RuntimeException e) {
-            player.getInventory().removeItem(given.toArray(new ItemStack[0]));
-            logClaimFailure(e, player, entry, summary);
-            return new int[] {0, 0, 1};
+            won = Boolean.TRUE.equals(pendingReturns.transaction(() -> {
+                if (!pendingReturns.updateIf(claimed, WhereCondition.builder()
+                        .column("items").value(entry.getItems()).build())) {
+                    return false;
+                }
+                if (!remaining.isEmpty()) {
+                    PendingStakeReturn rest = new PendingStakeReturn();
+                    rest.setOwnerUuid(entry.getOwnerUuid());
+                    rest.setItems(serializeStacks(remaining));
+                    rest.setStackCount(remaining.size());
+                    rest.setCreatedAt(entry.getCreatedAt());
+                    pendingReturns.insert(rest);
+                }
+                return true;
+            }));
+        } catch (Exception e) {
+            // The transaction may have committed before the call failed (a connection lost after the
+            // commit): the entry says whether it carries this claim's marker.
+            won = carriesMarker(entry.getId(), marker);
+            if (!won) {
+                player.getInventory().removeItem(given.toArray(new ItemStack[0]));
+                plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
+                        .replace("{PLAYER}", player.getName())
+                        .replace("{ID}", String.valueOf(entry.getId())));
+                return new int[] {0, 0, 1};
+            }
         }
         if (!won) {
             player.getInventory().removeItem(given.toArray(new ItemStack[0]));
@@ -1459,54 +1691,41 @@ public class TradeService {
                     .replace("{ID}", String.valueOf(entry.getId())));
             return new int[] {0, 0, 1};
         }
-        if (remaining.isEmpty()) {
-            removeEmpty(player, claimed);
-        }
         try {
             player.saveData();
-            // The other half of the operator's record: these items are now in the player's saved data
-            // (gate-1 top-up F1). Without it, every successful hand-over would read like one to give back
-            // after any later crash.
+        } catch (RuntimeException e) {
+            // Unreachable on Paper, whose saveData() catches its own write failure (logging "Failed to save
+            // player data for <name>"); kept because the Bukkit API does not promise it. The entry is not
+            // confirmed, so it stays held for the operator.
+            plugin.getLogger().warn(e, i18n("log_pending_return_player_save_failed")
+                    .replace("{COUNT}", String.valueOf(givenCount))
+                    .replace("{PLAYER}", player.getName()));
+            return new int[] {givenCount, keptCount, 0};
+        }
+        // Confirm: the player's data save returned, so the entry is removed. A failure leaves it held.
+        try {
+            pendingReturns.delById(entry.getId());
             logQuietly(() -> plugin.getLogger().info(Placeholders.fill(i18n("log_pending_return_handed_over"),
                     "{ID}", String.valueOf(entry.getId()),
                     "{PLAYER}", player.getName(),
                     "{UUID}", player.getUniqueId().toString(),
                     "{ITEMS}", summary)));
         } catch (RuntimeException e) {
-            plugin.getLogger().warn(e, i18n("log_pending_return_player_save_failed")
-                    .replace("{COUNT}", String.valueOf(givenCount))
-                    .replace("{PLAYER}", player.getName()));
+            plugin.getLogger().warn(e, i18n("log_pending_return_remove_failed")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{ID}", String.valueOf(entry.getId())));
         }
         return new int[] {givenCount, keptCount, 0};
     }
 
-    /**
-     * Log a claim whose call threw. The statement may still have been applied (a connection lost after
-     * the database committed it), so the row is read again: if it still lists the items this join read,
-     * the claim did not apply and the entry is tried again at the next join; otherwise -- the row changed,
-     * is gone, or cannot be read -- whether this claim took the items is unknown, and the line names the
-     * entry and the items for the operator to check (gate-1 top-up F2). The items have already been taken
-     * back out of the inventory, so nothing is ever handed over twice.
-     */
-    private void logClaimFailure(RuntimeException e, Player player, PendingStakeReturn entry, String items) {
-        boolean untouched;
+    /** Whether the stored entry carries {@code marker}; {@code false} also when it cannot be read. */
+    private boolean carriesMarker(String id, String marker) {
         try {
-            PendingStakeReturn now = pendingReturns.getById(entry.getId());
-            untouched = now != null && entry.getItems().equals(now.getItems());
-        } catch (RuntimeException rereadFailed) {
-            untouched = false;
+            PendingStakeReturn now = pendingReturns.getById(id);
+            return now != null && marker.equals(now.getDeliveryToken());
+        } catch (RuntimeException e) {
+            return false;
         }
-        if (untouched) {
-            plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
-                    .replace("{PLAYER}", player.getName())
-                    .replace("{ID}", String.valueOf(entry.getId())));
-            return;
-        }
-        plugin.getLogger().error(e, Placeholders.fill(i18n("log_pending_return_claim_unknown"),
-                "{ID}", String.valueOf(entry.getId()),
-                "{PLAYER}", player.getName(),
-                "{UUID}", player.getUniqueId().toString(),
-                "{ITEMS}", items));
     }
 
     /**

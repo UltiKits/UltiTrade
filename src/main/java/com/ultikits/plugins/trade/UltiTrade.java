@@ -117,6 +117,13 @@ public class UltiTrade extends UltiToolsPlugin {
 
         TradeService tradeService = getContext().getBean(TradeService.class);
         if (tradeService != null) {
+            // Held hand-overs (claimed, never confirmed) are named again at each reload; advisory, not a
+            // reload step (UltiKits/UltiTrade#55, maintainer decision of 2026-10-04).
+            try {
+                tradeService.warnAboutHeldClaims();
+            } catch (RuntimeException ignored) {
+                // the method logs its own failure
+            }
             try {
                 tradeService.reloadEconomy();
             } catch (RuntimeException e) {

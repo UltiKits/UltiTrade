@@ -226,8 +226,8 @@ class TradePendingReturnClaimTest {
     }
 
     @Test
-    @DisplayName("A hand-over is logged at WARNING naming the player, the items and the row before the items can reach the player's saved data")
-    void theWinningClaimIsLoggedForTheOperator() throws Exception {
+    @DisplayName("A crash inside the player save after the claim: the entry is held, never handed over again by a join, and listed for the operator (maintainer decision 2026-10-04)")
+    void aCrashAfterTheClaimLeavesTheEntryHeld() throws Exception {
         TradeService serverA = server();
         stakeIsPending(serverA);
         String rowId = rows().get(0).getId();
@@ -241,9 +241,11 @@ class TradePendingReturnClaimTest {
             // the server died here
         }
 
-        verify(loggerOf(0), atLeastOnce()).warn(argThat((String line) -> line.contains("Away") && line.contains(rowId)
-                && line.contains("DIAMOND x10") && line.contains("EMERALD x1")));
-        assertThat(rows()).as("accepted cost: the claimed stake is no longer listed, so it is never handed over twice").isEmpty();
+        TradeService serverB = server();
+        PlayerMock onB = awayOn();
+        serverB.deliverPendingReturns(onB);
+        assertThat(count(onB, Material.DIAMOND)).as("a held entry is not handed over by another server's join").isZero();
+        assertThat(serverB.heldClaims()).extracting(TradeService.HeldClaim::getId).containsExactly(rowId);
     }
 
     @Test
@@ -260,7 +262,7 @@ class TradePendingReturnClaimTest {
         serverA.deliverPendingReturns(awayOn());
 
         org.mockito.InOrder order = org.mockito.Mockito.inOrder(loggerOf(1));
-        order.verify(loggerOf(1)).warn(argThat((String line) -> line.contains(rowId) && line.contains("DIAMOND x10")));
+        order.verify(loggerOf(1)).info(argThat((String line) -> line.contains(rowId) && line.contains("DIAMOND x10")));
         order.verify(loggerOf(1)).warn(argThat((String line) -> line.contains(rowId) && line.contains("nothing from it was handed over")));
     }
 
@@ -275,9 +277,14 @@ class TradePendingReturnClaimTest {
         serverA.deliverPendingReturns(onA);
 
         verify(loggerOf(0)).info(argThat((String line) -> line.contains(rowId) && line.contains("Away")
-                && line.contains(awayId.toString()) && line.contains("DIAMOND x10") && line.contains("saved")));
+                && line.contains(awayId.toString()) && line.contains("DIAMOND x10") && line.contains("confirmed")));
     }
 
+    /**
+     * A guard, not RED evidence: it asserts an absence ({@code never()}), so it would also pass against
+     * code that never writes the line (gate-1 top-up r3 P1-e). Its RED partner is
+     * {@link #aSavedHandOverIsConfirmedPerEntry}.
+     */
     @Test
     @DisplayName("A crash inside the player save leaves no saved line for the entry, so the operator's record says to give the items back (gate-1 top-up F1)")
     void aCrashInsideTheSaveLeavesNoSavedLine() throws Exception {
@@ -293,7 +300,7 @@ class TradePendingReturnClaimTest {
             // the server died here
         }
 
-        verify(loggerOf(0), org.mockito.Mockito.never()).info(argThat((String line) -> line.contains(rowId) && line.contains("saved")));
+        verify(loggerOf(0), org.mockito.Mockito.never()).info(argThat((String line) -> line.contains(rowId) && line.contains("confirmed")));
     }
 
     @Test
@@ -312,46 +319,14 @@ class TradePendingReturnClaimTest {
 
         serverA.deliverPendingReturns(onA);
 
-        int handing = indexOf(events, e -> e.startsWith("warn:") && e.contains(rowId) && e.contains("DIAMOND x10"));
+        int handing = indexOf(events, e -> e.startsWith("info:") && e.contains(rowId) && e.contains("Handing"));
         int claim = events.indexOf("claim");
         int save = events.indexOf("save");
-        int saved = indexOf(events, e -> e.startsWith("info:") && e.contains(rowId) && e.contains("saved"));
+        int saved = indexOf(events, e -> e.startsWith("info:") && e.contains(rowId) && e.contains("confirmed"));
         assertThat(handing).as("hand-over line written").isNotNegative();
         assertThat(claim).as("claim made").isGreaterThan(handing);
         assertThat(save).as("player saved after the claim").isGreaterThan(claim);
-        assertThat(saved).as("saved line after the save").isGreaterThan(save);
-    }
-
-    @Test
-    @DisplayName("A claim that committed but whose call threw is not reported as 'tried again': the line says the outcome is unknown, naming row and items (gate-1 top-up F2)")
-    void aClaimThatCommittedThenThrewIsReportedAsUnknown() throws Exception {
-        DataOperator<PendingStakeReturn> real = database.openAs(PendingStakeReturn.class);
-        @SuppressWarnings("unchecked")
-        DataOperator<PendingStakeReturn> throwingAfterCommit = (DataOperator<PendingStakeReturn>) java.lang.reflect.Proxy.newProxyInstance(
-                DataOperator.class.getClassLoader(), new Class<?>[] {DataOperator.class}, (proxy, method, args) -> {
-                    Object result;
-                    try {
-                        result = method.invoke(real, args);
-                    } catch (java.lang.reflect.InvocationTargetException e) {
-                        throw e.getCause();
-                    }
-                    if (method.getName().equals("updateIf")) {
-                        throw new IllegalStateException("connection lost after the statement was applied");
-                    }
-                    return result;
-                });
-        TradeService serverA = serverWith(throwingAfterCommit);
-        stakeIsPending(serverA);
-        String rowId = rows().get(0).getId();
-        PlayerMock onA = awayOn();
-
-        serverA.deliverPendingReturns(onA);
-
-        verify(loggerOf(0), org.mockito.Mockito.never()).error(any(Throwable.class),
-                argThat((String line) -> line.contains("tried again")));
-        verify(loggerOf(0)).error(any(Throwable.class), argThat((String line) -> line.contains(rowId)
-                && line.contains("unknown") && line.contains("DIAMOND x10")));
-        assertThat(count(onA, Material.DIAMOND)).as("items taken back: whether they were claimed is not known").isZero();
+        assertThat(saved).as("confirmed line after the save").isGreaterThan(save);
     }
 
     private static int indexOf(List<String> events, java.util.function.Predicate<String> match) {

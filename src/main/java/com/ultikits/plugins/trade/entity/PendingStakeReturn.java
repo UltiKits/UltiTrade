@@ -54,18 +54,18 @@ public class PendingStakeReturn extends BaseDataEntity<String> {
     private long createdAt;
 
     /**
-     * Legacy, read only for upgrades: set by UltiTrade builds before UltiKits/UltiTrade#55 while one of
-     * their hand-overs was in progress; the same token was written into the player's persistent data
-     * with the handed-over items. A join settles such an entry from that data before claiming it, and
-     * clears the token; this version never sets it.
+     * The hand-over state (maintainer decision of 2026-10-04, UltiKits/UltiTrade#55). {@code null}: unclaimed,
+     * a join may hand the entry over. {@code claimed|<claim id>|<epoch ms>|<server>}: CLAIMED by a hand-over
+     * that was not confirmed yet; a join never hands it over, and {@code /trade pending} resolves it. Any other
+     * value: a token written by a build before UltiKits/UltiTrade#55, settled from the player's data at their
+     * next join. The column keeps its old name because the framework never adds a column to an existing table.
      */
     @Column("delivery_token")
     private String deliveryToken;
 
     /**
-     * Legacy, read only for upgrades: while {@link #deliveryToken} is set, the stacks that stay listed
-     * once that earlier hand-over is confirmed (the part that did not fit), in the form of
-     * {@link #items}; blank when everything fitted.
+     * While CLAIMED: the stacks that hand-over gave, in the form of {@link #items} ({@link #items} is then
+     * empty). On a legacy token row: the stacks that stay listed once that earlier hand-over is confirmed.
      */
     @Column(value = "after_delivery", type = "LONGTEXT")
     private String afterDelivery;

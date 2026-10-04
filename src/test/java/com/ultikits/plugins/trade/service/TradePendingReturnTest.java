@@ -514,23 +514,23 @@ class TradePendingReturnTest {
 
     /**
      * A crash at each point of a hand-over, for a stake that only partly fits and for one that fits
-     * entirely (maintainer decision of 2026-10-04, UltiKits/UltiTrade#55: claim before handing over).
-     * No item is ever in both the saved player file and the list. Before the claim commits, every item
-     * is still listed and the join after the restart hands the stake over once; after the claim commits
-     * and before the player is saved, the claimed items are in neither place -- the accepted cost -- and
-     * the WARNING naming the player, the entry and those items is already in the log; from the player save
-     * on, every item is in exactly one place.
+     * entirely (maintainer decision of 2026-10-04, "UltiTrade pending-return crash reconciliation"): the
+     * claim marks the entry CLAIMED in one transaction, and the entry is removed only after the player's
+     * data save returned. Before the claim commits nothing is held and the next join hands the stake over;
+     * from the claim until the removal the handed part is held -- never handed over by a join, listed for
+     * the operator -- while the part that did not fit stays an unclaimed entry; after the removal nothing
+     * is held. No item is ever handed over twice. The same points run against the real SQLite operator in
+     * {@code TradePendingReturnClaimStateTest}.
      */
     @org.junit.jupiter.params.ParameterizedTest(name = "{0}")
     @org.junit.jupiter.params.provider.ValueSource(strings = {
-            "partial/before-claim", "partial/after-claim", "partial/before-save", "partial/after-save",
-            "full/before-claim", "full/after-claim", "full/before-save", "full/after-save"})
-    @DisplayName("A crash at any point never hands an item over twice; a claimed hand-over that did not reach the player's data is on record")
-    void crashAtAnyPointNeverDuplicatesAndLeavesARecord(String scenario) throws Exception {
+            "partial/before-claim", "partial/before-save", "partial/after-save", "partial/after-confirm",
+            "full/before-claim", "full/before-save", "full/after-save", "full/after-confirm"})
+    @DisplayName("A crash at any point never hands an item over twice; a claimed, unconfirmed hand-over is held for the operator")
+    void crashAtAnyPointNeverDuplicatesAndHoldsWhatWasClaimed(String scenario) throws Exception {
         String shape = scenario.substring(0, scenario.indexOf('/'));
         String point = scenario.substring(scenario.indexOf('/') + 1);
         service.completeTrade(sessionWithStakes());
-        String rowId = store.rowsOf(away.getUniqueId()).get(0).getId();
         server.addPlayer(away);
         if (shape.equals("partial")) {
             fillAllBut(away, 0); // room for the diamonds only; the sword stays listed
@@ -544,14 +544,19 @@ class TradePendingReturnTest {
                 crash.run();
             }
         };
-        store.afterUpdate = () -> {
-            if (point.equals("after-claim")) {
+        store.beforeDelete = () -> {
+            if (point.equals("after-save")) {
+                crash.run();
+            }
+        };
+        store.afterDelete = () -> {
+            if (point.equals("after-confirm")) {
                 crash.run();
             }
         };
         PlayerMock joined = saving(away,
                 () -> { if (point.equals("before-save")) crash.run(); },
-                () -> { if (point.equals("after-save")) crash.run(); });
+                () -> { });
 
         try {
             service.deliverPendingReturns(joined);
@@ -559,19 +564,15 @@ class TradePendingReturnTest {
             // the process died here
         }
 
-        // What survives: the table as committed and the player file as last written.
-        int onRecord = count(savedContents, Material.DIAMOND) + countListed(Material.DIAMOND);
-        boolean claimCommitted = !point.equals("before-claim");
-        boolean reachedPlayerFile = point.equals("after-save");
-        if (claimCommitted && !reachedPlayerFile) {
-            assertThat(onRecord).as("accepted cost: the claimed diamonds are in neither place").isZero();
-            verify(logger).warn(argThat((String s) -> s.contains("Away") && s.contains(rowId) && s.contains("DIAMOND x10")));
-        } else {
-            assertThat(onRecord).as("every diamond is in the saved file or in the list, exactly once").isEqualTo(10);
-        }
+        boolean held = point.equals("before-save") || point.equals("after-save");
+        assertThat(service.heldClaims()).as("held only between the claim and the confirm").hasSize(held ? 1 : 0);
+        int inFile = count(savedContents, Material.DIAMOND);
+        assertThat(inFile + countListed(Material.DIAMOND)).as("never in both the file and the list")
+                .isLessThanOrEqualTo(10);
 
         store.beforeUpdate = () -> { };
-        store.afterUpdate = () -> { };
+        store.beforeDelete = () -> { };
+        store.afterDelete = () -> { };
         PlayerMock restarted = new PlayerMock(server, "Away", away.getUniqueId());
         restarted.getInventory().setContents(copy(savedContents));
         restarted.getInventory().remove(Material.DIRT); // room for the rest
@@ -580,12 +581,13 @@ class TradePendingReturnTest {
         service.deliverPendingReturns(rejoined);
         service.deliverPendingReturns(rejoined);
 
-        assertThat(count(rejoined, Material.DIAMOND)).as("never more than the stake")
-                .isEqualTo(claimCommitted && !reachedPlayerFile ? 0 : 10);
-        assertThat(rejoined.getInventory().all(Material.DIAMOND_SWORD))
-                .as("the sword: claimed with the diamonds when everything fitted, otherwise still listed and handed over now")
-                .hasSize(shape.equals("full") && claimCommitted && !reachedPlayerFile ? 0 : 1);
-        assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
+        int expectedDiamonds = point.equals("before-save") ? 0 : 10; // held and not in the file: the operator decides
+        assertThat(count(rejoined, Material.DIAMOND)).as("never more than the stake").isEqualTo(expectedDiamonds);
+        // The sword: claimed with the diamonds when everything fitted (then in the file once saved, or held
+        // and in neither place when the crash came before the save); otherwise an unclaimed entry handed over now.
+        boolean swordNowhere = point.equals("before-save") && shape.equals("full");
+        assertThat(rejoined.getInventory().all(Material.DIAMOND_SWORD)).hasSize(swordNowhere ? 0 : 1);
+        assertThat(service.heldClaims()).hasSize(held ? 1 : 0);
     }
 
     @Test
@@ -636,8 +638,8 @@ class TradePendingReturnTest {
     }
 
     @Test
-    @DisplayName("An emptied entry whose removal fails holds no items, so nothing is handed over twice, and a later join removes it")
-    void emptiedEntryWhoseRemovalFailsIsRemovedLater() throws Exception {
+    @DisplayName("A hand-over whose confirming removal fails stays held: a later join hands nothing over again, and the operator sees it")
+    void confirmFailureLeavesTheEntryHeld() throws Exception {
         service.completeTrade(sessionWithStakes());
         server.addPlayer(away);
         PlayerMock joined = saving(away);
@@ -646,8 +648,7 @@ class TradePendingReturnTest {
         service.deliverPendingReturns(joined);
 
         assertThat(count(joined, Material.DIAMOND)).isEqualTo(10);
-        assertThat(store.rowsOf(away.getUniqueId())).as("the claimed entry stays, empty").hasSize(1);
-        assertThat(countListed(Material.DIAMOND)).isZero();
+        assertThat(service.heldClaims()).as("the claimed entry stays, held").hasSize(1);
         verify(logger).warn(any(Throwable.class), argThat((String s) -> s.contains("Away")));
 
         store.failDelete = false;
@@ -655,7 +656,7 @@ class TradePendingReturnTest {
 
         assertThat(count(joined, Material.DIAMOND)).as("not handed over twice").isEqualTo(10);
         assertThat(joined.getInventory().all(Material.DIAMOND_SWORD)).hasSize(1);
-        assertThat(store.rowsOf(away.getUniqueId())).isEmpty();
+        assertThat(service.heldClaims()).hasSize(1);
     }
 
     // ==================== Upgrade from the delivery-token protocol (Codex run 2 on UltiKits/UltiTrade#56) ====================
@@ -769,6 +770,8 @@ class TradePendingReturnTest {
         boolean failUpdate;
         Runnable beforeUpdate = () -> { };
         Runnable afterUpdate = () -> { };
+        Runnable beforeDelete = () -> { };
+        Runnable afterDelete = () -> { };
         private int nextId = 1;
 
         static PendingStakeReturn copyOf(PendingStakeReturn row) {
@@ -819,12 +822,30 @@ class TradePendingReturnTest {
 
         @Override
         public void delById(Object id) {
-            beforeUpdate.run();
+            beforeDelete.run();
             if (failDelete) {
                 throw new IllegalStateException("simulated delete failure");
             }
             rows.removeIf(row -> row.getId().equals(id));
-            afterUpdate.run();
+            afterDelete.run();
+        }
+
+        /** A database transaction: everything written inside it is undone if it does not return normally. */
+        @Override
+        public <R> R transaction(java.util.concurrent.Callable<R> action) throws Exception {
+            List<PendingStakeReturn> snapshot = new ArrayList<>();
+            for (PendingStakeReturn row : rows) {
+                snapshot.add(copyOf(row));
+            }
+            int idBefore = nextId;
+            try {
+                return action.call();
+            } catch (Throwable t) {
+                rows.clear();
+                rows.addAll(snapshot);
+                nextId = idBefore;
+                throw t;
+            }
         }
 
         @Override
@@ -867,7 +888,8 @@ class TradePendingReturnTest {
         /**
          * The framework's conditional update (6.3.0, UltiTools-Reborn#543): writes {@code entity} over the
          * stored row with its id only while that row still holds every expected value, in one step, and
-         * reports whether it did. Only the {@code items} column is compared, the one the module conditions on.
+         * reports whether it did. Only {@code items} and {@code delivery_token} are compared, the columns the
+         * module conditions on.
          */
         @Override
         public boolean updateIf(PendingStakeReturn entity, WhereCondition... expected) {
@@ -883,10 +905,13 @@ class TradePendingReturnTest {
                 }
                 boolean matches = true;
                 for (WhereCondition c : expected) {
-                    if (!"items".equals(c.getColumn())) {
+                    if ("items".equals(c.getColumn())) {
+                        matches &= String.valueOf(c.getValue()).equals(row.getItems());
+                    } else if ("delivery_token".equals(c.getColumn())) {
+                        matches &= String.valueOf(c.getValue()).equals(row.getDeliveryToken());
+                    } else {
                         throw new UnsupportedOperationException("unexpected column " + c.getColumn());
                     }
-                    matches &= String.valueOf(c.getValue()).equals(row.getItems());
                 }
                 if (matches) {
                     rows.set(i, copyOf(entity));

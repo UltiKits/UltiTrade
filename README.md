@@ -216,26 +216,29 @@ private String guiTitle = "&6与 {PLAYER} 交易";
 
 ## ⚠️ Known limitations / 已知限制
 
-- **A crash while a saved stake is being returned can lose that return.** When a trade is cancelled
-  while one participant cannot be found, their staked items are kept in `trade_pending_returns` and
-  handed back at their next join. On servers sharing one database, a join first claims the entry in
-  that table and only the server whose claim succeeds hands the items over, so a stake is never
-  returned twice (UltiKits/UltiTrade#55). If the server crashes after the claim and before the
-  player's data is saved (which follows at once), the claimed items reach neither the table nor the
-  player. Each hand-over is logged at WARNING before it is claimed, naming the player, their UUID, the
-  entry and the items (`Handing saved trade stake <id> over to <player> ...`), and once the player's data
-  is saved an INFO line confirms it (`Saved trade stake <id> handed over to <player> ... and saved in their
-  player data`). After a crash, give the items of such a WARNING back by hand only if neither a line saying
-  nothing from that entry was handed over nor that saved line follows for the same entry id.
+- **A crash while a saved stake is being returned holds that return for the operator.** When a trade
+  is cancelled while one participant cannot be found, their staked items are kept in
+  `trade_pending_returns` and handed back at their next join. The table records each hand-over's state:
+  before handing over, a join marks the entry CLAIMED (only one server can), and once the player's data
+  save returns the entry is removed (UltiKits/UltiTrade#55). An entry left CLAIMED by a crash (or a failed
+  save) is never handed over again automatically, because whether its items reached the player cannot be
+  known from the table. At start-up and on every reload the console warns with the number of such
+  entries. Check the player's inventory and ender chest, then resolve each entry with
+  `/trade pending list`, `/trade pending redeliver <id>` (handed over at the player's next join, or at once
+  if they are online on that server) or `/trade pending void <id>` (removed, not handed over). The
+  commands need `ultitrade.admin` and work from the console. While an entry is held, the player is not
+  told anything about it.
 - **All servers sharing one database must run the same UltiTrade version.** Stop them all, upgrade, then
-  start them: a server still running a build from before UltiKits/UltiTrade#55 can hand over an entry that
-  an upgraded server hands over too.
-- **服务器在发还保存的押入物品时崩溃，可能导致这次发还丢失。** 交易取消时若服务器找不到一方，其押入物品保存在
-  `trade_pending_returns` 中，并在其下次进服时发还。多台服务器共享数据库时，进服会先在该表中占用条目，只有占用成功的服务器才发还物品，
-  因此同一份物品不会被发还两次（UltiKits/UltiTrade#55）。若服务器在占用之后、玩家数据保存之前（保存紧随其后）崩溃，被占用的物品既不在表中也不在玩家身上。
-  每次发还都会在占用前记录一条 WARNING，写明玩家、其 UUID、条目与物品（`正在将保存的交易物品 <id> 发还给 <玩家> ...`），玩家数据保存后再记录一条 INFO 确认
-  （`保存的交易物品 <id> 已发还给 <玩家> ... 并已写入其玩家数据`）。崩溃后，仅当同一条目之后既没有「未发还任何物品」的说明、也没有这条已保存的日志时，才需按 WARNING 手动发还。
-- **共享同一数据库的所有服务器必须运行同一版本的 UltiTrade。** 请全部停服、升级后再启动：仍运行 UltiKits/UltiTrade#55 之前版本的服务器，可能与已升级的服务器重复发还同一条目。
+  start them: a server still running a build from before UltiKits/UltiTrade#55 does not know the CLAIMED
+  state and can hand over an entry that an upgraded server holds.
+- **服务器在发还保存的押入物品时崩溃，这次发还会被暂扣，交由服主处理。** 交易取消时若服务器找不到一方，其押入物品保存在
+  `trade_pending_returns` 中，并在其下次进服时发还。该表记录每次发还的状态：发还前进服会将条目标记为「已占用」（只有一台服务器能成功），
+  玩家数据保存完成后再删除条目（UltiKits/UltiTrade#55）。因崩溃（或保存失败）而停留在「已占用」状态的条目不会再自动发还，因为仅凭该表无法判断物品是否已送达。
+  服务器启动及每次重载时，控制台会提示此类条目的数量。请先检查玩家背包与末影箱，再用 `/trade pending list`、`/trade pending redeliver <id>`
+  （在玩家下次进服时发还，若其正在该服在线则立即发还）或 `/trade pending void <id>`（删除，不发还）逐条处理。这些命令需要 `ultitrade.admin` 权限，可在控制台使用。
+  条目被暂扣期间不会通知玩家。
+- **共享同一数据库的所有服务器必须运行同一版本的 UltiTrade。** 请全部停服、升级后再启动：仍运行 UltiKits/UltiTrade#55 之前版本的服务器不认识「已占用」状态，
+  可能发还已被暂扣的条目。
 
 ## 📜 许可证
 
