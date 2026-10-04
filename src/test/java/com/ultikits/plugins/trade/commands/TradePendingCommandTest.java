@@ -100,6 +100,26 @@ class TradePendingCommandTest {
     }
 
     @Test
+    @DisplayName("the framework accepts the command class: no method widens the class-level target, so /trade still registers (Codex run 1 P1)")
+    void theFrameworkAcceptsTheTargetComposition() {
+        assertThat(com.ultikits.ultitools.abstracts.command.validation.CmdTargetComposition.check(TradeCommand.class)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("every player subcommand stays player-only")
+    void playerSubcommandsStayPlayerOnly() {
+        for (Method method : TradeCommand.class.getDeclaredMethods()) {
+            CmdMapping mapping = method.getAnnotation(CmdMapping.class);
+            if (mapping == null || mapping.format().startsWith("pending")) {
+                continue;
+            }
+            assertThat(com.ultikits.ultitools.abstracts.command.validation.CmdTargetComposition.resolve(
+                    TradeCommand.class.getAnnotation(CmdTarget.class).value(), method))
+                    .as(method.getName()).isEqualTo(CmdTarget.CmdTargetType.PLAYER);
+        }
+    }
+
+    @Test
     @DisplayName("every pending subcommand is permission-gated and usable from the console")
     void gatedAndConsoleUsable() {
         for (String name : Arrays.asList("pendingList", "pendingRedeliver", "pendingVoid")) {

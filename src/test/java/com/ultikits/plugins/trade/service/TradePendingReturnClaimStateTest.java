@@ -400,6 +400,25 @@ class TradePendingReturnClaimStateTest {
     }
 
     @Test
+    @DisplayName("A hand-over whose row an operator released while it was in flight does not remove the released row when it confirms (Codex run 1 P2)")
+    void aConfirmDoesNotRemoveARowReleasedMeanwhile() throws Exception {
+        TradeService operatorServer = server();
+        String[] heldId = new String[1];
+        // Between this join's player save and its confirm, an operator on another server releases the row.
+        TradeService serverA = server();
+        stakeIsPending(serverA);
+        PlayerMock player = joining(NOTHING, () -> {
+            heldId[0] = operatorServer.heldClaims().get(0).getId();
+            assertThat(operatorServer.redeliverHeld(heldId[0])).isEqualTo(TradeService.HeldResolution.DONE);
+        });
+
+        serverA.deliverPendingReturns(player);
+
+        assertThat(rows()).as("the released row is still there for the operator's redelivery").hasSize(1);
+        assertThat(rows().get(0).getId()).isEqualTo(heldId[0]);
+    }
+
+    @Test
     @DisplayName("No held rows: start-up writes no warning")
     void noHeldRowsNoWarning() throws Exception {
         TradeService serverA = server();
