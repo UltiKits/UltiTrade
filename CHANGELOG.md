@@ -94,6 +94,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   行在运行中被删除，之后的开关交易、拉黑、取消拉黑、交易后统计更新或关服时的保存在 SQLite 与 MySQL 上什么也没写却当作已保存（只有 JSON 后端会报告）。
   现在会记录 `保存玩家设置失败`（关服时附带玩家 UUID），与写入出错时的日志行相同（UltiKits/UltiTrade#52）。
 
+- A change to a player's trade settings is no longer lost at the next restart when their stored row was deleted
+  while the server ran. Such a save matched no row and wrote nothing (since UltiKits/UltiTrade#52 it was at least
+  logged as failed), while the player's chat confirmed the change. The save now re-creates the row with the current
+  settings and logs a WARNING naming the player. If another server sharing the database has already created a row
+  for that player, the settings are written onto it instead; a player's settings row now takes the player's UUID as
+  its id, so two servers creating or re-creating it at once leave one row, not two (UltiKits/UltiTrade#57).
+- 玩家的交易设置存储行在服务器运行期间被删除后，其设置修改不再在下次重启时丢失。此前这种保存匹配不到任何行、什么也没写（自 UltiKits/UltiTrade#52
+  起至少会记录为失败），玩家聊天栏却显示修改成功。现在保存会用当前设置重建该行，并记录一条指名该玩家的 WARNING。若共享数据库的另一台服务器已为该玩家创建了行，
+  则写入那一行；玩家设置行现在以玩家 UUID 作为 id，因此两台服务器同时创建或重建时只会留下一行（UltiKits/UltiTrade#57）。
+
 - `/ul reload UltiTrade` (and a bare `/ul reload`) no longer reports a plain success when part of this module's
   reload failed. If rescheduling the trade-log cleanup task, applying `enable-money-trade`, or voiding open trades'
   confirmations and redrawing their windows fails, or one player's open trade window cannot be redrawn, the module

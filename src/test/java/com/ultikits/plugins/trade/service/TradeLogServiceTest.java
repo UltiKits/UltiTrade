@@ -58,6 +58,18 @@ class TradeLogServiceTest {
         UltiTradeTestHelper.tearDown();
     }
 
+    /**
+     * The stored row is gone and cannot be re-created either: no row for the player turns up, and the
+     * re-creating insert reaches no row (the JSON backend ignores an insert whose id it already holds), so
+     * every write still matches nothing (UltiKits/UltiTrade#52 after UltiKits/UltiTrade#57).
+     */
+    private void noRowCanBeRecreated() {
+        lenient().when(settingsOperator.query()).thenReturn(queryBuilder);
+        lenient().when(queryBuilder.where(anyString())).thenReturn(queryBuilder);
+        lenient().when(queryBuilder.eq(any())).thenReturn(queryBuilder);
+        lenient().when(queryBuilder.list()).thenReturn(Collections.emptyList());
+    }
+
     @Nested
     @DisplayName("Player Settings Management")
     class PlayerSettingsManagement {
@@ -626,7 +638,7 @@ class TradeLogServiceTest {
         }
 
         @Test
-        @DisplayName("a cached settings object whose stored row is gone is logged as not saved at shutdown, naming the player (UltiKits/UltiTrade#52)")
+        @DisplayName("a cached settings object whose stored row is gone and cannot be re-created is logged as not saved at shutdown, naming the player (UltiKits/UltiTrade#52)")
         void shutdownSaveOfAMissingRowIsLoggedAsFailed() throws Exception {
             Map<UUID, PlayerTradeSettings> cache = UltiTradeTestHelper.getField(service, "settingsCache");
             PlayerTradeSettings gone = new PlayerTradeSettings(playerUuid, "TestPlayer");
@@ -636,6 +648,7 @@ class TradeLogServiceTest {
             PlayerTradeSettings kept = new PlayerTradeSettings(otherUuid, "Other");
             cache.put(otherUuid, kept);
             when(settingsOperator.updateCounted(gone)).thenReturn(0);
+            noRowCanBeRecreated();
 
             service.shutdown();
 
@@ -901,26 +914,28 @@ class TradeLogServiceTest {
         }
 
         @Test
-        @DisplayName("a settings save whose stored row is gone is logged as not saved, on the inline path (UltiKits/UltiTrade#52)")
+        @DisplayName("a settings save whose stored row is gone and cannot be re-created is logged as not saved, on the inline path (UltiKits/UltiTrade#52)")
         void saveOfAMissingRowIsLoggedAsFailedInline() throws Exception {
             // No enabled plugin to schedule through, so the write runs on the calling thread.
             PlayerTradeSettings gone = new PlayerTradeSettings(playerUuid, "TestPlayer");
             gone.setId("row-deleted-while-running");
             when(settingsOperator.updateCounted(gone)).thenReturn(0);
+            noRowCanBeRecreated();
 
             service.saveSettings(gone);
 
-            verify(settingsOperator).updateCounted(gone);
+            verify(settingsOperator, org.mockito.Mockito.atLeastOnce()).updateCounted(gone);
             verify(settingsOperator, never()).update(any(PlayerTradeSettings.class));
             verify(UltiTradeTestHelper.getMockLogger()).warn(zhLine("log_settings_write_failed"));
         }
 
         @Test
-        @DisplayName("a settings save whose stored row is gone is logged as not saved, on the asynchronous path (UltiKits/UltiTrade#52)")
+        @DisplayName("a settings save whose stored row is gone and cannot be re-created is logged as not saved, on the asynchronous path (UltiKits/UltiTrade#52)")
         void saveOfAMissingRowIsLoggedAsFailedAsync() throws Exception {
             UltiTradeTestHelper.setField(service, "bukkitPlugin", org.bukkit.Bukkit.getPluginManager().getPlugin("UltiTools"));
             PlayerTradeSettings gone = new PlayerTradeSettings(playerUuid, "TestPlayer");
             when(settingsOperator.updateCounted(gone)).thenReturn(0);
+            noRowCanBeRecreated();
             org.mockito.ArgumentCaptor<Runnable> captor = org.mockito.ArgumentCaptor.forClass(Runnable.class);
 
             service.saveSettings(gone);
@@ -943,12 +958,13 @@ class TradeLogServiceTest {
         }
 
         @Test
-        @DisplayName("a toggle whose stored row is gone is logged as not saved (UltiKits/UltiTrade#52)")
+        @DisplayName("a toggle whose stored row is gone and cannot be re-created is logged as not saved (UltiKits/UltiTrade#52)")
         void toggleOfAMissingRowIsLoggedAsFailed() throws Exception {
             Map<UUID, PlayerTradeSettings> cache = UltiTradeTestHelper.getField(service, "settingsCache");
             PlayerTradeSettings gone = new PlayerTradeSettings(playerUuid, "TestPlayer");
             cache.put(playerUuid, gone);
             when(settingsOperator.updateCounted(gone)).thenReturn(0);
+            noRowCanBeRecreated();
 
             service.toggleTrade(player);
 
