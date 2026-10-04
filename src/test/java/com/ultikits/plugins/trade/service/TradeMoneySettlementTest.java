@@ -71,6 +71,8 @@ class TradeMoneySettlementTest {
     /** Per player: refuse their next withdrawal / deposit, or throw from it. */
     private final Map<UUID, String> withdrawFault = new HashMap<>();
     private final Map<UUID, String> depositFault = new HashMap<>();
+    /** Run once when a deposit is refused or throws (to arm a fault for the calls that follow it). */
+    private Runnable afterDepositFault = () -> { };
 
     @BeforeEach
     void setUp() throws Exception {
@@ -119,6 +121,11 @@ class TradeMoneySettlementTest {
                 fault = fault.substring(0, fault.length() - "-always".length());
             } else {
                 depositFault.remove(id);
+            }
+            if (fault != null) {
+                Runnable hook = afterDepositFault;
+                afterDepositFault = () -> { };
+                hook.run();
             }
             if ("throw".equals(fault)) {
                 throw new IllegalStateException("simulated economy storage error");
@@ -277,6 +284,34 @@ class TradeMoneySettlementTest {
         assertThat(balance(alice)).isEqualTo(1000.0);
         assertThat(balance(bob)).isEqualTo(1000.0);
         assertNoItemsMoved();
+    }
+
+    @Test
+    @DisplayName("A payment that cannot be taken back: one SEVERE line names payee, payer, UUIDs, amount and currency; both payers refunded; no items move; nobody is told nothing was transferred (gate-1 top-up r3 M1, M3)")
+    void failedTakeBackIsLoggedSevereAndNotCalledNothingTransferred() throws Exception {
+        TradeSession session = openTrade();
+        // Alice's 90 to Bob lands; Bob's 180 to Alice is refused; taking the 90 back from Bob is refused too.
+        depositFault.put(alice.getUniqueId(), "refuse");
+        afterDepositFault = () -> withdrawFault.put(bob.getUniqueId(), "refuse");
+
+        service.completeTrade(session);
+
+        assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+        assertNoItemsMoved();
+        assertThat(balance(alice)).as("Alice refunded her 100").isEqualTo(1000.0);
+        assertThat(balance(bob)).as("Bob refunded his 200, and keeps the 90 that could not be taken back").isEqualTo(1090.0);
+        verify(logger).error(argThat((String line) -> line.contains("Bob") && line.contains(bob.getUniqueId().toString())
+                && line.contains("Alice") && line.contains(alice.getUniqueId().toString())
+                && line.contains("90") && line.contains("coins")));
+        for (PlayerMock player : new PlayerMock[] {alice, bob}) {
+            String last = null;
+            String next;
+            while ((next = player.nextMessage()) != null) {
+                last = next;
+            }
+            assertThat(last).as(player.getName() + " is not told nothing was transferred")
+                    .contains("Trade cancelled").doesNotContain("nothing was transferred").contains("operator");
+        }
     }
 
     @Test
