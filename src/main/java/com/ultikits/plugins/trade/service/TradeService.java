@@ -1034,9 +1034,10 @@ public class TradeService {
                 continue;
             }
             if (!moved(economy, payers[i], amounts[i], true)) {
-                refundWithdrawn(economy, payers, payees, amounts, withdrawn);
-                cancelTrade(session, i18n("cancel_reason_money_withdraw_refused")
-                        .replace("{PLAYER}", payers[i].getName()));
+                boolean restored = refundWithdrawn(economy, payers, payees, amounts, withdrawn);
+                cancelTrade(session, restored
+                        ? i18n("cancel_reason_money_withdraw_refused").replace("{PLAYER}", payers[i].getName())
+                        : i18n("cancel_reason_money_not_restored"));
                 return false;
             }
             withdrawn[i] = true;
@@ -1047,14 +1048,18 @@ public class TradeService {
                 continue;
             }
             if (!moved(economy, payees[i], amounts[i] - taxes[i], false)) {
+                boolean restored = true;
                 for (int j = 0; j < 2; j++) {
                     if (deposited[j] && !moved(economy, payees[j], amounts[j] - taxes[j], true)) {
                         logLostMoney(i18n("log_trade_money_takeback_failed"), economy, payees[j], payers[j], amounts[j] - taxes[j]);
+                        restored = false;
                     }
                 }
-                refundWithdrawn(economy, payers, payees, amounts, withdrawn);
-                cancelTrade(session, i18n("cancel_reason_money_deposit_refused")
-                        .replace("{PLAYER}", payees[i].getName()));
+                restored &= refundWithdrawn(economy, payers, payees, amounts, withdrawn);
+                // "Nothing was transferred" is said only when it is true (gate-1 top-up r3 M1).
+                cancelTrade(session, restored
+                        ? i18n("cancel_reason_money_deposit_refused").replace("{PLAYER}", payees[i].getName())
+                        : i18n("cancel_reason_money_not_restored"));
                 return false;
             }
             deposited[i] = true;
@@ -1062,13 +1067,19 @@ public class TradeService {
         return true;
     }
 
-    /** Refund every payer whose withdrawal went through; a refund that fails is logged at SEVERE. */
-    private void refundWithdrawn(Object economy, Player[] payers, Player[] payees, double[] amounts, boolean[] withdrawn) {
+    /**
+     * Refund every payer whose withdrawal went through; a refund that fails is logged at SEVERE. Returns
+     * whether every refund went through.
+     */
+    private boolean refundWithdrawn(Object economy, Player[] payers, Player[] payees, double[] amounts, boolean[] withdrawn) {
+        boolean all = true;
         for (int i = 0; i < 2; i++) {
             if (withdrawn[i] && !moved(economy, payers[i], amounts[i], false)) {
                 logLostMoney(i18n("log_trade_money_refund_failed"), economy, payers[i], payees[i], amounts[i]);
+                all = false;
             }
         }
+        return all;
     }
 
     /**
