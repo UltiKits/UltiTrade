@@ -296,6 +296,19 @@ class TradeMoneySettlementTest {
     }
 
     @Test
+    @DisplayName("The SEVERE line keeps the amount's full precision, so the operator can restore it exactly (Codex run 1 on #59)")
+    void failedRefundLineKeepsFullPrecision() throws Exception {
+        TradeSession session = openTrade();
+        session.setMoney(alice.getUniqueId(), 0.005);
+        withdrawFault.put(bob.getUniqueId(), "refuse");
+        depositFault.put(alice.getUniqueId(), "throw-always");
+
+        service.completeTrade(session);
+
+        verify(logger).error(argThat((String line) -> line.contains("Alice") && line.contains("0.005")));
+    }
+
+    @Test
     @DisplayName("Experience is checked before any money moves: too little experience cancels with every balance untouched")
     void experienceShortfallCancelsBeforeMoneyMoves() throws Exception {
         TradeSession session = openTrade();
