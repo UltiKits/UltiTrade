@@ -328,6 +328,13 @@ class TradeMoneySettlementTest {
         verify(logger).error(argThat((String line) -> line.contains("Alice") && line.contains(alice.getUniqueId().toString())
                 && line.contains("Bob") && line.contains(bob.getUniqueId().toString())
                 && line.contains("100") && line.contains("coins")));
+        String last = null;
+        String next;
+        while ((next = alice.nextMessage()) != null) {
+            last = next;
+        }
+        assertThat(last).as("Alice, whose refund failed, is not told nothing was transferred")
+                .doesNotContain("nothing was transferred").contains("operator");
     }
 
     @Test
