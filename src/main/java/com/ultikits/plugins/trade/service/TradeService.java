@@ -1499,9 +1499,7 @@ public class TradeService {
                     .column("items").value(entry.getItems()).build());
         } catch (RuntimeException e) {
             player.getInventory().removeItem(given.toArray(new ItemStack[0]));
-            plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
-                    .replace("{PLAYER}", player.getName())
-                    .replace("{ID}", String.valueOf(entry.getId())));
+            logClaimFailure(e, player, entry, summary);
             return new int[] {0, 0, 1};
         }
         if (!won) {
@@ -1516,12 +1514,49 @@ public class TradeService {
         }
         try {
             player.saveData();
+            // The other half of the operator's record: these items are now in the player's saved data
+            // (gate-1 top-up F1). Without it, every successful hand-over would read like one to give back
+            // after any later crash.
+            logQuietly(() -> plugin.getLogger().info(Placeholders.fill(i18n("log_pending_return_handed_over"),
+                    "{ID}", String.valueOf(entry.getId()),
+                    "{PLAYER}", player.getName(),
+                    "{UUID}", player.getUniqueId().toString(),
+                    "{ITEMS}", summary)));
         } catch (RuntimeException e) {
             plugin.getLogger().warn(e, i18n("log_pending_return_player_save_failed")
                     .replace("{COUNT}", String.valueOf(givenCount))
                     .replace("{PLAYER}", player.getName()));
         }
         return new int[] {givenCount, keptCount, 0};
+    }
+
+    /**
+     * Log a claim whose call threw. The statement may still have been applied (a connection lost after
+     * the database committed it), so the row is read again: if it still lists the items this join read,
+     * the claim did not apply and the entry is tried again at the next join; otherwise -- the row changed,
+     * is gone, or cannot be read -- whether this claim took the items is unknown, and the line names the
+     * entry and the items for the operator to check (gate-1 top-up F2). The items have already been taken
+     * back out of the inventory, so nothing is ever handed over twice.
+     */
+    private void logClaimFailure(RuntimeException e, Player player, PendingStakeReturn entry, String items) {
+        boolean untouched;
+        try {
+            PendingStakeReturn now = pendingReturns.getById(entry.getId());
+            untouched = now != null && entry.getItems().equals(now.getItems());
+        } catch (RuntimeException rereadFailed) {
+            untouched = false;
+        }
+        if (untouched) {
+            plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{ID}", String.valueOf(entry.getId())));
+            return;
+        }
+        plugin.getLogger().error(e, Placeholders.fill(i18n("log_pending_return_claim_unknown"),
+                "{ID}", String.valueOf(entry.getId()),
+                "{PLAYER}", player.getName(),
+                "{UUID}", player.getUniqueId().toString(),
+                "{ITEMS}", items));
     }
 
     /**
