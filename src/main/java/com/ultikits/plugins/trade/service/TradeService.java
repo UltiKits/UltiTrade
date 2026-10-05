@@ -36,6 +36,8 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.scheduler.BukkitTask;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -949,8 +951,8 @@ public class TradeService {
         // Handle experience transfer
         if (expAvailable) {
             double expTaxRate = config.getExpTaxRate();
-            int tax1 = (int)(exp1 * expTaxRate);
-            int tax2 = (int)(exp2 * expTaxRate);
+            int tax1 = experienceTax(exp1, expTaxRate);
+            int tax2 = experienceTax(exp2, expTaxRate);
             expTax = tax1 + tax2;
             if (exp1 > 0) {
                 setTotalExperience(player1, getTotalExperience(player1) - exp1);
@@ -1775,6 +1777,27 @@ public class TradeService {
     
     // ==================== Experience Utilities ====================
     
+    /**
+     * The experience tax on an offer: the offer times the rate with the fraction dropped (floor), computed in exact
+     * decimal arithmetic from the rate as configured. A double product lands just under a whole number for many
+     * rates (100 x 0.29 = 28.999999999999996), so a cast truncated the tax a point short; 100 at 29% is 29 here, as
+     * the rule says (follow-up of UltiKits/UltiTrade#64). The trade itself and every window that shows the tax or the
+     * amount received after it use this method, so what is shown is what is taken.
+     *
+     * @param offered the experience points offered
+     * @param rate    the configured {@code exp-tax-rate} (0 to 1)
+     * @return the points taken as tax, never more than {@code offered}
+     */
+    public static int experienceTax(int offered, double rate) {
+        if (offered <= 0 || rate <= 0) {
+            return 0;
+        }
+        // BigDecimal.valueOf goes through Double.toString, the shortest decimal that reads back as the configured
+        // value (0.29, not 0.28999999999999998), so the product is the decimal the operator wrote times the offer.
+        return BigDecimal.valueOf(rate).multiply(BigDecimal.valueOf(offered))
+                .setScale(0, RoundingMode.FLOOR).intValue();
+    }
+
     /**
      * Get total experience points for a player, exactly.
      *
