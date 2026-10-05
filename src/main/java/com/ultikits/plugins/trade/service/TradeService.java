@@ -25,8 +25,8 @@ import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.boss.BossBar;
 import org.bukkit.configuration.file.YamlConfiguration;
-import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.entity.Player;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.InventoryView;
@@ -35,6 +35,8 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.scheduler.BukkitTask;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -283,9 +285,14 @@ public class TradeService {
      * nothing offered is added, removed or returned.
      * <p>
      * Each player's window is redrawn in isolation: a failure is logged at SEVERE with the player's
-     * name and the remaining windows are still redrawn.
+     * name and the remaining windows are still redrawn. The players whose window could not be redrawn
+     * are returned, so the reload can report itself as partial (UltiKits/UltiTrade#50).
+     *
+     * @return the names of the players whose window still shows the previous terms, in the order tried;
+     *         empty when every open window was redrawn
      */
-    public void refreshOpenTradeWindowsAfterReload() {
+    public List<String> refreshOpenTradeWindowsAfterReload() {
+        List<String> notRedrawn = new ArrayList<>();
         for (TradeSession session : activeSessions.values()) {
             for (UUID participant : new UUID[] {session.getPlayer1(), session.getPlayer2()}) {
                 Player player = Bukkit.getPlayer(participant);
@@ -296,9 +303,11 @@ public class TradeService {
                     refreshOpenTradeWindow(session, player);
                 } catch (RuntimeException | LinkageError e) {
                     plugin.getLogger().error(e, i18n("log_window_redraw_failed").replace("{PLAYER}", player.getName()));
+                    notRedrawn.add(player.getName());
                 }
             }
         }
+        return notRedrawn;
     }
 
     private void refreshOpenTradeWindow(TradeSession session, Player player) {
@@ -936,8 +945,8 @@ public class TradeService {
             
             // Apply tax
             double expTaxRate = config.getExpTaxRate();
-            int tax1 = (int)(exp1 * expTaxRate);
-            int tax2 = (int)(exp2 * expTaxRate);
+            int tax1 = experienceTax(exp1, expTaxRate);
+            int tax2 = experienceTax(exp2, expTaxRate);
             expTax = tax1 + tax2;
             
             // Check experience
@@ -1180,33 +1189,29 @@ public class TradeService {
         }
     }
 
-    /** The player's persistent-data key that lists the hand-overs their saved data already holds. */
-    private static final NamespacedKey DELIVERIES = NamespacedKey.fromString("ultitrade:pending_return_deliveries");
-
     /**
      * Hand a joining player what fits of every stake saved for them by {@link #holdStakeForReturn}, and
      * keep the rest listed for a later join (maintainer answers of 2026-09-24, amended 2026-09-25 for
      * this step: 「只发装得下的，其余留在列表」).
      * <p>
-     * The list and the player's saved data cannot be written together, so each entry is handed over in
-     * three writes, ordered so that a crash at any point leaves every item either in the list (as the
-     * next join reads it) or in the player's saved data, never both and never neither:
-     * <ol>
-     *   <li>the entry is marked with a fresh token and the part that stays listed afterwards; its items
-     *       are unchanged, so until step 2 is on disk it still lists everything;</li>
-     *   <li>the items that fit go into the inventory, the token into the player's persistent data, and
-     *       the player's data is saved: inventory and token reach the disk in one write;</li>
-     *   <li>at the player's next join, the entry is completed: it keeps only the part that did not fit,
-     *       or is removed.</li>
-     * </ol>
-     * Step 3 is taken from what the disk says, not from what this session did: at a join the player's
-     * persistent data has just been read from their saved file, so a marked entry whose token is in it
-     * reached the disk and is completed, and one whose token is not never did and is unmarked and handed
-     * over again. Completing in the same session would trust that {@code saveData} wrote the file, and
-     * Paper's {@code saveData} logs a failed write and returns normally. The one exception is a server
-     * with player-data saving disabled ({@code players.disable-saving} in {@code spigot.yml}), where no
-     * token can ever reach the disk: there the entry is completed at once, as the player's inventory
-     * itself is never kept either. Nothing is dropped at the join.
+     * <b>Claim before handing over</b> (maintainer decision of 2026-10-04, UltiKits/UltiTrade#55). Servers
+     * sharing one database share the list, but each keeps its own player files, so nothing a server
+     * writes into a player's data can tell another server whether a hand-over happened. Each entry is
+     * therefore claimed in the list itself before anything from it is handed over: one conditional write
+     * ({@code DataOperator#updateIf}) replaces the entry's items with the part that did not fit (nothing,
+     * when everything fitted), and applies only while the entry still holds exactly the items this join
+     * read. That write is one statement on SQLite and MySQL, so of two servers claiming the same entry
+     * only one succeeds; on JSON it runs under the operator's lock. Only the server whose claim succeeded
+     * hands the items over; a claim that did not apply (the entry was claimed by another server, or
+     * removed, after this join read it) hands nothing over, and a later join reads what is still listed.
+     * An entry left with no items is removed.
+     * <p>
+     * <b>Accepted cost.</b> Once claimed, the items are no longer listed; they reach the player's saved
+     * data when the player is saved, which is done straight after. A crash between the claim and that
+     * save leaves them undelivered. So that an operator can act on it, each hand-over is logged at WARNING
+     * naming the player, the entry and the items before the claim is written; a claim that then does not
+     * apply or fails is followed by a line saying that nothing from that entry was handed over. Nothing is dropped at the
+     * join, and nothing is ever handed over twice.
      *
      * @param player the player who joined
      */
@@ -1227,12 +1232,13 @@ public class TradeService {
         int kept = 0;
         boolean retry = false;
         for (PendingStakeReturn entry : entries) {
-            if (entry.getDeliveryToken() != null && !settle(player, entry)) {
+            if (entry.getDeliveryToken() != null && !settleLegacy(player, entry)) {
                 retry = true;
                 continue;
             }
-            if (entry.getId() == null) {
-                continue; // settled by removal: everything had been handed over
+            if (entry.getItems() == null || entry.getItems().isEmpty()) {
+                removeEmpty(player, entry); // claimed whole earlier; only its removal had failed
+                continue;
             }
             List<ItemStack> stacks;
             try {
@@ -1248,7 +1254,7 @@ public class TradeService {
             kept += outcome[1];
             retry |= outcome[2] > 0;
         }
-        pruneDeliveries(player, entries);
+        pruneLegacyDeliveries(player, entries);
         if (retry) {
             player.sendMessage(text(i18n("message_pending_return_retry")));
         }
@@ -1268,39 +1274,94 @@ public class TradeService {
         }
     }
 
+    /** The persistent-data key in which builds before UltiKits/UltiTrade#55 recorded their hand-overs. */
+    private static final NamespacedKey LEGACY_DELIVERIES = NamespacedKey.fromString("ultitrade:pending_return_deliveries");
+
     /**
-     * Settle an entry an earlier hand-over marked. Returns whether the entry may be handed over now; a
-     * removed entry comes back with a {@code null} id.
+     * Settle an entry a build before UltiKits/UltiTrade#55 marked for hand-over, so an upgrade neither
+     * hands it over again nor loses it. Such a build marked the entry with a token, gave the items and
+     * saved the token into the player's data, and completed the entry only at the next join. If the token
+     * is in the player's data, that hand-over reached it: the entry keeps only the part that stayed listed
+     * ({@code afterDelivery}); otherwise it never did, and the entry keeps everything. Either way the token
+     * is cleared with a conditional write on the items this join read, the same claim as a hand-over, and
+     * the entry then goes through the normal hand-over. Returns whether it may; a write that fails or does
+     * not apply leaves the entry for a later join.
+     * <p>
+     * A token is in the data of the server that wrote it only, so an entry marked on one server and
+     * settled on another is handed over again there once: the defect UltiKits/UltiTrade#55 removes, left
+     * only for entries an earlier build had marked and not yet completed when the server was upgraded.
      */
-    private boolean settle(Player player, PendingStakeReturn entry) {
+    private boolean settleLegacy(Player player, PendingStakeReturn entry) {
         String token = entry.getDeliveryToken();
-        boolean reachedDisk = savedDeliveries(player).contains(token);
+        boolean reachedDisk = legacyDeliveries(player).contains(token);
+        PendingStakeReturn settled = copyOf(entry);
+        settled.setDeliveryToken(null);
+        settled.setAfterDelivery(null);
+        boolean won;
         try {
             if (reachedDisk) {
-                complete(entry);
-                forgetDelivery(player, token);
-            } else {
-                plugin.getLogger().info(i18n("log_pending_return_redeliver")
-                        .replace("{PLAYER}", player.getName())
-                        .replace("{ID}", String.valueOf(entry.getId())));
-                PendingStakeReturn unmarked = copyOf(entry);
-                unmarked.setDeliveryToken(null);
-                unmarked.setAfterDelivery(null);
-                write(entry, unmarked);
+                String after = entry.getAfterDelivery() == null ? "" : entry.getAfterDelivery();
+                settled.setItems(after);
+                settled.setStackCount(after.isEmpty() ? 0 : deserializeStacks(after).size());
             }
-            return true;
-        } catch (RuntimeException | IllegalAccessException e) {
+            won = pendingReturns.updateIf(settled, WhereCondition.builder()
+                    .column("items").value(entry.getItems()).build());
+        } catch (RuntimeException e) {
             plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
                     .replace("{PLAYER}", player.getName())
                     .replace("{ID}", String.valueOf(entry.getId())));
             return false;
         }
+        if (!won) {
+            plugin.getLogger().warn(i18n("log_pending_return_claim_lost")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{ID}", String.valueOf(entry.getId())));
+            return false;
+        }
+        entry.setItems(settled.getItems());
+        entry.setStackCount(settled.getStackCount());
+        entry.setDeliveryToken(null);
+        entry.setAfterDelivery(null);
+        return true;
+    }
+
+    /** Drop every legacy marker from the player's data that no entry still carries. */
+    private static void pruneLegacyDeliveries(Player player, List<PendingStakeReturn> entries) {
+        Set<String> tokens = legacyDeliveries(player);
+        if (tokens.isEmpty()) {
+            return;
+        }
+        Set<String> live = new HashSet<>();
+        for (PendingStakeReturn entry : entries) {
+            if (entry.getDeliveryToken() != null) {
+                live.add(entry.getDeliveryToken());
+            }
+        }
+        if (tokens.retainAll(live)) {
+            if (tokens.isEmpty()) {
+                player.getPersistentDataContainer().remove(LEGACY_DELIVERIES);
+            } else {
+                player.getPersistentDataContainer().set(LEGACY_DELIVERIES, PersistentDataType.STRING, String.join(",", tokens));
+            }
+        }
+    }
+
+    private static Set<String> legacyDeliveries(Player player) {
+        String value = player.getPersistentDataContainer().get(LEGACY_DELIVERIES, PersistentDataType.STRING);
+        Set<String> tokens = new LinkedHashSet<>();
+        if (value != null && !value.isEmpty()) {
+            tokens.addAll(Arrays.asList(value.split(",")));
+        }
+        return tokens;
     }
 
     /**
-     * Steps 1 and 2 for one entry (step 3 follows at the next join, or at once when player-data saving is
-     * disabled). Returns {items handed over, items kept listed because they did not fit, 1 if the entry
-     * could not be handed over for a storage failure and waits for a later join}.
+     * Claim one entry and hand over what fits. Returns {items handed over, items kept listed because they
+     * did not fit, 1 if the entry could not be claimed and waits for a later join}.
+     * <p>
+     * The items go into the inventory first, in memory, to learn what fits; nothing can reach the
+     * player's saved data before the claim below, as this all runs on the main thread. If the claim does
+     * not apply or fails, they are taken back out.
      */
     private int[] handOver(Player player, PendingStakeReturn entry, List<ItemStack> stacks) {
         List<ItemStack> given = new ArrayList<>();
@@ -1327,96 +1388,96 @@ public class TradeService {
         if (given.isEmpty()) {
             return new int[] {0, keptCount, 0};
         }
-        // Step 1: mark. On failure nothing may stay handed over, so the in-memory hand-over is undone.
-        String token = UUID.randomUUID().toString();
-        PendingStakeReturn marked = copyOf(entry);
-        marked.setDeliveryToken(token);
-        marked.setAfterDelivery(remaining.isEmpty() ? "" : serializeStacks(remaining));
+        PendingStakeReturn claimed = copyOf(entry);
+        claimed.setItems(remaining.isEmpty() ? "" : serializeStacks(remaining));
+        claimed.setStackCount(remaining.size());
+        // Written before the claim, so it is on record whatever happens after the claim commits: once it
+        // has, these items are listed nowhere until the player's data is saved below (the accepted cost
+        // of UltiKits/UltiTrade#55). A claim that does not apply is followed by a line saying so.
+        String summary = summarize(given);
+        logQuietly(() -> plugin.getLogger().warn(Placeholders.fill(i18n("log_pending_return_handing_over"),
+                "{PLAYER}", player.getName(),
+                "{UUID}", player.getUniqueId().toString(),
+                "{ID}", String.valueOf(entry.getId()),
+                "{ITEMS}", summary)));
+        boolean won;
         try {
-            write(entry, marked);
-        } catch (RuntimeException | IllegalAccessException e) {
+            won = pendingReturns.updateIf(claimed, WhereCondition.builder()
+                    .column("items").value(entry.getItems()).build());
+        } catch (RuntimeException e) {
             player.getInventory().removeItem(given.toArray(new ItemStack[0]));
-            plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
+            logClaimFailure(e, player, entry, summary);
+            return new int[] {0, 0, 1};
+        }
+        if (!won) {
+            player.getInventory().removeItem(given.toArray(new ItemStack[0]));
+            plugin.getLogger().warn(i18n("log_pending_return_claim_lost")
                     .replace("{PLAYER}", player.getName())
                     .replace("{ID}", String.valueOf(entry.getId())));
             return new int[] {0, 0, 1};
         }
-        // Step 2: inventory and token reach the disk together. Saved now so that the window before the
-        // next autosave closes; whether the write landed is read back at the next join (step 3).
-        rememberDelivery(player, token);
+        if (remaining.isEmpty()) {
+            removeEmpty(player, claimed);
+        }
         try {
             player.saveData();
+            // The other half of the operator's record: these items are now in the player's saved data
+            // (gate-1 top-up F1). Without it, every successful hand-over would read like one to give back
+            // after any later crash.
+            logQuietly(() -> plugin.getLogger().info(Placeholders.fill(i18n("log_pending_return_handed_over"),
+                    "{ID}", String.valueOf(entry.getId()),
+                    "{PLAYER}", player.getName(),
+                    "{UUID}", player.getUniqueId().toString(),
+                    "{ITEMS}", summary)));
         } catch (RuntimeException e) {
             plugin.getLogger().warn(e, i18n("log_pending_return_player_save_failed")
                     .replace("{COUNT}", String.valueOf(givenCount))
                     .replace("{PLAYER}", player.getName()));
         }
-        if (playerDataSavingDisabled()) {
-            try {
-                complete(entry);
-                forgetDelivery(player, token);
-            } catch (RuntimeException | IllegalAccessException e) {
-                plugin.getLogger().error(e, i18n("log_pending_return_remove_failed")
-                        .replace("{PLAYER}", player.getName())
-                        .replace("{ID}", String.valueOf(entry.getId())));
-            }
-        }
         return new int[] {givenCount, keptCount, 0};
     }
 
     /**
-     * Whether the server never writes player data ({@code players.disable-saving} in {@code spigot.yml}).
-     * Read on each hand-over, so a changed setting applies at the next join.
+     * Log a claim whose call threw. The statement may still have been applied (a connection lost after
+     * the database committed it), so the row is read again: if it still lists the items this join read,
+     * the claim did not apply and the entry is tried again at the next join; otherwise -- the row changed,
+     * is gone, or cannot be read -- whether this claim took the items is unknown, and the line names the
+     * entry and the items for the operator to check (gate-1 top-up F2). The items have already been taken
+     * back out of the inventory, so nothing is ever handed over twice.
      */
-    boolean playerDataSavingDisabled() {
+    private void logClaimFailure(RuntimeException e, Player player, PendingStakeReturn entry, String items) {
+        boolean untouched;
         try {
-            return Bukkit.spigot().getSpigotConfig().getBoolean("players.disable-saving", false);
-        } catch (RuntimeException | LinkageError e) {
-            return false;
+            PendingStakeReturn now = pendingReturns.getById(entry.getId());
+            untouched = now != null && entry.getItems().equals(now.getItems());
+        } catch (RuntimeException rereadFailed) {
+            untouched = false;
         }
-    }
-
-    /** Drop every saved marker that no entry of this player carries any more. */
-    private static void pruneDeliveries(Player player, List<PendingStakeReturn> entries) {
-        Set<String> live = new HashSet<>();
-        for (PendingStakeReturn entry : entries) {
-            if (entry.getId() != null && entry.getDeliveryToken() != null) {
-                live.add(entry.getDeliveryToken());
-            }
-        }
-        Set<String> tokens = savedDeliveries(player);
-        if (tokens.retainAll(live)) {
-            writeDeliveries(player, tokens);
-        }
-    }
-
-    /** Keep only the part that did not fit, or remove the entry (its id is then cleared). */
-    private void complete(PendingStakeReturn entry) throws IllegalAccessException {
-        String after = entry.getAfterDelivery();
-        if (after == null || after.isEmpty()) {
-            pendingReturns.delById(entry.getId());
-            entry.setId(null);
+        if (untouched) {
+            plugin.getLogger().error(e, i18n("log_pending_return_mark_failed")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{ID}", String.valueOf(entry.getId())));
             return;
         }
-        PendingStakeReturn completed = copyOf(entry);
-        completed.setItems(after);
-        completed.setStackCount(deserializeStacks(after).size());
-        completed.setDeliveryToken(null);
-        completed.setAfterDelivery(null);
-        write(entry, completed);
+        plugin.getLogger().error(e, Placeholders.fill(i18n("log_pending_return_claim_unknown"),
+                "{ID}", String.valueOf(entry.getId()),
+                "{PLAYER}", player.getName(),
+                "{UUID}", player.getUniqueId().toString(),
+                "{ITEMS}", items));
     }
 
     /**
-     * Write {@code next} over the stored entry, and only once that write committed, make {@code entry}
-     * (the in-memory copy the rest of the join reads, marker pruning included) say the same. A failed
-     * write leaves {@code entry} as the table still holds it.
+     * Remove an entry that lists no items any more. Any server may do this: the entry holds nothing, so
+     * removing it cannot take or duplicate an item. A failure leaves it for a later join.
      */
-    private void write(PendingStakeReturn entry, PendingStakeReturn next) throws IllegalAccessException {
-        pendingReturns.update(next);
-        entry.setItems(next.getItems());
-        entry.setStackCount(next.getStackCount());
-        entry.setDeliveryToken(next.getDeliveryToken());
-        entry.setAfterDelivery(next.getAfterDelivery());
+    private void removeEmpty(Player player, PendingStakeReturn entry) {
+        try {
+            pendingReturns.delById(entry.getId());
+        } catch (RuntimeException e) {
+            plugin.getLogger().warn(e, i18n("log_pending_return_remove_failed")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{ID}", String.valueOf(entry.getId())));
+        }
     }
 
     private static PendingStakeReturn copyOf(PendingStakeReturn entry) {
@@ -1437,36 +1498,6 @@ public class TradeService {
             n += stack.getAmount();
         }
         return n;
-    }
-
-    private static Set<String> savedDeliveries(Player player) {
-        String value = player.getPersistentDataContainer().get(DELIVERIES, PersistentDataType.STRING);
-        Set<String> tokens = new LinkedHashSet<>();
-        if (value != null && !value.isEmpty()) {
-            tokens.addAll(Arrays.asList(value.split(",")));
-        }
-        return tokens;
-    }
-
-    private static void writeDeliveries(Player player, Set<String> tokens) {
-        if (tokens.isEmpty()) {
-            player.getPersistentDataContainer().remove(DELIVERIES);
-        } else {
-            player.getPersistentDataContainer().set(DELIVERIES, PersistentDataType.STRING, String.join(",", tokens));
-        }
-    }
-
-    private static void rememberDelivery(Player player, String token) {
-        Set<String> tokens = savedDeliveries(player);
-        tokens.add(token);
-        writeDeliveries(player, tokens);
-    }
-
-    private static void forgetDelivery(Player player, String token) {
-        Set<String> tokens = savedDeliveries(player);
-        if (tokens.remove(token)) {
-            writeDeliveries(player, tokens);
-        }
     }
 
     /**
@@ -1641,23 +1672,53 @@ public class TradeService {
     // ==================== Experience Utilities ====================
     
     /**
-     * Get total experience points for a player.
+     * The experience tax on an offer: the offer times the rate with the fraction dropped (floor), computed in exact
+     * decimal arithmetic from the rate as configured. A double product lands just under a whole number for many
+     * rates (100 x 0.29 = 28.999999999999996), so a cast truncated the tax a point short; 100 at 29% is 29 here, as
+     * the rule says (follow-up of UltiKits/UltiTrade#64). The trade itself and every window that shows the tax or the
+     * amount received after it use this method, so what is shown is what is taken.
+     *
+     * @param offered the experience points offered
+     * @param rate    the configured {@code exp-tax-rate} (0 to 1)
+     * @return the points taken as tax, never more than {@code offered}
+     */
+    public static int experienceTax(int offered, double rate) {
+        if (offered <= 0 || rate <= 0) {
+            return 0;
+        }
+        // BigDecimal.valueOf goes through Double.toString, the shortest decimal that reads back as the configured
+        // value (0.29, not 0.28999999999999998), so the product is the decimal the operator wrote times the offer.
+        return BigDecimal.valueOf(rate).multiply(BigDecimal.valueOf(offered))
+                .setScale(0, RoundingMode.FLOOR).intValue();
+    }
+
+    /**
+     * Get total experience points for a player, exactly.
+     *
+     * <p>The server keeps the progress inside the current level as a float fraction of the points that level needs,
+     * so multiplying it back can land just under a whole number (3/13 x 13 = 2.9999998 for a player holding 30
+     * points). The points inside the level are therefore rounded to the nearest whole point, never truncated: a
+     * truncation read such a player one point short, refused an offer of all of their experience and, through
+     * {@link #setTotalExperience}, left them one point lower after a trade (UltiKits/UltiTrade#64).
      */
     public int getTotalExperience(Player player) {
         int level = player.getLevel();
-        int exp = (int) (player.getExp() * player.getExpToLevel());
-        
-        // Calculate total exp from levels
-        int totalFromLevels;
+        int exp = Math.round(player.getExp() * player.getExpToLevel());
+        return pointsToReachLevel(level) + exp;
+    }
+
+    /**
+     * Total points a player needs to reach {@code level} from zero (Minecraft's own table), in integer arithmetic:
+     * {@code L^2 + 6L} up to 16, {@code 2.5L^2 - 40.5L + 360} from 17 to 31 and {@code 4.5L^2 - 162.5L + 2220} above,
+     * each of which is a whole number for every whole level.
+     */
+    static int pointsToReachLevel(int level) {
         if (level <= 16) {
-            totalFromLevels = level * level + 6 * level;
+            return level * level + 6 * level;
         } else if (level <= 31) {
-            totalFromLevels = (int) (2.5 * level * level - 40.5 * level + 360);
-        } else {
-            totalFromLevels = (int) (4.5 * level * level - 162.5 * level + 2220);
+            return (5 * level * level - 81 * level) / 2 + 360;
         }
-        
-        return totalFromLevels + exp;
+        return (9 * level * level - 325 * level) / 2 + 2220;
     }
     
     /**

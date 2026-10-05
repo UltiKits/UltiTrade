@@ -490,8 +490,10 @@ class TradeReloadReconciliationTest {
             Inventory windowContents = offererWindow.getInventory();
             clearInvocations(windowContents, offererView, counterpartyView);
 
-            reload("enable-money-trade: true\ntrade-tax: 1.0\ngui-title: '&6Reloaded {PLAYER}'\n");
+            com.ultikits.ultitools.abstracts.ReloadReport report =
+                    reload("enable-money-trade: true\ntrade-tax: 1.0\ngui-title: '&6Reloaded {PLAYER}'\n");
 
+            assertThat(report.isPartial()).as("control: every window redrawn, so the reload is complete").isFalse();
             ArgumentCaptor<ItemStack> moneySlot = ArgumentCaptor.forClass(ItemStack.class);
             verify(windowContents, atLeastOnce()).setItem(eq(TradeGUI.YOUR_MONEY_SLOT), moneySlot.capture());
             assertThat(moneySlot.getAllValues()).anySatisfy(item -> assertThat(plainLore(item))
@@ -652,10 +654,14 @@ class TradeReloadReconciliationTest {
             Inventory windowContents = counterpartyWindow.getInventory();
             clearInvocations(windowContents);
 
-            reload("enable-money-trade: true\ntrade-tax: 0.5\n");
+            com.ultikits.ultitools.abstracts.ReloadReport report = reload("enable-money-trade: true\ntrade-tax: 0.5\n");
 
             verify(windowContents).setItem(TradeGUI.YOUR_SLOTS[0], emerald);
             verify(UltiTradeTestHelper.getMockLogger()).error(eq(failure), contains("Offerer"));
+            // The window left on the previous terms is a part of the reload that did not happen, so the reply
+            // must not be the plain success line (UltiKits/UltiTrade#50, gate-1 WR-01).
+            assertThat(report.getPartialReasons()).containsExactly(
+                    zhLine("reload_partial_window_redraw").replace("{PLAYERS}", "Offerer"));
         }
     }
 
@@ -972,13 +978,16 @@ class TradeReloadReconciliationTest {
         config.init(plugin);
     }
 
-    /** Edit the file, re-initialise the same config instance, then run the module's reload hook. */
-    @SuppressWarnings("PMD.AvoidAccessibilityAlteration") // onReload() is protected on the framework base class
-    private void reload(String yaml) throws Exception {
+    /** Edit the file, re-initialise the same config instance, then run the module's reload hook; returns its report. */
+    @SuppressWarnings("PMD.AvoidAccessibilityAlteration") // onReload(ReloadReport) is protected on the framework base class
+    private com.ultikits.ultitools.abstracts.ReloadReport reload(String yaml) throws Exception {
         loadConfig(yaml);
-        Method hook = UltiToolsPlugin.class.getDeclaredMethod("onReload");
+        // The hook the framework calls, with a fresh report, as reloadSelf() does (UltiKits/UltiTrade#50).
+        Method hook = UltiToolsPlugin.class.getDeclaredMethod("onReload", com.ultikits.ultitools.abstracts.ReloadReport.class);
         hook.setAccessible(true);
-        hook.invoke(plugin);
+        com.ultikits.ultitools.abstracts.ReloadReport report = new com.ultikits.ultitools.abstracts.ReloadReport();
+        hook.invoke(plugin, report);
+        return report;
     }
 
     @SuppressWarnings("PMD.AvoidAccessibilityAlteration") // points the module's config folder at a temp directory

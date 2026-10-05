@@ -34,104 +34,104 @@ public class TradeConfig extends AbstractConfigEntity {
     // ==================== Basic Settings ====================
 
     @Range(min = 5, max = 600)
-    @ConfigEntry(path = "request-timeout", comment = "交易请求超时时间（秒）")
+    @ConfigEntry(path = "request-timeout", comment = "{config_comment_request_timeout}")
     private int requestTimeout = 30;
 
     @Range(min = 0, max = 1000)
-    @ConfigEntry(path = "max-distance", comment = "交易最大距离（格），0为无限制")
+    @ConfigEntry(path = "max-distance", comment = "{config_comment_max_distance}")
     private int maxDistance = 50;
     
-    @ConfigEntry(path = "allow-cross-world", comment = "允许跨世界交易")
+    @ConfigEntry(path = "allow-cross-world", comment = "{config_comment_allow_cross_world}")
     private boolean allowCrossWorld = false;
     
     // ==================== Trade Features ====================
     
-    @ConfigEntry(path = "enable-money-trade", comment = "启用金币交易（需要Vault）")
+    @ConfigEntry(path = "enable-money-trade", comment = "{config_comment_enable_money_trade}")
     private boolean enableMoneyTrade = true;
     
-    @ConfigEntry(path = "enable-exp-trade", comment = "启用经验交易")
+    @ConfigEntry(path = "enable-exp-trade", comment = "{config_comment_enable_exp_trade}")
     private boolean enableExpTrade = true;
     
-    @ConfigEntry(path = "enable-shift-click", comment = "启用Shift+右键玩家发起交易")
+    @ConfigEntry(path = "enable-shift-click", comment = "{config_comment_enable_shift_click}")
     private boolean enableShiftClick = true;
     
     // ==================== Tax Settings ====================
 
     @Range(min = 0.0, max = 1.0)
-    @ConfigEntry(path = "trade-tax", comment = "金币交易税率（0-1之间，0为不收税）")
+    @ConfigEntry(path = "trade-tax", comment = "{config_comment_trade_tax}")
     private double tradeTax = 0.0;
 
     @Range(min = 0.0, max = 1.0)
-    @ConfigEntry(path = "exp-tax-rate", comment = "经验交易税率（0-1之间，0为不收税）")
+    @ConfigEntry(path = "exp-tax-rate", comment = "{config_comment_exp_tax_rate}")
     private double expTaxRate = 0.0;
 
     // ==================== Confirmation Settings ====================
 
     @Range(min = 0.0, max = 1000000000.0)
-    @ConfigEntry(path = "confirm-threshold", comment = "大额交易确认阈值（金币或经验超过此值需二次确认）")
+    @ConfigEntry(path = "confirm-threshold", comment = "{config_comment_confirm_threshold}")
     private double confirmThreshold = 10000;
     
     // ==================== Log Settings ====================
 
-    @ConfigEntry(path = "enable-trade-log", comment = "启用交易日志记录")
+    @ConfigEntry(path = "enable-trade-log", comment = "{config_comment_enable_trade_log}")
     private boolean enableTradeLog = true;
 
     @Range(min = 1, max = 365)
-    @ConfigEntry(path = "log-retention-days", comment = "日志保留天数")
+    @ConfigEntry(path = "log-retention-days", comment = "{config_comment_log_retention_days}")
     private int logRetentionDays = 30;
 
     @Range(min = 1, max = 168)
-    @ConfigEntry(path = "cleanup-interval-hours", comment = "日志清理间隔（小时）")
+    @ConfigEntry(path = "cleanup-interval-hours", comment = "{config_comment_cleanup_interval_hours}")
     private int cleanupIntervalHours = 24;
     
     // ==================== Effect Settings ====================
     
-    @ConfigEntry(path = "enable-sounds", comment = "启用交易音效")
+    @ConfigEntry(path = "enable-sounds", comment = "{config_comment_enable_sounds}")
     private boolean enableSounds = true;
     
-    @ConfigEntry(path = "enable-particles", comment = "启用交易粒子效果")
+    @ConfigEntry(path = "enable-particles", comment = "{config_comment_enable_particles}")
     private boolean enableParticles = true;
     
-    @ConfigEntry(path = "enable-bossbar", comment = "启用BossBar请求倒计时")
+    @ConfigEntry(path = "enable-bossbar", comment = "{config_comment_enable_bossbar}")
     private boolean enableBossbar = true;
     
-    @ConfigEntry(path = "enable-clickable-buttons", comment = "启用可点击的聊天按钮")
+    @ConfigEntry(path = "enable-clickable-buttons", comment = "{config_comment_enable_clickable_buttons}")
     private boolean enableClickableButtons = true;
     
     // ==================== GUI Settings ====================
 
     @NotEmpty
-    @ConfigEntry(path = "gui-title", comment = "交易界面标题")
+    @ConfigEntry(path = "gui-title", comment = "{config_comment_gui_title}")
     private String guiTitle = SHIPPED_GUI_TITLE;
     
     // ==================== Messages ====================
 
     @NotEmpty
-    @ConfigEntry(path = "messages.request-sent", comment = "发送交易请求")
+    @ConfigEntry(path = "messages.request-sent", comment = "{config_comment_messages_request_sent}")
     private String requestSentMessage = SHIPPED_REQUEST_SENT_MESSAGE;
 
     @NotEmpty
-    @ConfigEntry(path = "messages.request-received", comment = "收到交易请求")
+    @ConfigEntry(path = "messages.request-received", comment = "{config_comment_messages_request_received}")
     private String requestReceivedMessage = SHIPPED_REQUEST_RECEIVED_MESSAGE;
 
     @NotEmpty
-    @ConfigEntry(path = "messages.request-timeout", comment = "请求超时")
+    @ConfigEntry(path = "messages.request-timeout", comment = "{config_comment_messages_request_timeout}")
     private String requestTimeoutMessage = SHIPPED_REQUEST_TIMEOUT_MESSAGE;
 
     @NotEmpty
-    @ConfigEntry(path = "messages.trade-complete", comment = "交易完成")
+    @ConfigEntry(path = "messages.trade-complete", comment = "{config_comment_messages_trade_complete}")
     private String tradeCompleteMessage = SHIPPED_TRADE_COMPLETE_MESSAGE;
 
     @NotEmpty
-    @ConfigEntry(path = "messages.trade-cancelled", comment = "交易取消")
+    @ConfigEntry(path = "messages.trade-cancelled", comment = "{config_comment_messages_trade_cancelled}")
     private String tradeCancelledMessage = SHIPPED_TRADE_CANCELLED_MESSAGE;
 
     @NotEmpty
-    @ConfigEntry(path = "messages.trade-disabled", comment = "交易已关闭")
+    @ConfigEntry(path = "messages.trade-disabled", comment = "{config_comment_messages_trade_disabled}")
     private String tradeDisabledMessage = SHIPPED_TRADE_DISABLED_MESSAGE;
 
     @NotEmpty
-    @ConfigEntry(path = "messages.player-blocked", comment = "被拉黑")
+    @ConfigEntry(path = "messages.player-blocked", comment = "{config_comment_messages_player_blocked}")
     private String playerBlockedMessage = SHIPPED_PLAYER_BLOCKED_MESSAGE;
     
     // ==================== Text defaults an earlier version shipped ====================

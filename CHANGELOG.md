@@ -76,6 +76,75 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- On servers sharing one database, a stake waiting to be returned to a player is handed over once, not again at every
+  server hop. A join used to decide whether an earlier hand-over had reached the player by looking in the player's
+  data on its own server, which another server cannot see, so a player who moved between servers was given the same
+  items on each. A join now first claims the entry in `trade_pending_returns` with one conditional write, and only
+  the server whose claim succeeds hands the items over; a claim that finds the entry changed or removed hands nothing
+  over and logs it. Each hand-over is logged at WARNING before it is claimed, naming the player, their UUID, the entry
+  and the items, and an INFO line for the same entry confirms it once the player's data is saved. Accepted cost: if the
+  server crashes after the claim and before the player's data is saved (which follows at once), those items are not
+  delivered; a WARNING followed by neither that saved line nor a "nothing was handed over" line is the record for
+  returning them by hand. All servers sharing the database must be upgraded together (see the README's known
+  limitations). An entry that an earlier build had marked for hand-over when the server was
+  upgraded is settled from the player's data first, so a single server neither hands it over again nor loses it
+  (UltiKits/UltiTrade#55).
+- 多台服务器共享数据库时，待返还给玩家的物品只会发还一次，不再在每次换服时重复发还。此前进服时通过本服务器上的玩家数据判断之前的发还是否已送达，
+  而另一台服务器看不到这份数据，因此在服务器之间移动的玩家会在每台服务器上再次收到同样的物品。现在进服会先用一次条件写入在 `trade_pending_returns`
+  中占用条目，只有占用成功的服务器才发还物品；占用时发现条目已被修改或删除则不发还任何物品并记录日志。每次发还都会在占用前记录一条 WARNING，
+  写明玩家、其 UUID、条目与物品，玩家数据保存后再为同一条目记录一条 INFO 确认。接受的代价：若服务器在占用之后、玩家数据保存之前（保存紧随其后）崩溃，
+  这些物品不会送达；其后既无该确认、也无「未发还任何物品」说明的 WARNING 就是手动发还的依据。共享数据库的所有服务器必须一起升级（见 README 的已知限制）。升级时，旧版本已标记为发还中的条目会先依据玩家数据结算，单台服务器上既不会重复发还也不会丢失（UltiKits/UltiTrade#55）。
+
+- A stake waiting to be returned to a player is no longer handed over when its stored entry was deleted after the
+  player's join read it (by an administrator, or by another server sharing the database). The write for the entry
+  matched no row and wrote nothing, but the items were given anyway and the entry was treated as updated. The join's
+  claim of the entry now does not apply to a deleted row: the hand-over is undone and a line names the player and the
+  entry (UltiKits/UltiTrade#53).
+- 待返还给玩家的物品条目若在玩家加入时被读取后、写入前被删除（管理员删除，或共享数据库的另一台服务器删除），不再照常交付。此前对该条目的写入没有命中任何行、
+  什么也没写，物品却仍交给玩家，条目也被当作已更新。现在进服对条目的占用不会作用于已删除的行：撤销本次交付，并记录一条写明玩家与条目的日志（UltiKits/UltiTrade#53）。
+
+- A save of a player's trade settings whose stored row no longer exists is now reported as failed on every storage
+  type. The module keeps each player's settings in memory for the server's lifetime, so if their
+  `trade_player_settings` row was deleted while the server ran, the next toggle, block, unblock, post-trade
+  statistics update or the save at shutdown wrote nothing and passed as saved on SQLite and MySQL (only the JSON
+  backend reported it). It now logs `Failed to save player settings` (and, at shutdown, the player's UUID), the
+  same line a failed write logs (UltiKits/UltiTrade#52).
+- 玩家交易设置的存储行已不存在时，保存现在在所有存储类型上都报告为失败。模块在服务器运行期间一直缓存每位玩家的设置，因此若其 `trade_player_settings`
+  行在运行中被删除，之后的开关交易、拉黑、取消拉黑、交易后统计更新或关服时的保存在 SQLite 与 MySQL 上什么也没写却当作已保存（只有 JSON 后端会报告）。
+  现在会记录 `保存玩家设置失败`（关服时附带玩家 UUID），与写入出错时的日志行相同（UltiKits/UltiTrade#52）。
+
+- A change to a player's trade settings is no longer lost at the next restart when their stored row was deleted
+  while the server ran. Such a save matched no row and wrote nothing (since UltiKits/UltiTrade#52 it was at least
+  logged as failed), while the player's chat confirmed the change. The save now re-creates the row with the current
+  settings and logs a WARNING naming the player. If another server sharing the database has already created a row
+  for that player, the settings are written onto it instead; a player's settings row now takes the player's UUID as
+  its id, so two servers creating or re-creating it at once leave one row, not two (UltiKits/UltiTrade#57).
+- 玩家的交易设置存储行在服务器运行期间被删除后，其设置修改不再在下次重启时丢失。此前这种保存匹配不到任何行、什么也没写（自 UltiKits/UltiTrade#52
+  起至少会记录为失败），玩家聊天栏却显示修改成功。现在保存会用当前设置重建该行，并记录一条指名该玩家的 WARNING。若共享数据库的另一台服务器已为该玩家创建了行，
+  则写入那一行；玩家设置行现在以玩家 UUID 作为 id，因此两台服务器同时创建或重建时只会留下一行（UltiKits/UltiTrade#57）。
+
+- `/ul reload UltiTrade` (and a bare `/ul reload`) no longer reports a plain success when part of this module's
+  reload failed. If rescheduling the trade-log cleanup task, applying `enable-money-trade`, or voiding open trades'
+  confirmations and redrawing their windows fails, or one player's open trade window cannot be redrawn, the module
+  still logs that error and runs the rest, and the reply and the framework's reload log line now say the reload was
+  partial and name each step that did not reload, with its cause, or the players whose window still shows the
+  previous terms (UltiKits/UltiTrade#50).
+- 本模块的重载有部分失败时，`/ul reload UltiTrade`（以及不带参数的 `/ul reload`）不再回复单纯的成功。若重新安排交易日志清理任务、应用 `enable-money-trade`、
+  或作废进行中交易的确认并重绘其窗口失败，或某位玩家打开的交易窗口未能重绘，模块仍记录该错误并继续执行其余部分，同时回复与框架的重载日志行会说明重载不完整，并列出未完成的每个步骤及其原因，或窗口仍显示旧条款的玩家（UltiKits/UltiTrade#50）。
+
+- `config/trade.yml` now writes its comments in the server's language. All twenty-four comments (every setting
+  in the file) used to be Chinese-only, so a fresh install under `language: en` got a file with Chinese comments.
+  Each is now a language-file key that the framework resolves in the server's `language` every time it writes
+  the file, with an English and a Chinese entry in `lang/en.yml` and `lang/zh.yml`. On an existing server the
+  comments the framework wrote on these settings, the Chinese ones earlier versions wrote included, switch to
+  the server's language at the next start, and after you change `language` and run a bare `/ul reload`; values are
+  untouched, and a comment you wrote yourself is kept as you wrote it (UltiKits/UltiTools-Reborn#611)
+  (UltiKits/UltiTrade#51).
+- `config/trade.yml` 的注释现在跟随服务器语言。此前文件中全部二十四条注释（每个设置一条）只有中文，`language: en` 的全新安装得到的文件注释是中文。
+  现在每条注释都是一个语言文件键，框架每次写入文件时按服务器的 `language` 解析，`lang/en.yml` 与 `lang/zh.yml` 各有英文和中文条目。
+  已有服务器上框架在这些设置上写下的注释（包括旧版本写下的中文注释）会在下次启动时、以及你修改 `language` 并执行不带参数的 `/ul reload` 后
+  切换为服务器语言；设置值不受影响，你自己写的注释保持原样（UltiKits/UltiTools-Reborn#611）（UltiKits/UltiTrade#51）。
+
 - An unrelated plugin refusing the large-trade confirmation page's own `InventoryOpenEvent` no longer
   leaves the player with no trade UI at all while the trade keeps running with both stakes locked. The
   trade window this page was meant to replace is already closed by the time it tries to open, and
@@ -204,13 +273,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   player's last known location, and the console names the player and the items in both cases.
   At the join only what fits in the inventory is handed over; the rest stays saved, the player is
   told how many items are still kept and to free some space and rejoin, and nothing is dropped. With
-  SQLite or MySQL storage a server crash during the hand-over neither loses nor duplicates an item;
-  with JSON storage the list reaches the disk only at the next flush (`datasource.flushRate`), so a
-  crash within that window can hand a stake over a second time (UltiKits/UltiTrade#32).
+  SQLite or MySQL storage a server crash during the hand-over never duplicates an item, but can lose
+  the items being handed over (see the UltiKits/UltiTrade#55 entry above); with JSON storage the list
+  reaches the disk only at the next flush (`datasource.flushRate`), so a crash within that window can
+  hand a stake over a second time (UltiKits/UltiTrade#32).
 - 修复：交易取消时若服务器找不到一方，其押入的物品会被保存，并在其下次进服时发还，不再被销毁。物品保存在新表
   `trade_pending_returns` 中；无法保存时掉落在该玩家最后所在的位置，两种情况下控制台都会写明玩家与物品。
   进服发还时只发背包装得下的部分，其余继续保存，并告知玩家还有多少物品保留、腾出空间后重新进服领取，不会掉落在地。
-  使用 SQLite 或 MySQL 存储时，发还过程中服务器崩溃既不会丢失也不会重复物品；使用 JSON 存储时列表要到下次写盘
+  使用 SQLite 或 MySQL 存储时，发还过程中服务器崩溃不会重复物品，但可能丢失正在发还的物品（见上文 UltiKits/UltiTrade#55 条目）；使用 JSON 存储时列表要到下次写盘
   （`datasource.flushRate`）才落盘，在此窗口内崩溃可能导致重复发还（UltiKits/UltiTrade#32）。
 - `language: en` now applies to everything this module shows or logs: every `/trade` reply and its
   help, the trade request (clickable buttons, their hover text and the countdown BossBar), the
@@ -221,15 +291,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   was fixed Chinese text in every language, although the language files already held English text for
   much of it that no code read; the console lines were fixed English text and now follow
   `language: zh` too (UltiKits/UltiTrade#16). Language keys were renamed: the few lines that used a
-  Chinese sentence as their language key now use ASCII keys. If you edited this module's language
-  files, re-apply those edits to the new keys; until then the renamed lines show the built-in text.
+  Chinese sentence as their language key now use ASCII keys. If you customised this module's messages in your own language file -- a copy of an official file
+  whose name starts with that file's language code and a hyphen (for example `lang/zh-myserver.yml`),
+  selected with `language: zh-myserver` in `plugins/UltiTools/config.yml` -- re-apply those edits to the new
+  keys; until then each renamed line shows the text of the official language the name starts with. A copy
+  whose name does not start with an official language code and a hyphen is still read, but every message
+  it lacks then shows in English, with one warning. An edit made directly in an official language file (`lang/en.yml`, `lang/zh.yml`) is not
+  kept: the framework restores the official files at every start and on every module reload and keeps the edited file as `.bak`
+  (UltiKits/UltiTools-Reborn#616).
 - `language: en` 现在对本模块显示或记录的全部内容生效：`/trade` 的所有回复与帮助，交易请求（可点击按钮、按钮的悬停
   提示与倒计时 BossBar），请求、接受、拒绝与取消的回复及每一种取消原因，交易界面与大额交易确认页（标题、物品名称、
   说明、按钮、税费行），金币与经验的输入提示及回复，PlaceholderAPI 的显示值（`enabled_display`、`last_trade_time`、
   `last_trade_ago`），命令描述以及控制台日志。其中大部分原先在任何语言下都是写死的中文，而语言文件中其实已有其中许多
   内容的无人读取的英文文本；控制台日志原先写死为英文，现在也跟随 `language: zh`（UltiKits/UltiTrade#16）。语言键已改名：
-  少数以中文句子作为语言键的行现在改用 ASCII 键。如果你修改过本模块的语言文件，请把这些修改重新应用到新键上；在此之前，
-  改名的行显示内置文本。
+  少数以中文句子作为语言键的行现在改用 ASCII 键。如果你在自己的语言文件中自定义过本模块的消息——即把官方文件复制一份，文件名以该文件的语言代码加连字符开头
+  （例如 `lang/zh-myserver.yml`），并在 `plugins/UltiTools/config.yml` 中设置 `language: zh-myserver` 选择它——请把这些修改重新应用到新键上；
+  在此之前，改名的行显示文件名开头那种官方语言的文本。文件名不以官方语言代码加连字符开头的副本仍会被读取，但其中缺少的消息
+  都显示英文，并记录一条警告。
+  直接在官方语言文件（`lang/en.yml`、`lang/zh.yml`）中做的修改不会保留：框架会在每次启动以及每次模块重载时恢复官方文件，并把修改过的文件保留为
+  `.bak`（UltiKits/UltiTools-Reborn#616）。
 
 - Reloading this module (`/ul reload UltiTrade`) now re-reads `config/trade.yml` and refreshes the
   language files, so an edited value such as `max-distance` applies without a restart. Previously
@@ -448,9 +528,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `messages.unblock-success`, `messages.already-blocked` and `messages.not-blocked` in
   `config/trade.yml`. None of them ever took effect in any version: the commands they describe sent
   fixed text of their own, so editing them never changed what a player saw. Those replies now come
-  from the language file (see `### Changed`), which is where their text is changed; removing the
-  settings moves that ability to the file that already held the text in both languages rather than
-  taking it away. The seven other `messages.*` settings are read and are unchanged
+  from the language file (see `### Changed`). To customise them, copy the official language file to one
+  whose name starts with its language code and a hyphen (for example `lang/en-myserver.yml`), edit the
+  replies there and set `language: en-myserver` in `plugins/UltiTools/config.yml`; an edit made in the
+  official file itself is restored at the next start or module reload (UltiKits/UltiTools-Reborn#616). The seven other `messages.*` settings are read and are unchanged
   (UltiKits/UltiTrade#17).
 - 移除本模块在 `/ul reload UltiTrade` 时输出的"UltiTrade 配置已重载！"控制台行，以及未被使用的
   `trade_reloaded` 语言键。UltiTools 6.3.0 会为每个模块输出一行重载日志（UltiKits/UltiTrade#15）。
@@ -461,5 +542,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - 移除 `config/trade.yml` 中的六个设置项 `messages.toggle-on`、`messages.toggle-off`、`messages.block-success`、
   `messages.unblock-success`、`messages.already-blocked` 和 `messages.not-blocked`。它们在任何版本中都从未生效：
   它们所描述的命令一直发送自己固定的文本，修改这些设置项从未改变玩家看到的内容。这些回复现在来自语言文件
-  （见 `### Changed`），应在那里修改其文本；移除这些设置项并不是取消修改文本的能力，而是把它移到了早已以两种语言
-  保存这些文本的文件中。其余七个 `messages.*` 设置项会被读取，保持不变（UltiKits/UltiTrade#17）。
+  （见 `### Changed`）。要自定义这些回复，请把官方语言文件复制为以其语言代码加连字符开头的文件（例如 `lang/zh-myserver.yml`），
+  在副本中修改，并在 `plugins/UltiTools/config.yml` 中设置 `language: zh-myserver`；直接修改官方文件的改动会在下次启动或模块重载时被恢复
+  （UltiKits/UltiTools-Reborn#616）。其余七个 `messages.*` 设置项会被读取，保持不变（UltiKits/UltiTrade#17）。

@@ -164,6 +164,176 @@ class TradeServiceTest {
         }
     }
 
+    /**
+     * UltiKits/UltiTrade#64: a player's experience is read exactly, whatever float the server stores for the
+     * level progress. Minecraft keeps the progress inside a level as a float fraction, so multiplying it back by the
+     * points the level needs can land just under a whole number (3/13 x 13 = 2.9999998); truncating that lost one
+     * point, so a player holding exactly 30 points could not offer 30.
+     */
+    @Nested
+    @DisplayName("Experience is read exactly (UltiTrade#64)")
+    class ExperienceExactness {
+
+        /** Points needed to go from {@code level} to the next one (Minecraft's own table). */
+        private int needed(int level) {
+            return level >= 30 ? 112 + (level - 30) * 9 : level >= 15 ? 37 + (level - 15) * 5 : 7 + level * 2;
+        }
+
+        /** Stubs player1 with the level and progress Minecraft stores after {@code points} are given at once from zero. */
+        private void holdGivenAtOnce(int points) {
+            int level = 0;
+            float progress = (float) points / (float) needed(0);
+            while (progress >= 1.0F) {
+                progress = (progress - 1.0F) * (float) needed(level);
+                level++;
+                progress /= (float) needed(level);
+            }
+            stub(level, progress);
+        }
+
+        /** Stubs player1 with the level and progress Minecraft stores after {@code points} single points are given one by one. */
+        private void holdGivenOneByOne(int points) {
+            int level = 0;
+            float progress = 0.0F;
+            for (int i = 0; i < points; i++) {
+                progress += 1.0F / (float) needed(level);
+                while (progress >= 1.0F) {
+                    progress = (progress - 1.0F) * (float) needed(level);
+                    level++;
+                    progress /= (float) needed(level);
+                }
+            }
+            stub(level, progress);
+        }
+
+        private void stub(int level, float progress) {
+            when(player1.getLevel()).thenReturn(level);
+            when(player1.getExp()).thenReturn(progress);
+            when(player1.getExpToLevel()).thenReturn(needed(level));
+        }
+
+        @Test
+        @DisplayName("a player holding exactly 30 points has 30 (level 3 plus 3 of 13)")
+        void thirtyPointsAreThirty() {
+            stub(3, 3.0F / 13.0F);
+            assertThat(service.getTotalExperience(player1)).isEqualTo(30);
+        }
+
+        @Test
+        @DisplayName("30 points given by the server's own command read back as 30")
+        void thirtyPointsGivenAtOnce() {
+            holdGivenAtOnce(30);
+            assertThat(service.getTotalExperience(player1)).isEqualTo(30);
+        }
+
+        @Test
+        @DisplayName("level boundaries read back exactly")
+        void levelBoundaries() {
+            for (int points : new int[] {0, 7, 16, 27, 352, 394, 1507, 1628}) {
+                holdGivenAtOnce(points);
+                assertThat(service.getTotalExperience(player1)).as("%d points", points).isEqualTo(points);
+            }
+        }
+
+        @Test
+        @DisplayName("mid-level amounts read back exactly")
+        void midLevelAmounts() {
+            for (int points : new int[] {3, 30, 100, 500, 1000, 2000, 5000}) {
+                holdGivenAtOnce(points);
+                assertThat(service.getTotalExperience(player1)).as("%d points", points).isEqualTo(points);
+            }
+        }
+
+        @Test
+        @DisplayName("every amount up to level 40, given at once or point by point, reads back exactly")
+        void everyAmountReadsBack() {
+            for (int points = 0; points <= 2920; points++) {
+                holdGivenAtOnce(points);
+                assertThat(service.getTotalExperience(player1)).as("%d points given at once", points).isEqualTo(points);
+                holdGivenOneByOne(points);
+                assertThat(service.getTotalExperience(player1)).as("%d points given one by one", points).isEqualTo(points);
+            }
+        }
+    }
+
+    /**
+     * The experience tax is "offer x rate, fraction dropped" (floor) in exact decimal arithmetic. The product of an
+     * int and a double rate lands just under a whole number for many rates (100 x 0.29 = 28.999999999999996), so a
+     * cast truncated it a point short; 100 at 29% must be 29, not 28 (follow-up of UltiKits/UltiTrade#64).
+     */
+    @Nested
+    @DisplayName("Experience tax is offer x rate floored exactly (UltiTrade#64 follow-up)")
+    class ExperienceTaxExactness {
+
+        private int expectedReceived(int offer, double rate) {
+            int tax = new java.math.BigDecimal(Double.toString(rate)).multiply(java.math.BigDecimal.valueOf(offer))
+                    .setScale(0, java.math.RoundingMode.FLOOR).intValueExact();
+            return offer - tax;
+        }
+
+        /** Runs one experience-only trade of {@code offer} points from player1 to player2 and returns what player2 was given. */
+        private int tradeOnce(int offer, double rate) throws Exception {
+            when(config.isEnableExpTrade()).thenReturn(true);
+            when(config.getExpTaxRate()).thenReturn(rate);
+            when(config.isEnableMoneyTrade()).thenReturn(false);
+            UltiTradeTestHelper.setField(service, "economy", null);
+            TradeSession session = new TradeSession(player1, player2);
+            session.setExp(uuid1, offer);
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+            // player1 holds level 40 (2920 points), more than any offer below
+            when(player1.getLevel()).thenReturn(40);
+            when(player1.getExp()).thenReturn(0.0f);
+            when(player1.getExpToLevel()).thenReturn(202);
+            clearInvocations(player1, player2);
+            service.completeTrade(session);
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.COMPLETED);
+            org.mockito.ArgumentCaptor<Integer> given = org.mockito.ArgumentCaptor.forClass(Integer.class);
+            verify(player2).giveExp(given.capture());
+            return given.getValue();
+        }
+
+        @Test
+        @DisplayName("100 points at 29% are taxed 29: the other player receives 71")
+        void hundredAtTwentyNinePercent() throws Exception {
+            assertThat(tradeOnce(100, 0.29)).isEqualTo(71);
+        }
+
+        @Test
+        @DisplayName("experienceTax, which the trade window and the confirm page also show, floors offer x rate exactly")
+        void experienceTaxHelper() {
+            assertThat(TradeService.experienceTax(100, 0.29)).isEqualTo(29);
+            assertThat(TradeService.experienceTax(1000, 0.99)).isEqualTo(990);
+            assertThat(TradeService.experienceTax(100, 0.295)).isEqualTo(29); // floor, not round
+            assertThat(TradeService.experienceTax(7, 0.14)).isEqualTo(0);
+            assertThat(TradeService.experienceTax(100, 0.0)).isZero();
+            assertThat(TradeService.experienceTax(0, 0.29)).isZero();
+            for (double rate : new double[] {0.07, 0.14, 0.29, 0.57, 0.99}) {
+                for (int offer = 1; offer <= 1000; offer++) {
+                    assertThat(TradeService.experienceTax(offer, rate)).as("offer %d at rate %s", offer, rate)
+                            .isEqualTo(offer - expectedReceived(offer, rate));
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("every offer from 1 to 1000 at 7%, 14%, 29%, 57% and 99% is taxed by exact decimal floor")
+        void sweepOfOffersAndRates() throws Exception {
+            for (double rate : new double[] {0.07, 0.14, 0.29, 0.57, 0.99}) {
+                for (int offer = 1; offer <= 1000; offer++) {
+                    assertThat(tradeOnce(offer, rate)).as("offer %d at rate %s", offer, rate)
+                            .isEqualTo(expectedReceived(offer, rate));
+                }
+            }
+        }
+    }
+
     @Nested
     @DisplayName("Experience Calculation")
     class ExperienceCalculation {

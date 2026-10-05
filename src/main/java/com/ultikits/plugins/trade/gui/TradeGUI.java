@@ -278,7 +278,7 @@ public class TradeGUI implements InventoryHolder {
             
             // Calculate tax
             double taxRate = tradeService.getConfig().getExpTaxRate();
-            int yourTax = (int)(yourExp * taxRate);
+            int yourTax = TradeService.experienceTax(yourExp, taxRate);
             int theirReceive = yourExp - yourTax;
             
             List<String> yourLore = new ArrayList<>();

@@ -316,6 +316,106 @@ class TradeConfigTextTest {
         }
     }
 
+    /**
+     * Plan 17-73 S5: a language switch re-renders only the shipped-text settings of trade.yml; a typo value and a
+     * hand-written comment elsewhere in the same file stay byte for byte. The two writes are measured one at a time:
+     * the test switches the language before the entity's own {@code reload()}, so that reload's comment-only rewrite
+     * stands in for the framework's refresh after the language rebuild (both are the same gated write of the
+     * framework's own comment lines); then the module's {@code onReload()} re-renders the texts that still hold
+     * built-in Chinese text, and its save writes only those settings (UltiKits/UltiTools-Reborn#611).
+     */
+    @Test
+    @DisplayName("a language switch re-renders only the shipped-text settings; a typo value and a hand-written comment stay byte for byte")
+    void languageSwitchRewritesOnlyTheShippedTextLines() throws Exception {
+        language[0] = "zh";
+        TradeConfig config = spy(load());
+        start(config);
+        String started = new String(bytes(), StandardCharsets.UTF_8);
+        String edited = started.replaceFirst("(?m)^request-timeout: 30$", "# Operator note: keep this\nrequest-timeout: 3O");
+        assertThat(edited).as("the typo and the comment applied to:\n" + started).isNotEqualTo(started);
+        int at = edited.indexOf("# Operator note: keep this\n");
+        String operatorLines = edited.substring(at, edited.indexOf('\n', edited.indexOf('\n', at) + 1));
+        Files.write(file().toPath(), edited.getBytes(StandardCharsets.UTF_8));
+
+        language[0] = "en";
+        config.reload();
+        String afterComments = new String(bytes(), StandardCharsets.UTF_8);
+        reload();
+        String after = new String(bytes(), StandardCharsets.UTF_8);
+
+        // The framework's comment refresh: comment lines only, never the operator's own comment.
+        String[] was = edited.split("\n", -1);
+        String[] then = afterComments.split("\n", -1);
+        assertThat(then.length).as("line count after the comment refresh:\n" + afterComments).isEqualTo(was.length);
+        int comments = 0;
+        for (int i = 0; i < was.length; i++) {
+            if (!was[i].equals(then[i])) {
+                assertThat(was[i].trim()).as("line " + (i + 1) + " changed by the framework's comment refresh:\n" + afterComments)
+                        .startsWith("#").doesNotContain("Operator note");
+                assertThat(then[i].trim()).as("line " + (i + 1) + " is still a comment after the framework's comment refresh").startsWith("#");
+                comments++;
+            }
+        }
+        assertThat(comments).as("the framework's comments followed the switch").isPositive();
+        // The module's save: the shipped-text settings' values, nothing else.
+        assertThat(s5WithoutTextValues(after)).as("everything outside the text settings' values, after the module's save")
+                .isEqualTo(s5WithoutTextValues(afterComments));
+        assertThat(after).as("the operator's typo and comment").contains(operatorLines);
+        for (Setting s : SETTINGS) {
+            assertThat(onDisk().getString(s.path)).as(s.path + " follows the switch").isEqualTo(s.text("en"));
+        }
+        verify(config, times(1)).save();
+    }
+
+    /**
+     * {@code text} with each shipped-text setting's value removed: its key line keeps only the key, and the
+     * lines of a multi-line value (more deeply indented, or empty) are dropped. Every setting must be found.
+     */
+    private static String s5WithoutTextValues(String text) {
+        StringBuilder kept = new StringBuilder();
+        Set<String> found = new TreeSet<>();
+        String[] lines = text.split("\n", -1);
+        for (int i = 0; i < lines.length; i++) {
+            String setting = null;
+            int indent = 0;
+            for (Setting s : SETTINGS) {
+                String[] parts = s.path.split("\\.");
+                StringBuilder pad = new StringBuilder();
+                for (int k = 1; k < parts.length; k++) {
+                    pad.append("  ");
+                }
+                if (lines[i].startsWith(pad + parts[parts.length - 1] + ":")) {
+                    setting = s.path;
+                    indent = pad.length();
+                }
+            }
+            if (setting == null) {
+                kept.append(lines[i]).append('\n');
+                continue;
+            }
+            found.add(setting);
+            kept.append(lines[i], 0, lines[i].indexOf(':') + 1).append('\n');
+            while (i + 1 < lines.length && (lines[i + 1].isEmpty()
+                    ? i + 2 < lines.length && s5Indent(lines[i + 2]) > indent : s5Indent(lines[i + 1]) > indent)) {
+                i++;
+            }
+        }
+        Set<String> all = new TreeSet<>();
+        for (Setting s : SETTINGS) {
+            all.add(s.path);
+        }
+        assertThat(found).as("every text setting found in:\n" + text).isEqualTo(all);
+        return kept.toString();
+    }
+
+    private static int s5Indent(String line) {
+        int n = 0;
+        while (n < line.length() && line.charAt(n) == ' ') {
+            n++;
+        }
+        return n;
+    }
+
     @Test
     @DisplayName("no configuration change listener rewrites the text (the framework fires them before it reloads the language)")
     void changeListenersDoNotMaterialize() throws Exception {
@@ -525,14 +625,16 @@ class TradeConfigTextTest {
         }
     }
 
-    /** The module's {@code onReload()} (protected), as the framework calls it after rebuilding the language. */
+    /** The module's reload hook (protected), as the framework calls it after rebuilding the language. */
     @SuppressWarnings("PMD.AvoidAccessibilityAlteration")
     private void reload() throws Exception {
-        java.lang.reflect.Method onReload = UltiTrade.class.getDeclaredMethod("onReload");
+        // The hook the framework calls, with a fresh report, as reloadSelf() does (UltiKits/UltiTrade#50).
+        java.lang.reflect.Method onReload = com.ultikits.ultitools.abstracts.UltiToolsPlugin.class
+                .getDeclaredMethod("onReload", com.ultikits.ultitools.abstracts.ReloadReport.class);
         onReload.setAccessible(true);
         try (MockedStatic<Bukkit> bukkit = mockStatic(Bukkit.class)) {
             bukkit.when(Bukkit::getPluginManager).thenReturn(mock(org.bukkit.plugin.PluginManager.class));
-            onReload.invoke(plugin);
+            onReload.invoke(plugin, new com.ultikits.ultitools.abstracts.ReloadReport());
         }
     }
 

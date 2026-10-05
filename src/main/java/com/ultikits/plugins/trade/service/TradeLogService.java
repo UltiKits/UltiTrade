@@ -125,13 +125,16 @@ public class TradeLogService {
             cleanupTask = null;
         }
         
-        // Save all cached settings
+        // Save all cached settings. A row deleted while the server ran is re-created (UltiKits/UltiTrade#57);
+        // a write that still reaches no row is logged like a write that threw (UltiKits/UltiTrade#52).
         for (PlayerTradeSettings settings : settingsCache.values()) {
+            String failureLine = i18n("log_settings_save_failed").replace("{PLAYER}", String.valueOf(settings.getPlayerUuid()));
             try {
-                settingsOperator.update(settings);
+                if (!writeSettings(settings)) {
+                    plugin.getLogger().warn(failureLine);
+                }
             } catch (Exception e) {
-                plugin.getLogger().warn(e,
-                    i18n("log_settings_save_failed").replace("{PLAYER}", String.valueOf(settings.getPlayerUuid())));
+                plugin.getLogger().warn(e, failureLine);
             }
         }
         settingsCache.clear();
@@ -358,9 +361,7 @@ public class TradeLogService {
                 saveSettings(settings);
             }
         } else {
-            // Create new settings
-            settings = new PlayerTradeSettings(playerUuid, playerName);
-            settingsOperator.insert(settings);
+            settings = createSettings(playerUuid, playerName);
         }
         
         settingsCache.put(playerUuid, settings);
@@ -399,12 +400,98 @@ public class TradeLogService {
     }
     
     /**
-     * Save player settings.
+     * Create the player's first settings row, under the id every server derives for this player.
+     * <p>
+     * A new row's id is the player's UUID, not a random one, so two servers sharing a database that both
+     * read "no row" and both create one address the same primary key: the second insert fails instead of
+     * adding a second row, and that server takes the row the first one wrote (UltiKits/UltiTrade#57).
+     */
+    private PlayerTradeSettings createSettings(UUID playerUuid, String playerName) {
+        PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, playerName);
+        settings.setId(playerUuid.toString());
+        try {
+            settingsOperator.insert(settings);
+            return settings;
+        } catch (RuntimeException insertFailed) {
+            List<PlayerTradeSettings> existing = rowsOf(playerUuid.toString());
+            if (existing.isEmpty()) {
+                throw insertFailed;
+            }
+            return selectCanonicalSettings(existing);
+        }
+    }
+
+    private List<PlayerTradeSettings> rowsOf(String playerUuid) {
+        List<PlayerTradeSettings> rows = settingsOperator.query()
+            .where("player_uuid").eq(playerUuid)
+            .list();
+        return rows == null ? new ArrayList<>() : rows;
+    }
+
+    /**
+     * Save player settings. A write that matched no stored row -- the row was deleted while the server
+     * ran, and this cached object still carries its id -- re-creates the row (UltiKits/UltiTrade#57); a
+     * save that still reaches no row is logged with the same line as a write that threw, instead of
+     * passing as saved (UltiKits/UltiTrade#52).
      *
      * @param settings Settings to save
      */
     public void saveSettings(PlayerTradeSettings settings) {
-        submitLogWrite(i18n("log_settings_write_failed"), () -> settingsOperator.update(settings));
+        String failureLine = i18n("log_settings_write_failed");
+        submitLogWrite(failureLine, () -> {
+            if (!writeSettings(settings) && plugin != null) {
+                plugin.getLogger().warn(failureLine);
+            }
+        });
+    }
+
+    /**
+     * Write {@code settings} over its stored row, re-creating the row when the write matched none
+     * (maintainer decision of 2026-10-04, UltiKits/UltiTrade#57). Returns whether a stored row now holds
+     * the settings.
+     * <p>
+     * The row is re-created so that later reads find it and no second row appears:
+     * <ul>
+     *   <li>reads select by {@code player_uuid} and take the lowest id, so if another server has already
+     *       created a row for this player, the settings are written onto that row (and this object takes
+     *       its id) rather than inserted beside it;</li>
+     *   <li>otherwise the row is inserted under the player's UUID as its id -- the id every server derives
+     *       for this player, also for a first row ({@link #createSettings}) -- so two servers re-creating
+     *       at once address one primary key; the loser's insert fails, and its write lands on the row the
+     *       winner inserted.</li>
+     * </ul>
+     * The values written are this server's current copy; when two servers hold different copies, the
+     * last write wins, as for any save (UltiKits/UltiTrade#54).
+     */
+    private boolean writeSettings(PlayerTradeSettings settings) {
+        if (settingsOperator.updateCounted(settings) > 0) {
+            return true;
+        }
+        List<PlayerTradeSettings> existing = rowsOf(settings.getPlayerUuid());
+        if (!existing.isEmpty()) {
+            settings.setId(selectCanonicalSettings(existing).getId());
+            return settingsOperator.updateCounted(settings) > 0;
+        }
+        settings.setId(settings.getPlayerUuid());
+        RuntimeException insertFailed = null;
+        try {
+            settingsOperator.insert(settings);
+        } catch (RuntimeException e) {
+            insertFailed = e; // another server inserted the same id first: the write below lands on its row
+        }
+        // Also after an insert that returned normally: the JSON backend ignores an insert whose id it
+        // already holds, so only this write proves the row holds these settings.
+        if (settingsOperator.updateCounted(settings) > 0) {
+            if (plugin != null) {
+                plugin.getLogger().warn(i18n("log_settings_row_recreated")
+                    .replace("{PLAYER}", String.valueOf(settings.getPlayerName())));
+            }
+            return true;
+        }
+        if (insertFailed != null) {
+            throw insertFailed;
+        }
+        return false;
     }
     
     /**

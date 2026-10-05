@@ -114,13 +114,13 @@ public class TradeConfirmPage implements InventoryHolder {
         }
         infoLore.add(filled(tradeService.i18n("confirm_exp_line"), "{AMOUNT}", String.valueOf(yourExp)));
         if (expTaxRate > 0 && yourExp > 0) {
-            infoLore.add(filled(tradeService.i18n("confirm_tax_line"), "{AMOUNT}", String.valueOf((int) (yourExp * expTaxRate))));
+            infoLore.add(filled(tradeService.i18n("confirm_tax_line"), "{AMOUNT}", String.valueOf(TradeService.experienceTax(yourExp, expTaxRate))));
         }
         infoLore.add(filled(tradeService.i18n("confirm_items_line"), "{COUNT}", String.valueOf(session.getPlayerItems(viewerUuid).size())));
         infoLore.add("");
         infoLore.add(text(tradeService.i18n("confirm_you_receive")));
         infoLore.add(filled(tradeService.i18n("confirm_money_line"), "{AMOUNT}", String.format("%.2f", theirMoney * (1 - taxRate))));
-        infoLore.add(filled(tradeService.i18n("confirm_exp_line"), "{AMOUNT}", String.valueOf((int) (theirExp * (1 - expTaxRate)))));
+        infoLore.add(filled(tradeService.i18n("confirm_exp_line"), "{AMOUNT}", String.valueOf(theirExp - TradeService.experienceTax(theirExp, expTaxRate))));
         infoLore.add(filled(tradeService.i18n("confirm_items_line"), "{COUNT}", String.valueOf(session.getOtherPlayerItems(viewerUuid).size())));
         infoLore.add("");
         infoLore.add(text(tradeService.i18n("confirm_check_carefully")));
@@ -156,7 +156,7 @@ public class TradeConfirmPage implements InventoryHolder {
             text(tradeService.i18n("confirm_your_exp")),
             Arrays.asList(
                 filled(tradeService.i18n("confirm_exp_amount"), "{AMOUNT}", String.valueOf(yourExp)),
-                expTaxRate > 0 ? filled(tradeService.i18n("confirm_other_receives_after_tax"), "{AMOUNT}", String.valueOf((int) (yourExp * (1 - expTaxRate)))) : ""
+                expTaxRate > 0 ? filled(tradeService.i18n("confirm_other_receives_after_tax"), "{AMOUNT}", String.valueOf(yourExp - TradeService.experienceTax(yourExp, expTaxRate))) : ""
             ));
         inventory.setItem(YOUR_EXP_SLOT, yourExpItem);
         
@@ -164,7 +164,7 @@ public class TradeConfirmPage implements InventoryHolder {
             text(tradeService.i18n("confirm_their_exp")),
             Arrays.asList(
                 filled(tradeService.i18n("confirm_exp_amount"), "{AMOUNT}", String.valueOf(theirExp)),
-                expTaxRate > 0 ? filled(tradeService.i18n("confirm_you_receive_amount"), "{AMOUNT}", String.valueOf((int) (theirExp * (1 - expTaxRate)))) : ""
+                expTaxRate > 0 ? filled(tradeService.i18n("confirm_you_receive_amount"), "{AMOUNT}", String.valueOf(theirExp - TradeService.experienceTax(theirExp, expTaxRate))) : ""
             ));
         inventory.setItem(THEIR_EXP_SLOT, theirExpItem);
         

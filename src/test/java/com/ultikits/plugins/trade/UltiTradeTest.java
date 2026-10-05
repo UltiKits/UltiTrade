@@ -3,6 +3,8 @@ package com.ultikits.plugins.trade;
 import com.ultikits.plugins.placeholderapi.trade.TradePlaceholderExpansion;
 import com.ultikits.plugins.trade.service.TradeLogService;
 import com.ultikits.plugins.trade.service.TradeService;
+import com.ultikits.ultitools.abstracts.ReloadReport;
+import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.context.SimpleContainer;
 import com.ultikits.ultitools.interfaces.impl.logger.PluginLogger;
 
@@ -14,6 +16,8 @@ import org.mockito.InOrder;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.List;
@@ -97,10 +101,8 @@ class UltiTradeTest {
 
         @Test
         @DisplayName("onReload reconciles the cleanup task, then the economy provider, once each (UltiKits/UltiTrade#26)")
-        void onReloadReconcilesBothServices() {
-            doCallRealMethod().when(plugin).onReload();
-
-            plugin.onReload();
+        void onReloadReconcilesBothServices() throws Exception {
+            reload(plugin);
 
             InOrder order = inOrder(logService, tradeService);
             order.verify(logService, times(1)).reloadCleanupTask();
@@ -112,12 +114,10 @@ class UltiTradeTest {
 
         @Test
         @DisplayName("a failing economy reconciliation does not skip voiding the confirmations of open trades")
-        void onReloadResetsConfirmationsEvenIfEconomyFails() {
+        void onReloadResetsConfirmationsEvenIfEconomyFails() throws Exception {
             RuntimeException failure = new IllegalStateException("services manager unavailable");
             doThrow(failure).when(tradeService).reloadEconomy();
-            doCallRealMethod().when(plugin).onReload();
-
-            plugin.onReload();
+            reload(plugin);
 
             verify(tradeService, times(1)).resetConfirmationsAfterReload();
         }
@@ -127,9 +127,7 @@ class UltiTradeTest {
         void onReloadIsolatesConfirmationResetFailure() {
             RuntimeException failure = new IllegalStateException("session map unavailable");
             doThrow(failure).when(tradeService).resetConfirmationsAfterReload();
-            doCallRealMethod().when(plugin).onReload();
-
-            assertThatCode(() -> plugin.onReload()).doesNotThrowAnyException();
+            assertThatCode(() -> reload(plugin)).doesNotThrowAnyException();
 
             verify(logger).error(failure, zhLine("log_confirmation_reset_failed"));
         }
@@ -139,9 +137,7 @@ class UltiTradeTest {
         void onReloadIsolatesCleanupTaskFailure() {
             RuntimeException failure = new IllegalStateException("scheduler unavailable");
             doThrow(failure).when(logService).reloadCleanupTask();
-            doCallRealMethod().when(plugin).onReload();
-
-            assertThatCode(() -> plugin.onReload()).doesNotThrowAnyException();
+            assertThatCode(() -> reload(plugin)).doesNotThrowAnyException();
 
             verify(tradeService, times(1)).reloadEconomy();
             // The console line follows the language setting (UltiKits/UltiTrade#16)
@@ -153,9 +149,7 @@ class UltiTradeTest {
         void onReloadIsolatesEconomyFailure() {
             RuntimeException failure = new IllegalStateException("services manager unavailable");
             doThrow(failure).when(tradeService).reloadEconomy();
-            doCallRealMethod().when(plugin).onReload();
-
-            assertThatCode(() -> plugin.onReload()).doesNotThrowAnyException();
+            assertThatCode(() -> reload(plugin)).doesNotThrowAnyException();
 
             verify(logService, times(1)).reloadCleanupTask();
             verify(logger).error(failure, zhLine("log_economy_reconcile_failed"));
@@ -166,9 +160,97 @@ class UltiTradeTest {
         void onReloadWithoutBeans() {
             when(plugin.getContext().getBean(TradeService.class)).thenReturn(null);
             when(plugin.getContext().getBean(TradeLogService.class)).thenReturn(null);
-            doCallRealMethod().when(plugin).onReload();
+            assertThatCode(() -> reload(plugin)).doesNotThrowAnyException();
+        }
 
-            assertThatCode(() -> plugin.onReload()).doesNotThrowAnyException();
+        @Test
+        @DisplayName("a reload whose three steps all succeed is not reported as partial (control for UltiKits/UltiTrade#50)")
+        void fullReloadIsNotPartial() throws Exception {
+            ReloadReport report = reload(plugin);
+
+            assertThat(report.isPartial()).isFalse();
+            assertThat(report.getPartialReasons()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a failing cleanup-task step is reported as a partial reload naming the step and its cause (UltiKits/UltiTrade#50)")
+        void cleanupTaskFailureIsReportedAsPartial() throws Exception {
+            doThrow(new IllegalStateException("scheduler unavailable")).when(logService).reloadCleanupTask();
+
+            ReloadReport report = reload(plugin);
+
+            assertThat(report.isPartial()).as("the reply must not be the plain success line").isTrue();
+            assertThat(report.getPartialReasons())
+                    .containsExactly(zhLine("reload_partial_cleanup_task").replace("{ERROR}", "scheduler unavailable"));
+        }
+
+        @Test
+        @DisplayName("a failing economy step is reported as a partial reload naming the step and its cause (UltiKits/UltiTrade#50)")
+        void economyFailureIsReportedAsPartial() throws Exception {
+            doThrow(new IllegalStateException("services manager unavailable")).when(tradeService).reloadEconomy();
+
+            ReloadReport report = reload(plugin);
+
+            assertThat(report.isPartial()).as("the reply must not be the plain success line").isTrue();
+            assertThat(report.getPartialReasons())
+                    .containsExactly(zhLine("reload_partial_economy").replace("{ERROR}", "services manager unavailable"));
+        }
+
+        @Test
+        @DisplayName("a failing confirmation reset is reported as a partial reload naming the step and its cause (UltiKits/UltiTrade#50)")
+        void confirmationResetFailureIsReportedAsPartial() throws Exception {
+            doThrow(new IllegalStateException("session map unavailable")).when(tradeService).resetConfirmationsAfterReload();
+
+            ReloadReport report = reload(plugin);
+
+            assertThat(report.isPartial()).as("the reply must not be the plain success line").isTrue();
+            assertThat(report.getPartialReasons())
+                    .containsExactly(zhLine("reload_partial_confirmation_reset").replace("{ERROR}", "session map unavailable"));
+        }
+
+        @Test
+        @DisplayName("a failing window redraw is reported under the confirmation-reset step (UltiKits/UltiTrade#50)")
+        void windowRedrawFailureIsReportedAsPartial() throws Exception {
+            doThrow(new IllegalStateException("inventory view gone")).when(tradeService).refreshOpenTradeWindowsAfterReload();
+
+            ReloadReport report = reload(plugin);
+
+            assertThat(report.getPartialReasons())
+                    .containsExactly(zhLine("reload_partial_confirmation_reset").replace("{ERROR}", "inventory view gone"));
+        }
+
+        @Test
+        @DisplayName("three failing steps are three reasons, in the order the steps run, and each is still logged (UltiKits/UltiTrade#50)")
+        void everyFailingStepIsReported() throws Exception {
+            RuntimeException cleanup = new IllegalStateException("a");
+            RuntimeException economy = new IllegalStateException("b");
+            RuntimeException confirmations = new IllegalStateException("c");
+            doThrow(cleanup).when(logService).reloadCleanupTask();
+            doThrow(economy).when(tradeService).reloadEconomy();
+            doThrow(confirmations).when(tradeService).resetConfirmationsAfterReload();
+
+            ReloadReport report = reload(plugin);
+
+            assertThat(report.getPartialReasons()).containsExactly(
+                    zhLine("reload_partial_cleanup_task").replace("{ERROR}", "a"),
+                    zhLine("reload_partial_economy").replace("{ERROR}", "b"),
+                    zhLine("reload_partial_confirmation_reset").replace("{ERROR}", "c"));
+            verify(logger).error(cleanup, zhLine("log_cleanup_reconcile_failed"));
+            verify(logger).error(economy, zhLine("log_economy_reconcile_failed"));
+            verify(logger).error(confirmations, zhLine("log_confirmation_reset_failed"));
+        }
+
+        @Test
+        @DisplayName("a cause without a message is named by its exception type, and a placeholder in it is not expanded (UltiKits/UltiTrade#50)")
+        void causeWithoutMessageIsNamedByType() throws Exception {
+            doThrow(new IllegalStateException()).when(logService).reloadCleanupTask();
+            doThrow(new IllegalStateException("{ERROR}")).when(tradeService).reloadEconomy();
+
+            ReloadReport report = reload(plugin);
+
+            assertThat(report.getPartialReasons()).containsExactly(
+                    zhLine("reload_partial_cleanup_task").replace("{ERROR}", "java.lang.IllegalStateException"),
+                    zhLine("reload_partial_economy").replace("{ERROR}", "{ERROR}"));
         }
 
         @Test
@@ -197,14 +279,17 @@ class UltiTradeTest {
         }
 
         @Test
-        @DisplayName("the module overrides neither final framework template method and declares the onReload hook (UltiKits/UltiTrade#26)")
+        @DisplayName("the module overrides neither final framework template method and declares the onReload hook with the report (UltiKits/UltiTrade#26, #50)")
         void noTemplateMethodOverrideAndDeclaresReloadHook() {
             assertThatThrownBy(() -> UltiTrade.class.getDeclaredMethod("unregisterSelf"))
                     .isInstanceOf(NoSuchMethodException.class);
             assertThatThrownBy(() -> UltiTrade.class.getDeclaredMethod("reloadSelf"))
                     .isInstanceOf(NoSuchMethodException.class);
-            assertThatCode(() -> UltiTrade.class.getDeclaredMethod("onReload"))
+            assertThatCode(() -> UltiTrade.class.getDeclaredMethod("onReload", ReloadReport.class))
                     .doesNotThrowAnyException();
+            assertThatThrownBy(() -> UltiTrade.class.getDeclaredMethod("onReload"))
+                    .as("the report-less hook is not declared: the framework calls only the hook with the report (UltiKits/UltiTrade#50)")
+                    .isInstanceOf(NoSuchMethodException.class);
         }
     }
 
@@ -275,11 +360,9 @@ class UltiTradeTest {
 
         @Test
         @DisplayName("POSITIVE CONTROL: a reload of the module warns about each leftover key, and still reconciles")
-        void onReloadWarns(@TempDir File dir) throws IOException {
+        void onReloadWarns(@TempDir File dir) throws Exception {
             UltiTrade plugin = pluginReading(dir, FILE_WITH_REMOVED_KEYS);
-            doCallRealMethod().when(plugin).onReload();
-
-            plugin.onReload();
+            reload(plugin);
 
             assertThat(warnings()).hasSize(2);
             assertThat(warnings().get(0)).contains("'trade-timeout'");
@@ -314,10 +397,9 @@ class UltiTradeTest {
             when(plugin.operatorConfigFile())
                     .thenThrow(new java.io.UncheckedIOException(new IOException("disk unavailable")));
             when(plugin.registerSelf()).thenCallRealMethod();
-            doCallRealMethod().when(plugin).onReload();
 
             assertThat(plugin.registerSelf()).isTrue();
-            assertThatCode(plugin::onReload).doesNotThrowAnyException();
+            assertThatCode(() -> reload(plugin)).doesNotThrowAnyException();
 
             ArgumentCaptor<String> messages = ArgumentCaptor.forClass(String.class);
             verify(logger, times(2)).warn(any(Throwable.class), messages.capture());
@@ -329,7 +411,7 @@ class UltiTradeTest {
 
         @Test
         @DisplayName("neither entry point warns when the file holds no removed key")
-        void neitherWarnsOnACleanFile(@TempDir File dir) throws IOException {
+        void neitherWarnsOnACleanFile(@TempDir File dir) throws Exception {
             // Paired with the two controls above: same entry points, same file, the removed keys
             // taken out and nothing else changed.
             UltiTrade onEnable = pluginReading(dir, FILE_WITHOUT_REMOVED_KEYS);
@@ -338,8 +420,7 @@ class UltiTradeTest {
             assertThat(warnings()).isEmpty();
 
             UltiTrade onReload = pluginReading(dir, FILE_WITHOUT_REMOVED_KEYS);
-            doCallRealMethod().when(onReload).onReload();
-            onReload.onReload();
+            reload(onReload);
             assertThat(warnings()).isEmpty();
         }
     }
@@ -349,6 +430,32 @@ class UltiTradeTest {
         Field field = UltiTrade.class.getDeclaredField("placeholderExpansion");
         field.setAccessible(true);
         return (TradePlaceholderExpansion) field.get(plugin);
+    }
+
+    /**
+     * Runs the module's reload hook the way the framework does: {@code onReload(ReloadReport)} with a fresh
+     * report, dispatched on the module (UltiKits/UltiTrade#50). Both of the framework's hooks are stubbed to
+     * their real bodies first, so a module that declares either one runs it; the hooks are protected on the
+     * framework base class, hence the reflection. An exception the hook throws is rethrown unwrapped.
+     */
+    @SuppressWarnings("PMD.AvoidAccessibilityAlteration")
+    static ReloadReport reload(UltiTrade plugin) throws Exception {
+        Method withReport = UltiToolsPlugin.class.getDeclaredMethod("onReload", ReloadReport.class);
+        Method bare = UltiToolsPlugin.class.getDeclaredMethod("onReload");
+        withReport.setAccessible(true);
+        bare.setAccessible(true);
+        withReport.invoke(doCallRealMethod().when(plugin), any(ReloadReport.class));
+        bare.invoke(doCallRealMethod().when(plugin));
+        ReloadReport report = new ReloadReport();
+        try {
+            withReport.invoke(plugin, report);
+        } catch (InvocationTargetException e) {
+            if (e.getCause() instanceof Exception) {
+                throw (Exception) e.getCause();
+            }
+            throw e;
+        }
+        return report;
     }
 
     @SuppressWarnings("PMD.AvoidAccessibilityAlteration") // seeds the private expansion field registerSelf would set
