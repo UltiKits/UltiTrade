@@ -213,7 +213,7 @@ log_logs_cleanup_failed: "清理旧日志失败"
 log_player_logs_failed: "获取玩家日志失败"
 removed_key_warning: "{FILE} 仍包含 '{KEY}'，此版本的 UltiTrade 已不再读取它。{REASON} 从文件中删除该键即可消除此警告。"
 removed_key_reason_trade_timeout: "它从未生效：已打开的交易窗口没有时间限制，也没有其他设置取代它。待处理的交易请求仍会在 'request-timeout' 之后过期，该设置未变。为已打开的交易窗口设置时间限制是功能请求 UltiKits/UltiTrade#41（UltiKits/UltiTrade#18）。"
-removed_key_reason_moved: "它的值从未显示给玩家。它描述的回复现在来自本模块语言文件（lang/<语言>.yml，与 config/trade.yml 位于同一模块文件夹）中的 '{ENTRY}' 条目，因此会跟随服务器的语言设置；请在那里修改（UltiKits/UltiTrade#17）。"
+removed_key_reason_moved: "它的值从未显示给玩家。它描述的回复现在来自本模块语言文件（lang/<语言>.yml，与 config/trade.yml 位于同一模块文件夹）中的 '{ENTRY}' 条目，因此会跟随服务器的语言设置；要自定义它，请把该文件复制为以其语言代码加连字符开头的文件（例如 lang/zh-myserver.yml），在副本中修改 '{ENTRY}'，并在 plugins/UltiTools/config.yml 中设置 language: zh-myserver；直接修改官方文件的改动会在下次启动时被恢复（UltiKits/UltiTrade#17）。"
 
 log_config_default_save_failed: "按服务器语言写入 {FILE} 中的标题与消息后保存失败；本次运行已使用新的文本，下次启动时会再次写入该文件。"
 
