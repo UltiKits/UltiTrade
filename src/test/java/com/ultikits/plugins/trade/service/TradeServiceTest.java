@@ -256,6 +256,67 @@ class TradeServiceTest {
         }
     }
 
+    /**
+     * The experience tax is "offer x rate, fraction dropped" (floor) in exact decimal arithmetic. The product of an
+     * int and a double rate lands just under a whole number for many rates (100 x 0.29 = 28.999999999999996), so a
+     * cast truncated it a point short; 100 at 29% must be 29, not 28 (follow-up of UltiKits/UltiTrade#64).
+     */
+    @Nested
+    @DisplayName("Experience tax is offer x rate floored exactly (UltiTrade#64 follow-up)")
+    class ExperienceTaxExactness {
+
+        private int expectedReceived(int offer, double rate) {
+            int tax = new java.math.BigDecimal(Double.toString(rate)).multiply(java.math.BigDecimal.valueOf(offer))
+                    .setScale(0, java.math.RoundingMode.FLOOR).intValueExact();
+            return offer - tax;
+        }
+
+        /** Runs one experience-only trade of {@code offer} points from player1 to player2 and returns what player2 was given. */
+        private int tradeOnce(int offer, double rate) throws Exception {
+            when(config.isEnableExpTrade()).thenReturn(true);
+            when(config.getExpTaxRate()).thenReturn(rate);
+            when(config.isEnableMoneyTrade()).thenReturn(false);
+            UltiTradeTestHelper.setField(service, "economy", null);
+            TradeSession session = new TradeSession(player1, player2);
+            session.setExp(uuid1, offer);
+            Map<UUID, TradeSession> activeSessions = UltiTradeTestHelper.getField(service, "activeSessions");
+            Map<UUID, UUID> playerSessionMap = UltiTradeTestHelper.getField(service, "playerSessionMap");
+            activeSessions.put(session.getSessionId(), session);
+            playerSessionMap.put(uuid1, session.getSessionId());
+            playerSessionMap.put(uuid2, session.getSessionId());
+            org.bukkit.Server server = org.bukkit.Bukkit.getServer();
+            when(server.getPlayer(uuid1)).thenReturn(player1);
+            when(server.getPlayer(uuid2)).thenReturn(player2);
+            // player1 holds level 40 (2920 points), more than any offer below
+            when(player1.getLevel()).thenReturn(40);
+            when(player1.getExp()).thenReturn(0.0f);
+            when(player1.getExpToLevel()).thenReturn(202);
+            clearInvocations(player1, player2);
+            service.completeTrade(session);
+            assertThat(session.getState()).isEqualTo(TradeSession.TradeState.COMPLETED);
+            org.mockito.ArgumentCaptor<Integer> given = org.mockito.ArgumentCaptor.forClass(Integer.class);
+            verify(player2).giveExp(given.capture());
+            return given.getValue();
+        }
+
+        @Test
+        @DisplayName("100 points at 29% are taxed 29: the other player receives 71")
+        void hundredAtTwentyNinePercent() throws Exception {
+            assertThat(tradeOnce(100, 0.29)).isEqualTo(71);
+        }
+
+        @Test
+        @DisplayName("every offer from 1 to 1000 at 7%, 14%, 29%, 57% and 99% is taxed by exact decimal floor")
+        void sweepOfOffersAndRates() throws Exception {
+            for (double rate : new double[] {0.07, 0.14, 0.29, 0.57, 0.99}) {
+                for (int offer = 1; offer <= 1000; offer++) {
+                    assertThat(tradeOnce(offer, rate)).as("offer %d at rate %s", offer, rate)
+                            .isEqualTo(expectedReceived(offer, rate));
+                }
+            }
+        }
+    }
+
     @Nested
     @DisplayName("Experience Calculation")
     class ExperienceCalculation {
