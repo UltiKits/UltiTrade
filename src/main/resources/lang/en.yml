@@ -228,7 +228,7 @@ log_logs_cleanup_failed: "Failed to cleanup old logs"
 log_player_logs_failed: "Failed to get player logs"
 removed_key_warning: "{FILE} still contains '{KEY}', which this version of UltiTrade no longer reads. {REASON} Delete the key from the file to silence this warning."
 removed_key_reason_trade_timeout: "It never took effect: an open trade window has no time limit, and nothing replaces the setting. A pending trade request still expires after 'request-timeout', which is unchanged. A time limit for an open trade window is feature request UltiKits/UltiTrade#41 (UltiKits/UltiTrade#18)."
-removed_key_reason_moved: "Its value was never shown to players. The reply it described now comes from the '{ENTRY}' entry of this module's language file (lang/<language>.yml, in the same module folder as config/trade.yml), so it follows the server's language setting; edit it there (UltiKits/UltiTrade#17)."
+removed_key_reason_moved: "Its value was never shown to players. The reply it described now comes from the '{ENTRY}' entry of this module's language file (lang/<language>.yml, in the same module folder as config/trade.yml), so it follows the server's language setting; to customise it, copy that file to one whose name starts with its language code and a hyphen (for example lang/en-myserver.yml), edit '{ENTRY}' there and set language: en-myserver in plugins/UltiTools/config.yml; an edit made in the official file itself is restored at the next start (UltiKits/UltiTrade#17)."
 
 log_config_default_save_failed: "Could not save {FILE} after writing its title and messages in the server's language; the new text is used this session, and the file is written again at the next start."
 
