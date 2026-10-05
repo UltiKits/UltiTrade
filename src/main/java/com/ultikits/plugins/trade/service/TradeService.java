@@ -20,6 +20,7 @@ import net.md_5.bungee.api.chat.HoverEvent;
 import net.md_5.bungee.api.chat.TextComponent;
 import net.md_5.bungee.api.chat.hover.content.Text;
 import net.milkbowl.vault.economy.Economy;
+import net.milkbowl.vault.economy.EconomyResponse;
 import org.bukkit.*;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
@@ -911,16 +912,12 @@ public class TradeService {
             return;
         }
 
-        // Handle money transfer
+        // Every check runs before anything moves: a trade cancelled by a check leaves every balance,
+        // every experience level and every item where it was (UltiKits/UltiTrade#58).
+        double taxRate = config.getTradeTax();
+        double moneyTax1 = money1 * taxRate;
+        double moneyTax2 = money2 * taxRate;
         if (moneyAvailable) {
-
-            // Apply tax
-            double taxRate = config.getTradeTax();
-            double tax1 = money1 * taxRate;
-            double tax2 = money2 * taxRate;
-            moneyTax = tax1 + tax2;
-            
-            // Check balances
             if (money1 > 0 && currentEconomy.getBalance(player1) < money1) {
                 cancelTrade(session, i18n("cancel_reason_insufficient_money").replace("{PLAYER}", player1.getName()));
                 return;
@@ -929,28 +926,8 @@ public class TradeService {
                 cancelTrade(session, i18n("cancel_reason_insufficient_money").replace("{PLAYER}", player2.getName()));
                 return;
             }
-            
-            // Transfer money
-            if (money1 > 0) {
-                currentEconomy.withdrawPlayer(player1, money1);
-                currentEconomy.depositPlayer(player2, money1 - tax1);
-            }
-            if (money2 > 0) {
-                currentEconomy.withdrawPlayer(player2, money2);
-                currentEconomy.depositPlayer(player1, money2 - tax2);
-            }
         }
-        
-        // Handle experience transfer
         if (expAvailable) {
-            
-            // Apply tax
-            double expTaxRate = config.getExpTaxRate();
-            int tax1 = experienceTax(exp1, expTaxRate);
-            int tax2 = experienceTax(exp2, expTaxRate);
-            expTax = tax1 + tax2;
-            
-            // Check experience
             if (exp1 > 0 && getTotalExperience(player1) < exp1) {
                 cancelTrade(session, i18n("cancel_reason_insufficient_exp").replace("{PLAYER}", player1.getName()));
                 return;
@@ -959,8 +936,25 @@ public class TradeService {
                 cancelTrade(session, i18n("cancel_reason_insufficient_exp").replace("{PLAYER}", player2.getName()));
                 return;
             }
-            
-            // Transfer experience
+        }
+
+        // Money is settled before experience or items move (maintainer decision of 2026-10-04,
+        // UltiKits/UltiTrade#58). A balance can still change between the check above and the withdrawal
+        // (another server sharing the economy's database, an asynchronous plugin), so the economy's own
+        // answer decides.
+        if (moneyAvailable && !settleMoney(session, currentEconomy, player1, player2, money1, money2, moneyTax1, moneyTax2)) {
+            return;
+        }
+        if (moneyAvailable) {
+            moneyTax = moneyTax1 + moneyTax2;
+        }
+
+        // Handle experience transfer
+        if (expAvailable) {
+            double expTaxRate = config.getExpTaxRate();
+            int tax1 = experienceTax(exp1, expTaxRate);
+            int tax2 = experienceTax(exp2, expTaxRate);
+            expTax = tax1 + tax2;
             if (exp1 > 0) {
                 setTotalExperience(player1, getTotalExperience(player1) - exp1);
                 player2.giveExp(exp1 - tax1);
@@ -1015,6 +1009,118 @@ public class TradeService {
         playSuccessEffects(player2);
     }
     
+    /**
+     * Move both sides' money, all or nothing (maintainer decision of 2026-10-04, UltiKits/UltiTrade#58).
+     * Returns whether it moved; when it did not, the trade has been cancelled -- nothing paid, every
+     * payer refunded, no tax taken, every stake returned -- and both players told.
+     * <p>
+     * Both sides are withdrawn first. A withdrawal the economy refuses, or one that throws, refunds what
+     * was already withdrawn and cancels the trade with a reason telling both players the balance changed
+     * and nothing was transferred. Only then are the payees paid, each the payer's amount less the tax.
+     * A deposit that is refused or throws cancels the trade the same way: every deposit that already
+     * landed is taken back from its payee, and every payer is refunded in full. A refund or a take-back
+     * that fails is logged at SEVERE, naming both players, their UUIDs, the amount and the currency, so an
+     * operator can correct the balances by hand.
+     * <p>
+     * The economy is passed as {@code Object} and cast where it is used, so no method signature names a
+     * Vault type: the class must stay loadable without Vault (UltiKits/UltiTrade#49).
+     */
+    private boolean settleMoney(TradeSession session, Object economy, Player player1, Player player2,
+                                double money1, double money2, double tax1, double tax2) {
+        Player[] payers = {player1, player2};
+        Player[] payees = {player2, player1};
+        double[] amounts = {money1, money2};
+        double[] taxes = {tax1, tax2};
+        boolean[] withdrawn = new boolean[2];
+        for (int i = 0; i < 2; i++) {
+            if (amounts[i] <= 0) {
+                continue;
+            }
+            if (!moved(economy, payers[i], amounts[i], true)) {
+                boolean restored = refundWithdrawn(economy, payers, payees, amounts, withdrawn);
+                cancelTrade(session, restored
+                        ? i18n("cancel_reason_money_withdraw_refused").replace("{PLAYER}", payers[i].getName())
+                        : i18n("cancel_reason_money_not_restored"));
+                return false;
+            }
+            withdrawn[i] = true;
+        }
+        boolean[] deposited = new boolean[2];
+        for (int i = 0; i < 2; i++) {
+            if (amounts[i] <= 0) {
+                continue;
+            }
+            if (!moved(economy, payees[i], amounts[i] - taxes[i], false)) {
+                boolean restored = true;
+                for (int j = 0; j < 2; j++) {
+                    if (deposited[j] && !moved(economy, payees[j], amounts[j] - taxes[j], true)) {
+                        logLostMoney(i18n("log_trade_money_takeback_failed"), economy, payees[j], payers[j], amounts[j] - taxes[j]);
+                        restored = false;
+                    }
+                }
+                restored &= refundWithdrawn(economy, payers, payees, amounts, withdrawn);
+                // "Nothing was transferred" is said only when it is true (gate-1 top-up r3 M1).
+                cancelTrade(session, restored
+                        ? i18n("cancel_reason_money_deposit_refused").replace("{PLAYER}", payees[i].getName())
+                        : i18n("cancel_reason_money_not_restored"));
+                return false;
+            }
+            deposited[i] = true;
+        }
+        return true;
+    }
+
+    /**
+     * Refund every payer whose withdrawal went through; a refund that fails is logged at SEVERE. Returns
+     * whether every refund went through.
+     */
+    private boolean refundWithdrawn(Object economy, Player[] payers, Player[] payees, double[] amounts, boolean[] withdrawn) {
+        boolean all = true;
+        for (int i = 0; i < 2; i++) {
+            if (withdrawn[i] && !moved(economy, payers[i], amounts[i], false)) {
+                logLostMoney(i18n("log_trade_money_refund_failed"), economy, payers[i], payees[i], amounts[i]);
+                all = false;
+            }
+        }
+        return all;
+    }
+
+    /**
+     * One withdrawal ({@code withdraw}) or deposit through the economy. Returns whether the economy
+     * reported success; a refused response, a missing one and a thrown exception all count as not moved.
+     */
+    private boolean moved(Object economy, Player player, double amount, boolean withdraw) {
+        try {
+            Economy vault = (Economy) economy;
+            EconomyResponse response = withdraw ? vault.withdrawPlayer(player, amount) : vault.depositPlayer(player, amount);
+            return response != null && response.transactionSuccess();
+        } catch (RuntimeException e) {
+            String template = withdraw ? i18n("log_trade_money_withdraw_threw") : i18n("log_trade_money_deposit_threw");
+            logQuietly(() -> plugin.getLogger().warn(e, template
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{AMOUNT}", String.valueOf(amount))));
+            return false;
+        }
+    }
+
+    /** The SEVERE line for money a failed trade could not put back: {@code template} says whose and why. */
+    private void logLostMoney(String template, Object economy, Player holder, Player other, double amount) {
+        String currency;
+        try {
+            currency = ((Economy) economy).currencyNamePlural();
+        } catch (RuntimeException e) {
+            currency = "?";
+        }
+        String line = Placeholders.fill(template,
+                "{PLAYER}", holder.getName(),
+                "{UUID}", holder.getUniqueId().toString(),
+                "{OTHER}", other.getName(),
+                "{OTHER_UUID}", other.getUniqueId().toString(),
+                "{AMOUNT}", java.math.BigDecimal.valueOf(amount).toPlainString(), // exact: the operator restores this by hand
+                "{CURRENCY}", String.valueOf(currency));
+        logQuietly(() -> plugin.getLogger().error(line));
+    }
+
     /**
      * Cancel a trade.
      */

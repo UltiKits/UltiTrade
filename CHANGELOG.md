@@ -76,6 +76,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A trade's money now moves only when the economy confirms it. The trade checked each payer's balance, then withdrew and
+  paid without reading whether the withdrawal succeeded, so a withdrawal refused after the check (the balance changed,
+  for example on another server sharing the economy's database) still paid the other player, and the items still moved.
+  Now both payers are withdrawn first; if either withdrawal is refused or fails, whatever was withdrawn is refunded and
+  the whole trade is cancelled: no money, experience or item moves, no tax is taken, and both players are told the
+  balance changed and nothing was transferred. A payment that is refused or fails cancels the trade the same way, and a
+  refund that fails is logged at SEVERE naming both players, their UUIDs, the amount and the currency, and the players are
+  then told a balance could not be restored and an operator was notified. Every balance and
+  experience check now also runs before anything moves: too little experience used to cancel the trade after the money
+  had already moved (UltiKits/UltiTrade#58).
+- 交易中的金币现在只在经济插件确认后才转移。此前交易先检查余额，再扣款和付款，却不读取扣款是否成功，因此检查之后余额发生变化（例如共享经济数据库的另一台服务器上的操作）
+  导致扣款被拒绝时，对方仍会收到金币，物品也照常转移。现在先从双方扣款；任一方扣款被拒绝或出错时，已扣除的金额会退还，整笔交易取消：金币、经验与物品都不转移，
+  不收税，并告知双方余额已变化、未转移任何东西。付款被拒绝或出错时同样取消交易；退款失败时记录一条 SEVERE，写明双方玩家、其 UUID、金额与货币，并告知玩家有余额未能恢复、已通知管理员。
+  所有余额与经验检查现在也都在任何转移之前进行：此前经验不足会在金币已经转移之后才取消交易（UltiKits/UltiTrade#58）。
+
 - On servers sharing one database, a stake waiting to be returned to a player is handed over once, not again at every
   server hop. A join used to decide whether an earlier hand-over had reached the player by looking in the player's
   data on its own server, which another server cannot see, so a player who moved between servers was given the same
