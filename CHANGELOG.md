@@ -157,7 +157,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (UltiKits/UltiTrade#51).
 - `config/trade.yml` 的注释现在跟随服务器语言。此前文件中全部二十四条注释（每个设置一条）只有中文，`language: en` 的全新安装得到的文件注释是中文。
   现在每条注释都是一个语言文件键，框架每次写入文件时按服务器的 `language` 解析，`lang/en.yml` 与 `lang/zh.yml` 各有英文和中文条目。
-  已有服务器上框架在这些设置上写下的注释（包括旧版本写下的中文注释）会在下次启动时、以及你修改 `language` 并执行 不带参数的 `/ul reload` 后
+  已有服务器上框架在这些设置上写下的注释（包括旧版本写下的中文注释）会在下次启动时、以及你修改 `language` 并执行不带参数的 `/ul reload` 后
   切换为服务器语言；设置值不受影响，你自己写的注释保持原样（UltiKits/UltiTools-Reborn#611）（UltiKits/UltiTrade#51）。
 
 - An unrelated plugin refusing the large-trade confirmation page's own `InventoryOpenEvent` no longer
@@ -312,7 +312,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keys; until then each renamed line shows the text of the official language the name starts with. A copy
   whose name does not start with an official language code and a hyphen is still read, but every message
   it lacks then shows in English, with one warning. An edit made directly in an official language file (`lang/en.yml`, `lang/zh.yml`) is not
-  kept: the framework restores the official files at every start and keeps the edited file as `.bak`
+  kept: the framework restores the official files at every start and on every module reload and keeps the edited file as `.bak`
   (UltiKits/UltiTools-Reborn#616).
 - `language: en` 现在对本模块显示或记录的全部内容生效：`/trade` 的所有回复与帮助，交易请求（可点击按钮、按钮的悬停
   提示与倒计时 BossBar），请求、接受、拒绝与取消的回复及每一种取消原因，交易界面与大额交易确认页（标题、物品名称、
@@ -323,7 +323,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   （例如 `lang/zh-myserver.yml`），并在 `plugins/UltiTools/config.yml` 中设置 `language: zh-myserver` 选择它——请把这些修改重新应用到新键上；
   在此之前，改名的行显示文件名开头那种官方语言的文本。文件名不以官方语言代码加连字符开头的副本仍会被读取，但其中缺少的消息
   都显示英文，并记录一条警告。
-  直接在官方语言文件（`lang/en.yml`、`lang/zh.yml`）中做的修改不会保留：框架会在每次启动时恢复官方文件，并把修改过的文件保留为
+  直接在官方语言文件（`lang/en.yml`、`lang/zh.yml`）中做的修改不会保留：框架会在每次启动以及每次模块重载时恢复官方文件，并把修改过的文件保留为
   `.bak`（UltiKits/UltiTools-Reborn#616）。
 
 - Reloading this module (`/ul reload UltiTrade`) now re-reads `config/trade.yml` and refreshes the
@@ -546,7 +546,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   from the language file (see `### Changed`). To customise them, copy the official language file to one
   whose name starts with its language code and a hyphen (for example `lang/en-myserver.yml`), edit the
   replies there and set `language: en-myserver` in `plugins/UltiTools/config.yml`; an edit made in the
-  official file itself is restored at the next start (UltiKits/UltiTools-Reborn#616). The seven other `messages.*` settings are read and are unchanged
+  official file itself is restored at the next start or module reload (UltiKits/UltiTools-Reborn#616). The seven other `messages.*` settings are read and are unchanged
   (UltiKits/UltiTrade#17).
 - 移除本模块在 `/ul reload UltiTrade` 时输出的"UltiTrade 配置已重载！"控制台行，以及未被使用的
   `trade_reloaded` 语言键。UltiTools 6.3.0 会为每个模块输出一行重载日志（UltiKits/UltiTrade#15）。
@@ -558,5 +558,5 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `messages.unblock-success`、`messages.already-blocked` 和 `messages.not-blocked`。它们在任何版本中都从未生效：
   它们所描述的命令一直发送自己固定的文本，修改这些设置项从未改变玩家看到的内容。这些回复现在来自语言文件
   （见 `### Changed`）。要自定义这些回复，请把官方语言文件复制为以其语言代码加连字符开头的文件（例如 `lang/zh-myserver.yml`），
-  在副本中修改，并在 `plugins/UltiTools/config.yml` 中设置 `language: zh-myserver`；直接修改官方文件的改动会在下次启动时被恢复
+  在副本中修改，并在 `plugins/UltiTools/config.yml` 中设置 `language: zh-myserver`；直接修改官方文件的改动会在下次启动或模块重载时被恢复
   （UltiKits/UltiTools-Reborn#616）。其余七个 `messages.*` 设置项会被读取，保持不变（UltiKits/UltiTrade#17）。
