@@ -164,6 +164,98 @@ class TradeServiceTest {
         }
     }
 
+    /**
+     * UltiKits/UltiTrade#64: a player's experience is read exactly, whatever float the server stores for the
+     * level progress. Minecraft keeps the progress inside a level as a float fraction, so multiplying it back by the
+     * points the level needs can land just under a whole number (3/13 x 13 = 2.9999998); truncating that lost one
+     * point, so a player holding exactly 30 points could not offer 30.
+     */
+    @Nested
+    @DisplayName("Experience is read exactly (UltiTrade#64)")
+    class ExperienceExactness {
+
+        /** Points needed to go from {@code level} to the next one (Minecraft's own table). */
+        private int needed(int level) {
+            return level >= 30 ? 112 + (level - 30) * 9 : level >= 15 ? 37 + (level - 15) * 5 : 7 + level * 2;
+        }
+
+        /** Stubs player1 with the level and progress Minecraft stores after {@code points} are given at once from zero. */
+        private void holdGivenAtOnce(int points) {
+            int level = 0;
+            float progress = (float) points / (float) needed(0);
+            while (progress >= 1.0F) {
+                progress = (progress - 1.0F) * (float) needed(level);
+                level++;
+                progress /= (float) needed(level);
+            }
+            stub(level, progress);
+        }
+
+        /** Stubs player1 with the level and progress Minecraft stores after {@code points} single points are given one by one. */
+        private void holdGivenOneByOne(int points) {
+            int level = 0;
+            float progress = 0.0F;
+            for (int i = 0; i < points; i++) {
+                progress += 1.0F / (float) needed(level);
+                while (progress >= 1.0F) {
+                    progress = (progress - 1.0F) * (float) needed(level);
+                    level++;
+                    progress /= (float) needed(level);
+                }
+            }
+            stub(level, progress);
+        }
+
+        private void stub(int level, float progress) {
+            when(player1.getLevel()).thenReturn(level);
+            when(player1.getExp()).thenReturn(progress);
+            when(player1.getExpToLevel()).thenReturn(needed(level));
+        }
+
+        @Test
+        @DisplayName("a player holding exactly 30 points has 30 (level 3 plus 3 of 13)")
+        void thirtyPointsAreThirty() {
+            stub(3, 3.0F / 13.0F);
+            assertThat(service.getTotalExperience(player1)).isEqualTo(30);
+        }
+
+        @Test
+        @DisplayName("30 points given by the server's own command read back as 30")
+        void thirtyPointsGivenAtOnce() {
+            holdGivenAtOnce(30);
+            assertThat(service.getTotalExperience(player1)).isEqualTo(30);
+        }
+
+        @Test
+        @DisplayName("level boundaries read back exactly")
+        void levelBoundaries() {
+            for (int points : new int[] {0, 7, 16, 27, 352, 394, 1507, 1628}) {
+                holdGivenAtOnce(points);
+                assertThat(service.getTotalExperience(player1)).as("%d points", points).isEqualTo(points);
+            }
+        }
+
+        @Test
+        @DisplayName("mid-level amounts read back exactly")
+        void midLevelAmounts() {
+            for (int points : new int[] {3, 30, 100, 500, 1000, 2000, 5000}) {
+                holdGivenAtOnce(points);
+                assertThat(service.getTotalExperience(player1)).as("%d points", points).isEqualTo(points);
+            }
+        }
+
+        @Test
+        @DisplayName("every amount up to level 40, given at once or point by point, reads back exactly")
+        void everyAmountReadsBack() {
+            for (int points = 0; points <= 2920; points++) {
+                holdGivenAtOnce(points);
+                assertThat(service.getTotalExperience(player1)).as("%d points given at once", points).isEqualTo(points);
+                holdGivenOneByOne(points);
+                assertThat(service.getTotalExperience(player1)).as("%d points given one by one", points).isEqualTo(points);
+            }
+        }
+    }
+
     @Nested
     @DisplayName("Experience Calculation")
     class ExperienceCalculation {
