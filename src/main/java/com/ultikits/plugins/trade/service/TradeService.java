@@ -1776,23 +1776,32 @@ public class TradeService {
     // ==================== Experience Utilities ====================
     
     /**
-     * Get total experience points for a player.
+     * Get total experience points for a player, exactly.
+     *
+     * <p>The server keeps the progress inside the current level as a float fraction of the points that level needs,
+     * so multiplying it back can land just under a whole number (3/13 x 13 = 2.9999998 for a player holding 30
+     * points). The points inside the level are therefore rounded to the nearest whole point, never truncated: a
+     * truncation read such a player one point short, refused an offer of all of their experience and, through
+     * {@link #setTotalExperience}, left them one point lower after a trade (UltiKits/UltiTrade#64).
      */
     public int getTotalExperience(Player player) {
         int level = player.getLevel();
-        int exp = (int) (player.getExp() * player.getExpToLevel());
-        
-        // Calculate total exp from levels
-        int totalFromLevels;
+        int exp = Math.round(player.getExp() * player.getExpToLevel());
+        return pointsToReachLevel(level) + exp;
+    }
+
+    /**
+     * Total points a player needs to reach {@code level} from zero (Minecraft's own table), in integer arithmetic:
+     * {@code L^2 + 6L} up to 16, {@code 2.5L^2 - 40.5L + 360} from 17 to 31 and {@code 4.5L^2 - 162.5L + 2220} above,
+     * each of which is a whole number for every whole level.
+     */
+    static int pointsToReachLevel(int level) {
         if (level <= 16) {
-            totalFromLevels = level * level + 6 * level;
+            return level * level + 6 * level;
         } else if (level <= 31) {
-            totalFromLevels = (int) (2.5 * level * level - 40.5 * level + 360);
-        } else {
-            totalFromLevels = (int) (4.5 * level * level - 162.5 * level + 2220);
+            return (5 * level * level - 81 * level) / 2 + 360;
         }
-        
-        return totalFromLevels + exp;
+        return (9 * level * level - 325 * level) / 2 + 2220;
     }
     
     /**
