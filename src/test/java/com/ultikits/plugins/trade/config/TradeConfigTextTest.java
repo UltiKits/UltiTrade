@@ -352,6 +352,7 @@ class TradeConfigTextTest {
             if (!was[i].equals(then[i])) {
                 assertThat(was[i].trim()).as("line " + (i + 1) + " changed by the framework's comment refresh:\n" + afterComments)
                         .startsWith("#").doesNotContain("Operator note");
+                assertThat(then[i].trim()).as("line " + (i + 1) + " is still a comment after the framework's comment refresh").startsWith("#");
                 comments++;
             }
         }
