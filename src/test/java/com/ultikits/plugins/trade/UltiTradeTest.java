@@ -106,6 +106,7 @@ class UltiTradeTest {
 
             InOrder order = inOrder(logService, tradeService);
             order.verify(logService, times(1)).reloadCleanupTask();
+            order.verify(tradeService, times(1)).warnAboutHeldClaims(); // UltiKits/UltiTrade#55: held hand-overs named again
             order.verify(tradeService, times(1)).reloadEconomy();
             order.verify(tradeService, times(1)).resetConfirmationsAfterReload();
             order.verify(tradeService, times(1)).refreshOpenTradeWindowsAfterReload();
