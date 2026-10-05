@@ -249,9 +249,11 @@ left in an operator's file has no effect. Every key below is read.
 **Comments follow the server's `language`.** Every one of the 24 settings declares its comment as one
 `{config_comment_<path>}` language key (`lang/en.yml`, `lang/zh.yml`; `-` and `.` in the path become `_`),
 which the framework resolves in the server's `language` each time it writes the file (`UltiTools-Reborn#542`),
-so a fresh install under `language: en` writes English comments. On an existing file the comments on these
-settings switch at the next start, values untouched, and a hand-written comment there is replaced
-(`UltiKits/UltiTrade#51`).
+so a fresh install under `language: en` writes English comments. On an existing file the comments the
+framework wrote on these settings (recognised only by exact equality with a text one of the module's shipped
+catalogues holds, so the Chinese comments earlier versions wrote count as the framework's) switch at the next
+start and after the framework rebuilds the language on a bare `/ul reload`, values untouched; a comment an
+operator wrote by hand is kept byte for byte (`UltiKits/UltiTools-Reborn#611`, `UltiKits/UltiTrade#51`).
 
 | ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
 |---|---|---|---|---|---|---|---|---|
