@@ -151,11 +151,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in the file) used to be Chinese-only, so a fresh install under `language: en` got a file with Chinese comments.
   Each is now a language-file key that the framework resolves in the server's `language` every time it writes
   the file, with an English and a Chinese entry in `lang/en.yml` and `lang/zh.yml`. On an existing server the
-  comments on these settings switch to the server's language at the next start; values are untouched, and a
-  comment you wrote by hand on one of these settings is replaced (UltiKits/UltiTrade#51).
+  comments the framework wrote on these settings, the Chinese ones earlier versions wrote included, switch to
+  the server's language at the next start, and after you change `language` and run `/ul reload`; values are
+  untouched, and a comment you wrote yourself is kept as you wrote it (UltiKits/UltiTools-Reborn#611)
+  (UltiKits/UltiTrade#51).
 - `config/trade.yml` 的注释现在跟随服务器语言。此前文件中全部二十四条注释（每个设置一条）只有中文，`language: en` 的全新安装得到的文件注释是中文。
   现在每条注释都是一个语言文件键，框架每次写入文件时按服务器的 `language` 解析，`lang/en.yml` 与 `lang/zh.yml` 各有英文和中文条目。
-  已有服务器上这些设置的注释会在下次启动时切换为服务器语言；设置值不受影响，你手写在这些设置上的注释会被替换（UltiKits/UltiTrade#51）。
+  已有服务器上框架在这些设置上写下的注释（包括旧版本写下的中文注释）会在下次启动时、以及你修改 `language` 并执行 `/ul reload` 后
+  切换为服务器语言；设置值不受影响，你自己写的注释保持原样（UltiKits/UltiTools-Reborn#611）（UltiKits/UltiTrade#51）。
 
 - An unrelated plugin refusing the large-trade confirmation page's own `InventoryOpenEvent` no longer
   leaves the player with no trade UI at all while the trade keeps running with both stakes locked. The
@@ -303,15 +306,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   was fixed Chinese text in every language, although the language files already held English text for
   much of it that no code read; the console lines were fixed English text and now follow
   `language: zh` too (UltiKits/UltiTrade#16). Language keys were renamed: the few lines that used a
-  Chinese sentence as their language key now use ASCII keys. If you edited this module's language
-  files, re-apply those edits to the new keys; until then the renamed lines show the built-in text.
+  Chinese sentence as their language key now use ASCII keys. If you customised this module's messages in
+  your own language file (a copy of an official file under a new name, selected with `language` in
+  `plugins/UltiTools/config.yml`), re-apply those edits to the new keys; until then the renamed lines show
+  the official text. An edit made directly in an official language file (`lang/en.yml`, `lang/zh.yml`) is not
+  kept: the framework restores the official files at every start and keeps the edited file as `.bak`
+  (UltiKits/UltiTools-Reborn#616).
 - `language: en` 现在对本模块显示或记录的全部内容生效：`/trade` 的所有回复与帮助，交易请求（可点击按钮、按钮的悬停
   提示与倒计时 BossBar），请求、接受、拒绝与取消的回复及每一种取消原因，交易界面与大额交易确认页（标题、物品名称、
   说明、按钮、税费行），金币与经验的输入提示及回复，PlaceholderAPI 的显示值（`enabled_display`、`last_trade_time`、
   `last_trade_ago`），命令描述以及控制台日志。其中大部分原先在任何语言下都是写死的中文，而语言文件中其实已有其中许多
   内容的无人读取的英文文本；控制台日志原先写死为英文，现在也跟随 `language: zh`（UltiKits/UltiTrade#16）。语言键已改名：
-  少数以中文句子作为语言键的行现在改用 ASCII 键。如果你修改过本模块的语言文件，请把这些修改重新应用到新键上；在此之前，
-  改名的行显示内置文本。
+  少数以中文句子作为语言键的行现在改用 ASCII 键。如果你在自己的语言文件中自定义过本模块的消息（把官方文件复制一份、改名，
+  并在 `plugins/UltiTools/config.yml` 的 `language` 中选择它），请把这些修改重新应用到新键上；在此之前，改名的行显示官方文本。
+  直接在官方语言文件（`lang/en.yml`、`lang/zh.yml`）中做的修改不会保留：框架会在每次启动时恢复官方文件，并把修改过的文件保留为
+  `.bak`（UltiKits/UltiTools-Reborn#616）。
 
 - Reloading this module (`/ul reload UltiTrade`) now re-reads `config/trade.yml` and refreshes the
   language files, so an edited value such as `max-distance` applies without a restart. Previously
