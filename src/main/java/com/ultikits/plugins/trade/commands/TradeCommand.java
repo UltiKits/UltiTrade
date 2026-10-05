@@ -9,6 +9,10 @@ import com.ultikits.ultitools.annotations.command.*;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.command.CommandSender;
+import com.ultikits.plugins.trade.util.Placeholders;
+import java.util.List;
+import java.util.Date;
+import java.text.SimpleDateFormat;
 import org.bukkit.entity.Player;
 
 /**
@@ -17,7 +21,10 @@ import org.bukkit.entity.Player;
  * @author wisdomme
  * @version 2.0.0
  */
-@CmdTarget(CmdTarget.CmdTargetType.PLAYER)
+// BOTH at class level so the console-usable /trade pending subcommands do not widen it (the framework
+// refuses a method that widens its class's target and would reject the whole class); every player
+// subcommand narrows itself back to PLAYER (UltiKits/UltiTrade#55, Codex run 1 P1).
+@CmdTarget(CmdTarget.CmdTargetType.BOTH)
 @CmdExecutor(
     alias = {"trade", "t"},
     permission = "ultitrade.use",
@@ -53,6 +60,7 @@ public class TradeCommand extends BaseCommandExecutor {
         return ChatColor.translateAlternateColorCodes('&', languageText);
     }
     
+    @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "<player>")
     public void sendRequest(@CmdSender Player sender, @CmdParam("player") String targetName) {
         Player target = Bukkit.getPlayerExact(targetName);
@@ -69,16 +77,19 @@ public class TradeCommand extends BaseCommandExecutor {
         tradeService.sendRequest(sender, target);
     }
     
+    @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "accept")
     public void accept(@CmdSender Player player) {
         tradeService.acceptRequest(player);
     }
     
+    @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "deny")
     public void deny(@CmdSender Player player) {
         tradeService.denyRequest(player);
     }
     
+    @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "cancel")
     public void cancel(@CmdSender Player player) {
         if (!tradeService.isTrading(player.getUniqueId())) {
@@ -88,6 +99,7 @@ public class TradeCommand extends BaseCommandExecutor {
         tradeService.cancelTrade(player);
     }
     
+    @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "toggle")
     public void toggle(@CmdSender Player player) {
         boolean newState = logService.toggleTrade(player);
@@ -96,6 +108,7 @@ public class TradeCommand extends BaseCommandExecutor {
             : plugin.i18n("trade_toggle_off"), player.getName()));
     }
     
+    @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "block <player>")
     public void blockPlayer(@CmdSender Player player, @CmdParam("player") String targetName) {
         Player target = Bukkit.getPlayerExact(targetName);
@@ -120,6 +133,7 @@ public class TradeCommand extends BaseCommandExecutor {
         player.sendMessage(text(plugin.i18n("block_success_hint")));
     }
     
+    @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "unblock <player>")
     public void unblockPlayer(@CmdSender Player player, @CmdParam("player") String targetName) {
         Player target = Bukkit.getPlayerExact(targetName);
@@ -137,6 +151,57 @@ public class TradeCommand extends BaseCommandExecutor {
         player.sendMessage(withPlayer(plugin.i18n("unblock_success"), target.getName()));
     }
     
+    /**
+     * Lists every hand-over of a saved trade stake that was claimed and never confirmed -- the rows a crash
+     * or a failed save left held, which no join hands over (maintainer decision of 2026-10-04,
+     * UltiKits/UltiTrade#55). Console-usable; needs {@code ultitrade.admin}.
+     */
+    @CmdTarget(CmdTarget.CmdTargetType.BOTH)
+    @CmdMapping(format = "pending list", permission = "ultitrade.admin")
+    public void pendingList(@CmdSender CommandSender sender) {
+        List<TradeService.HeldClaim> held = tradeService.heldClaims();
+        if (held.isEmpty()) {
+            sender.sendMessage(text(plugin.i18n("pending_list_empty")));
+            return;
+        }
+        sender.sendMessage(text(plugin.i18n("pending_list_header").replace("{COUNT}", String.valueOf(held.size()))));
+        SimpleDateFormat time = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        for (TradeService.HeldClaim claim : held) {
+            sender.sendMessage(text(Placeholders.fill(plugin.i18n("pending_list_entry"),
+                "{ID}", claim.getId(),
+                "{PLAYER}", claim.getOwnerName(),
+                "{UUID}", claim.getOwnerUuid(),
+                "{TIME}", time.format(new Date(claim.getClaimedAt())),
+                "{SERVER}", claim.getServer(),
+                "{ITEMS}", claim.getItems())));
+        }
+    }
+
+    /** Releases a held hand-over so the owner's next join hands it over (now, if they are online here). */
+    @CmdTarget(CmdTarget.CmdTargetType.BOTH)
+    @CmdMapping(format = "pending redeliver <id>", permission = "ultitrade.admin")
+    public void pendingRedeliver(@CmdSender CommandSender sender, @CmdParam("id") String id) {
+        sender.sendMessage(resolution(tradeService.redeliverHeld(id), plugin.i18n("pending_redelivered"), id));
+    }
+
+    /** Voids a held hand-over: the entry is removed and its items are not handed over again. */
+    @CmdTarget(CmdTarget.CmdTargetType.BOTH)
+    @CmdMapping(format = "pending void <id>", permission = "ultitrade.admin")
+    public void pendingVoid(@CmdSender CommandSender sender, @CmdParam("id") String id) {
+        sender.sendMessage(resolution(tradeService.voidHeld(id), plugin.i18n("pending_voided"), id));
+    }
+
+    private String resolution(TradeService.HeldResolution outcome, String doneText, String id) {
+        String line = doneText;
+        if (outcome == TradeService.HeldResolution.NOT_HELD) {
+            line = plugin.i18n("pending_not_held");
+        } else if (outcome == TradeService.HeldResolution.FAILED) {
+            line = plugin.i18n("pending_resolve_failed");
+        }
+        return text(line.replace("{ID}", id));
+    }
+
+    @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "")
     public void help(@CmdSender Player player) {
         player.sendMessage(text(plugin.i18n("help_header")));
