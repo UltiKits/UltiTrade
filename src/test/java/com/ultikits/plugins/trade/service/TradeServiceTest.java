@@ -306,6 +306,23 @@ class TradeServiceTest {
         }
 
         @Test
+        @DisplayName("experienceTax, which the trade window and the confirm page also show, floors offer x rate exactly")
+        void experienceTaxHelper() {
+            assertThat(TradeService.experienceTax(100, 0.29)).isEqualTo(29);
+            assertThat(TradeService.experienceTax(1000, 0.99)).isEqualTo(990);
+            assertThat(TradeService.experienceTax(100, 0.295)).isEqualTo(29); // floor, not round
+            assertThat(TradeService.experienceTax(7, 0.14)).isEqualTo(0);
+            assertThat(TradeService.experienceTax(100, 0.0)).isZero();
+            assertThat(TradeService.experienceTax(0, 0.29)).isZero();
+            for (double rate : new double[] {0.07, 0.14, 0.29, 0.57, 0.99}) {
+                for (int offer = 1; offer <= 1000; offer++) {
+                    assertThat(TradeService.experienceTax(offer, rate)).as("offer %d at rate %s", offer, rate)
+                            .isEqualTo(offer - expectedReceived(offer, rate));
+                }
+            }
+        }
+
+        @Test
         @DisplayName("every offer from 1 to 1000 at 7%, 14%, 29%, 57% and 99% is taxed by exact decimal floor")
         void sweepOfOffersAndRates() throws Exception {
             for (double rate : new double[] {0.07, 0.14, 0.29, 0.57, 0.99}) {
