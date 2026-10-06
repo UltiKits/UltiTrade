@@ -149,6 +149,7 @@ class TradeExperienceDisplayTest {
 
         List<String> lore = loreAt(inventory, TradeGUI.YOUR_EXP_SLOT);
         assertThat(lore).contains(ChatColor.translateAlternateColorCodes('&', tradeService.i18n("exp_total_unreadable")));
-        assertThat(String.join("\n", lore)).doesNotContain(String.valueOf(Integer.MAX_VALUE));
+        assertThat(lore).as("no capped number presented as the total")
+                .doesNotContain(line("gui_your_total_exp", String.valueOf(Integer.MAX_VALUE)));
     }
 }
