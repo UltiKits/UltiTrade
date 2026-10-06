@@ -394,12 +394,28 @@ public class TradeLogService {
      * Off the main thread -- the post-trade statistics -- an entry is only replaced, never added, so a
      * write finishing after the player quit cannot bring their entry back.
      */
-    private void rememberWritten(UUID playerUuid, PlayerTradeSettings row) {
+    private void rememberWritten(UUID playerUuid, PlayerTradeSettings row, PlayerTradeSettings read) {
         if (Bukkit.isPrimaryThread() && Bukkit.getPlayer(playerUuid) != null) {
             settingsCache.put(playerUuid, row);
         } else {
-            settingsCache.computeIfPresent(playerUuid, (uuid, cached) -> row);
+            // Only over the entry this write read: if the main thread published a newer row of the player's own
+            // change between this write and here, keeping it keeps the cache in this server's write order (Codex
+            // run 1 on PR #66, gate-1 F3). An entry that was already stale stays as it was until the next change.
+            settingsCache.computeIfPresent(playerUuid, (uuid, cached) -> sameValues(cached, read) ? row : cached);
         }
+    }
+
+    /** Whether two settings rows hold the same value in every stored column ({@code read} may be null). */
+    private static boolean sameValues(PlayerTradeSettings a, PlayerTradeSettings read) {
+        return read != null
+            && Objects.equals(a.getPlayerUuid(), read.getPlayerUuid())
+            && Objects.equals(a.getPlayerName(), read.getPlayerName())
+            && a.isTradeEnabled() == read.isTradeEnabled()
+            && Objects.equals(a.getBlockedPlayersJson(), read.getBlockedPlayersJson())
+            && a.getTotalTrades() == read.getTotalTrades()
+            && Double.compare(a.getTotalMoneyTraded(), read.getTotalMoneyTraded()) == 0
+            && a.getTotalExpTraded() == read.getTotalExpTraded()
+            && a.getLastTradeTime() == read.getLastTradeTime();
     }
 
     /**
@@ -466,7 +482,15 @@ public class TradeLogService {
         settings.setId(playerUuid.toString());
         try {
             settingsOperator.insert(settings);
-            return settings;
+            // The stored row, not this object: the JSON backend ignores an insert whose id another writer on this
+            // server stored first, and returns normally (Codex run 1 on PR #66).
+            PlayerTradeSettings stored = readStoredRow(playerUuid);
+            if (stored == null) {
+                throw new IllegalStateException("the inserted trade settings row of " + playerUuid + " is not stored");
+            }
+            return stored;
+        } catch (IllegalStateException notStored) {
+            throw notStored;
         } catch (RuntimeException insertFailed) {
             List<PlayerTradeSettings> existing = rowsOf(playerUuid.toString());
             if (existing.isEmpty()) {
@@ -594,10 +618,17 @@ public class TradeLogService {
     private static final class ChangeResult {
         final SettingsWrite write;
         final PlayerTradeSettings row;
+        /** The row's values as this change read them, before applying it; {@code null} when no row was read. */
+        final PlayerTradeSettings read;
 
         ChangeResult(SettingsWrite write, PlayerTradeSettings row) {
+            this(write, row, null);
+        }
+
+        ChangeResult(SettingsWrite write, PlayerTradeSettings row, PlayerTradeSettings read) {
             this.write = write;
             this.row = row;
+            this.read = read;
         }
     }
 
@@ -644,7 +675,7 @@ public class TradeLogService {
      * current settings (UltiKits/UltiTrade#57) -- and from the defaults otherwise. When another server
      * inserts the same id first, the insert fails and the change is applied to that server's row instead.
      * <p>
-     * After a write, the cache holds the row as written ({@link #rememberWritten}).
+     * After a write, the cache holds the row as written ({@link #rememberWritten}), in this server's write order.
      * A failure is logged with the player named and nothing is written: a contended row with the reason,
      * a storage error with its exception.
      */
@@ -653,12 +684,22 @@ public class TradeLogService {
         try {
             for (int attempt = 1; ; attempt++) {
                 PlayerTradeSettings row = readStoredRow(playerUuid);
-                ChangeResult result = row == null
-                        ? createWith(playerUuid, playerName, change)
-                        : updateWith(row, playerName, change);
+                if (row == null) {
+                    ChangeResult unchanged = createWith(playerUuid, playerName, change);
+                    if (unchanged != null) {
+                        return unchanged;
+                    }
+                    row = readStoredRow(playerUuid);
+                    if (row == null) {
+                        // The JSON backend ignores an insert whose id it already holds, and returns normally: only
+                        // reading the row back proves one is stored (UltiKits/UltiTrade#52, #57).
+                        throw new IllegalStateException("the trade settings row of " + playerUuid + " is not stored");
+                    }
+                }
+                ChangeResult result = updateWith(row, playerName, change);
                 if (result != null) {
                     if (result.row != null) {
-                        rememberWritten(playerUuid, result.row);
+                        rememberWritten(playerUuid, result.row, result.read);
                     }
                     return result;
                 }
@@ -689,50 +730,55 @@ public class TradeLogService {
      */
     private ChangeResult updateWith(PlayerTradeSettings row, String playerName, SettingsChange change) {
         WhereCondition[] asRead = valuesAsRead(row);
+        PlayerTradeSettings read = copyOf(row);
         boolean renamed = playerName != null && !playerName.equals(row.getPlayerName());
         if (renamed) {
             row.setPlayerName(playerName);
         }
         boolean changed = change.apply(row);
         if (!changed && !renamed) {
-            return new ChangeResult(SettingsWrite.UNCHANGED, row);
+            return new ChangeResult(SettingsWrite.UNCHANGED, row, read);
         }
-        return settingsOperator.updateIf(row, asRead) ? new ChangeResult(SettingsWrite.WRITTEN, row) : null;
+        return settingsOperator.updateIf(row, asRead) ? new ChangeResult(SettingsWrite.WRITTEN, row, read) : null;
     }
 
     /**
-     * One attempt for a player with no stored row: insert one with the change applied. Returns
-     * {@code null} when another server inserted the player's row first (apply the change to that row).
+     * For a player with no stored row: insert one <b>without</b> the change -- the settings this server last held
+     * for the player (the row was deleted while they were online here; the maintainer's decision of 2026-10-04
+     * re-creates it with the current settings, UltiKits/UltiTrade#57) or the defaults -- under the player's UUID
+     * as id. The change is then applied by {@link #change} to whatever row is stored, through the same conditional
+     * write as every other change. Inserting the change itself could not tell a stored insert from one the JSON
+     * backend ignored because another writer on this server (the statistics task) had inserted the row first, and
+     * would report the change as written while it was not (Codex run 1 on PR #66). On the relational backends a
+     * duplicate insert fails, and the change is likewise applied to the row the other writer stored.
+     * <p>
+     * Returns {@code UNCHANGED} when the change would change nothing for a player this server holds nothing for
+     * (nothing is inserted); otherwise {@code null}.
      */
     private ChangeResult createWith(UUID playerUuid, String playerName, SettingsChange change) {
         PlayerTradeSettings held = settingsCache.get(playerUuid);
-        PlayerTradeSettings row = held != null ? copyOf(held) : new PlayerTradeSettings(playerUuid, playerName);
-        row.setId(playerUuid.toString());
+        PlayerTradeSettings base = held != null ? copyOf(held) : new PlayerTradeSettings(playerUuid, playerName);
+        base.setId(playerUuid.toString());
         if (playerName != null) {
-            row.setPlayerName(playerName);
+            base.setPlayerName(playerName);
         }
-        if (!change.apply(row) && held == null) {
+        if (held == null && !change.apply(copyOf(base))) {
             // Nothing to record for a player with no row and no settings this server knows of.
             return new ChangeResult(SettingsWrite.UNCHANGED, null);
         }
         try {
-            settingsOperator.insert(row);
+            settingsOperator.insert(base);
         } catch (RuntimeException insertFailed) {
             if (readStoredRow(playerUuid) == null) {
                 throw insertFailed;
             }
-            return null;
-        }
-        if (readStoredRow(playerUuid) == null) {
-            // The JSON backend ignores an insert whose id it already holds, and returns normally: only
-            // reading the row back proves it is stored (UltiKits/UltiTrade#52, #57).
-            throw new IllegalStateException("the inserted trade settings row of " + playerUuid + " is not stored");
+            return null; // another server inserted the row first: the change is applied to it
         }
         if (held != null && plugin != null) {
             plugin.getLogger().warn(i18n("log_settings_row_recreated")
-                .replace("{PLAYER}", String.valueOf(row.getPlayerName())));
+                .replace("{PLAYER}", String.valueOf(base.getPlayerName())));
         }
-        return new ChangeResult(SettingsWrite.WRITTEN, row);
+        return null;
     }
 
     /** A detached copy of {@code settings}, so a row built from it never shares state with the cache. */

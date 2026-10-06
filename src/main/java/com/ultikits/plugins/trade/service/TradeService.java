@@ -965,12 +965,21 @@ public class TradeService {
             int tax1 = experienceTax(exp1, expTaxRate);
             int tax2 = experienceTax(exp2, expTaxRate);
             expTax = tax1 + tax2;
+            // Both senders' totals are read before any experience moves, both senders rebuilt, and only then is
+            // either side paid: a total read after its owner received the other offer can exceed the int range and
+            // read capped, and a rebuild from it would take the remainder off the cap (Codex run 1 on PR #66).
+            int remaining1 = exp1 > 0 ? getTotalExperience(player1) - exp1 : 0;
+            int remaining2 = exp2 > 0 ? getTotalExperience(player2) - exp2 : 0;
             if (exp1 > 0) {
-                setTotalExperience(player1, getTotalExperience(player1) - exp1);
+                setTotalExperience(player1, remaining1);
+            }
+            if (exp2 > 0) {
+                setTotalExperience(player2, remaining2);
+            }
+            if (exp1 > 0) {
                 player2.giveExp(exp1 - tax1);
             }
             if (exp2 > 0) {
-                setTotalExperience(player2, getTotalExperience(player2) - exp2);
                 player1.giveExp(exp2 - tax2);
             }
         }
