@@ -177,6 +177,22 @@ class TradeSettingsCacheLifetimeTest {
         }
 
         @Test
+        @DisplayName("A first read off the main thread adds no entry, even for a player online here (a placeholder evaluated as they quit; gate-1 F4 of PR #66)")
+        void firstReadOffTheMainThreadAddsNoEntry() throws Exception {
+            server().toggleTrade(player); // off
+            TradeLogService serverA = server();
+            doReturn(player).when(Bukkit.getServer()).getPlayer(playerUuid);
+            boolean[] read = new boolean[1];
+
+            Thread placeholder = new Thread(() -> read[0] = !serverA.isTradeEnabled(playerUuid));
+            placeholder.start();
+            placeholder.join();
+
+            assertThat(read[0]).as("the read itself works: trading off").isTrue();
+            assertThat(cacheOf(serverA)).as("no entry added off the main thread").isEmpty();
+        }
+
+        @Test
         @DisplayName("After a change the cached entry is the row as written")
         void changeReplacesTheEntry() throws Exception {
             server().toggleTrade(player);
