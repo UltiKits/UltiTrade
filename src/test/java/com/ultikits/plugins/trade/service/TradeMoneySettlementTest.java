@@ -321,7 +321,8 @@ class TradeMoneySettlementTest {
     void failedRefundIsLoggedSevere() throws Exception {
         TradeSession session = openTrade();
         withdrawFault.put(bob.getUniqueId(), "refuse");
-        depositFault.put(alice.getUniqueId(), "throw-always"); // Alice's refund cannot be written
+        // Alice's refund is refused (a refused call is certain; a thrown one logs the outcome-unknown line instead, gate-1 F6)
+        depositFault.put(alice.getUniqueId(), "refuse-always");
 
         service.completeTrade(session);
 
@@ -345,7 +346,7 @@ class TradeMoneySettlementTest {
         TradeSession session = openTrade();
         session.setMoney(alice.getUniqueId(), 0.005);
         withdrawFault.put(bob.getUniqueId(), "refuse");
-        depositFault.put(alice.getUniqueId(), "throw-always");
+        depositFault.put(alice.getUniqueId(), "refuse-always"); // refused, so the certain refund line is the one logged (gate-1 F6)
 
         service.completeTrade(session);
 
