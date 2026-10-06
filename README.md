@@ -241,6 +241,10 @@ private String guiTitle = "&6与 {PLAYER} 交易";
 - **On Paper a failed player-data save is not reported to the module.** Paper's `Player#saveData()` logs
   its own `Failed to save player data for <name>` and returns normally, so the module cannot tell a stake
   hand-over's player save failed (UltiKits/UltiTrade#60).
+- **Above about 411,616 experience points (about level 320), Paper's own experience arithmetic drifts.** After a
+  trade the sender's remaining experience is rebuilt with `Player#giveExp`, which on Paper can store a few to about
+  100 points more or less than given at those totals; the server's `/xp` command behaves the same way. The
+  module reads a player's total exactly (UltiKits/UltiTrade#65).
 - **服务器在发还保存的押入物品时崩溃，这次发还会被暂扣，交由服主处理。** 交易取消时若服务器找不到一方，其押入物品保存在
   `trade_pending_returns` 中，并在其下次进服时发还。该表记录每次发还的状态：发还前进服会将条目标记为「已占用」（只有一台服务器能成功），
   玩家数据保存完成后再删除条目（UltiKits/UltiTrade#55）。因崩溃（或保存失败）而停留在「已占用」状态的条目不会再自动发还，因为仅凭该表无法判断物品是否已送达。
@@ -255,6 +259,8 @@ private String guiTitle = "&6与 {PLAYER} 交易";
   重新读取余额无法判断，因为其他插件或服务器也可能修改余额。
 - **在 Paper 上，玩家数据保存失败不会通知本模块。** Paper 的 `Player#saveData()` 只记录其自身的 `Failed to save player data for <name>` 并正常返回，
   因此本模块无法得知押入物品发还时的玩家数据保存失败（UltiKits/UltiTrade#60）。
+- **经验超过约 411,616 点（约 320 级）时，Paper 自身的经验计算存在偏差。** 交易后发送方剩余的经验通过 `Player#giveExp` 重建，
+  在这一数量级上 Paper 实际保存的数值可能比给予的多或少数点至约 100 点；服务器自带的 `/xp` 命令也是如此。本模块读取玩家经验总量是精确的（UltiKits/UltiTrade#65）。
 
 ## 📜 许可证
 

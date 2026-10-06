@@ -2101,22 +2101,37 @@ public class TradeService {
     public int getTotalExperience(Player player) {
         int level = player.getLevel();
         int exp = Math.round(player.getExp() * player.getExpToLevel());
-        return pointsToReachLevel(level) + exp;
+        // In long, then clamped: a level total already at Integer.MAX_VALUE plus the progress inside the level
+        // must not wrap to a negative total (UltiKits/UltiTrade#65).
+        return (int) Math.min((long) pointsToReachLevel(level) + exp, Integer.MAX_VALUE);
     }
 
     /**
      * Total points a player needs to reach {@code level} from zero (Minecraft's own table), in integer arithmetic:
      * {@code L^2 + 6L} up to 16, {@code 2.5L^2 - 40.5L + 360} from 17 to 31 and {@code 4.5L^2 - 162.5L + 2220} above,
      * each of which is a whole number for every whole level.
+     *
+     * <p>Computed in {@code long} and clamped to {@code Integer.MAX_VALUE}: in {@code int}, {@code 9 * level * level}
+     * overflows from level 15,466, and a player set to such a level (for example {@code /xp set <player> 16000
+     * levels}) read a negative total, so every experience offer was refused and {@code /trade} showed a negative
+     * total (UltiKits/UltiTrade#65). The true total exceeds {@code Integer.MAX_VALUE} from level 21,864; above
+     * {@link #LEVEL_TOTAL_SURELY_ABOVE_INT} the answer is the clamp without computing, so the {@code long} product
+     * itself cannot overflow either.
      */
     static int pointsToReachLevel(int level) {
         if (level <= 16) {
             return level * level + 6 * level;
         } else if (level <= 31) {
             return (5 * level * level - 81 * level) / 2 + 360;
+        } else if (level > LEVEL_TOTAL_SURELY_ABOVE_INT) {
+            return Integer.MAX_VALUE;
         }
-        return (9 * level * level - 325 * level) / 2 + 2220;
+        long l = level;
+        return (int) Math.min((9 * l * l - 325 * l) / 2 + 2220, Integer.MAX_VALUE);
     }
+
+    /** A level whose total is far above {@code Integer.MAX_VALUE}, low enough that {@code 9 * level * level} fits a long. */
+    private static final int LEVEL_TOTAL_SURELY_ABOVE_INT = 1_000_000;
     
     /**
      * Set total experience points for a player.

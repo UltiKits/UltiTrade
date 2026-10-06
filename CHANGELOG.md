@@ -172,6 +172,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   但经济插件可能已经扣除。请检查 <玩家> 的余额是否有 <金额> 的变动`（付款同理），金额完整显示（`12345678.9`，而非 `1.23456789E7`）。此前是一条只说明
   「按拒绝处理」的 WARNING。交易仍将此类调用视为被拒绝；已生效后才抛出异常的调用作为已知限制记录在文档中（UltiKits/UltiTrade#60）。
 
+- A player at a very high level no longer reads a negative experience total. From 15,466 levels (for example after
+  `/xp set <player> 16000 levels`) the total overflowed, so the experience prompt and the trade window showed a negative
+  number and every experience offer was refused as insufficient. The total is now exact up to 21,863 levels and
+  capped at 2,147,483,647 points above. Paper's own experience arithmetic drifting above about 411,616 points is
+  documented as a known limitation (UltiKits/UltiTrade#65).
+- 等级极高的玩家不再读到负数的经验总量。此前从 15,466 级起（例如执行 `/xp set <玩家> 16000 levels` 后）经验总量会溢出，经验输入提示和交易界面显示负数，
+  所有经验报价都被判为经验不足而拒绝。现在经验总量在 21,863 级以内精确计算，更高等级则封顶为 2,147,483,647 点。Paper 自身经验计算在约 411,616 点以上的偏差
+  作为已知限制记录在文档中（UltiKits/UltiTrade#65）。
+
 - `/ul reload UltiTrade` (and a bare `/ul reload`) no longer reports a plain success when part of this module's
   reload failed. If rescheduling the trade-log cleanup task, applying `enable-money-trade`, or voiding open trades'
   confirmations and redrawing their windows fails, or one player's open trade window cannot be redrawn, the module
