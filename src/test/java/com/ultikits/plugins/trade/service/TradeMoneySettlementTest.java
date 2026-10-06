@@ -375,6 +375,7 @@ class TradeMoneySettlementTest {
     @DisplayName("A withdrawal that throws logs one SEVERE outcome-unknown line naming the player and the exact amount, no WARNING; the trade is still refused (UltiTrade#60)")
     void throwingWithdrawalLogsOutcomeUnknownAtSevere() throws Exception {
         TradeSession session = openTrade();
+        balances.put(bob.getUniqueId(), 20000000.0); // enough to pass the balance check made before anything moves
         session.setMoney(bob.getUniqueId(), 12345678.9); // String.valueOf would print 1.23456789E7
         withdrawFault.put(bob.getUniqueId(), "throw");
 
@@ -385,6 +386,7 @@ class TradeMoneySettlementTest {
         verify(logger, never()).warn(any(Throwable.class), anyString());
         assertThat(session.getState()).as("the refusal behaviour is unchanged").isEqualTo(TradeSession.TradeState.CANCELLED);
         assertThat(balance(alice)).isEqualTo(1000.0);
+        assertThat(balance(bob)).isEqualTo(20000000.0);
         assertNoItemsMoved();
     }
 
