@@ -169,11 +169,7 @@ class TradeLogServiceTest {
         @Test
         @DisplayName("getOrCreateSettings should create new settings if not found")
         void createNewSettings() {
-            when(settingsOperator.query()).thenReturn(queryBuilder);
-        when(queryBuilder.where(anyString())).thenReturn(queryBuilder);
-        when(queryBuilder.eq(any())).thenReturn(queryBuilder);
-        when(queryBuilder.list())
-                    .thenReturn(Collections.emptyList());
+            storeHolds(); // an empty table that keeps what is inserted: the new row is read back (Codex run 1 on PR #66)
 
             PlayerTradeSettings result = service.getOrCreateSettings(playerUuid, "TestPlayer");
 
@@ -230,11 +226,15 @@ class TradeLogServiceTest {
         @Test
         @DisplayName("getOrCreateSettings should handle null result from getAll")
         void handleNullResult() {
-            when(settingsOperator.query()).thenReturn(queryBuilder);
-        when(queryBuilder.where(anyString())).thenReturn(queryBuilder);
-        when(queryBuilder.eq(any())).thenReturn(queryBuilder);
-        when(queryBuilder.list())
-                    .thenReturn(null);
+            storeHolds();
+            // The first read answers null; later reads see the table, so the inserted row is read back (Codex run 1)
+            lenient().when(queryBuilder.list()).thenReturn(null).thenAnswer(inv -> {
+                List<PlayerTradeSettings> copies = new ArrayList<>();
+                for (PlayerTradeSettings row : store) {
+                    copies.add(copy(row));
+                }
+                return copies;
+            });
 
             PlayerTradeSettings result = service.getOrCreateSettings(playerUuid, "TestPlayer");
 
