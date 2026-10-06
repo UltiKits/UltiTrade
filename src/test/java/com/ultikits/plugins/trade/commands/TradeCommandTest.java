@@ -168,6 +168,64 @@ class TradeCommandTest {
 
         @ParameterizedTest(name = "lang/{0}.yml")
         @ValueSource(strings = {"en", "zh"})
+        @DisplayName("/trade toggle whose row another server kept changing answers with settings_busy only (UltiTrade#54)")
+        void toggleBusy(String code) throws Exception {
+            YamlConfiguration catalogue = answerI18nFrom(code);
+            when(logService.toggle(player)).thenReturn(
+                    new TradeLogService.SettingsChangeResult(TradeLogService.SettingsWrite.BUSY, null));
+
+            command.toggle(player);
+
+            verify(player).sendMessage(rendered(catalogue, "settings_busy"));
+            verify(player, times(1)).sendMessage(anyString());
+        }
+
+        @ParameterizedTest(name = "lang/{0}.yml")
+        @ValueSource(strings = {"en", "zh"})
+        @DisplayName("/trade toggle that the storage refused answers with settings_not_saved only (UltiTrade#54)")
+        void toggleNotSaved(String code) throws Exception {
+            YamlConfiguration catalogue = answerI18nFrom(code);
+            when(logService.toggle(player)).thenReturn(
+                    new TradeLogService.SettingsChangeResult(TradeLogService.SettingsWrite.FAILED, null));
+
+            command.toggle(player);
+
+            verify(player).sendMessage(rendered(catalogue, "settings_not_saved"));
+            verify(player, times(1)).sendMessage(anyString());
+        }
+
+        @ParameterizedTest(name = "lang/{0}.yml")
+        @ValueSource(strings = {"en", "zh"})
+        @DisplayName("/trade unblock whose row another server kept changing answers with settings_busy only (UltiTrade#54)")
+        void unblockBusy(String code) throws Exception {
+            YamlConfiguration catalogue = answerI18nFrom(code);
+            when(server.getPlayerExact("Target")).thenReturn(target);
+            when(logService.isBlocked(playerUuid, targetUuid)).thenReturn(true);
+            when(logService.unblock(player, targetUuid)).thenReturn(TradeLogService.SettingsWrite.BUSY);
+
+            command.unblockPlayer(player, "Target");
+
+            verify(player).sendMessage(rendered(catalogue, "settings_busy"));
+            verify(player, times(1)).sendMessage(anyString());
+        }
+
+        @ParameterizedTest(name = "lang/{0}.yml")
+        @ValueSource(strings = {"en", "zh"})
+        @DisplayName("/trade unblock that the storage refused answers with settings_not_saved only (UltiTrade#54)")
+        void unblockNotSaved(String code) throws Exception {
+            YamlConfiguration catalogue = answerI18nFrom(code);
+            when(server.getPlayerExact("Target")).thenReturn(target);
+            when(logService.isBlocked(playerUuid, targetUuid)).thenReturn(true);
+            when(logService.unblock(player, targetUuid)).thenReturn(TradeLogService.SettingsWrite.FAILED);
+
+            command.unblockPlayer(player, "Target");
+
+            verify(player).sendMessage(rendered(catalogue, "settings_not_saved"));
+            verify(player, times(1)).sendMessage(anyString());
+        }
+
+        @ParameterizedTest(name = "lang/{0}.yml")
+        @ValueSource(strings = {"en", "zh"})
         @DisplayName("/trade block answers with block_success, naming the blocked player")
         void blockSuccess(String code) throws Exception {
             YamlConfiguration catalogue = answerI18nFrom(code);
