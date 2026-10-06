@@ -122,7 +122,13 @@ public class TradeCommand extends BaseCommandExecutor {
     @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "toggle")
     public void toggle(@CmdSender Player player) {
-        boolean newState = logService.toggleTrade(player);
+        TradeLogService.SettingsChangeResult result = logService.toggle(player);
+        if (!replyIfNotSaved(player, result.getWrite())) {
+            return;
+        }
+        boolean newState = result.getSettings() != null
+            ? result.getSettings().isTradeEnabled()
+            : logService.isTradeEnabled(player.getUniqueId());
         player.sendMessage(withPlayer(newState
             ? plugin.i18n("trade_toggle_on")
             : plugin.i18n("trade_toggle_off"), player.getName()));
@@ -169,7 +175,9 @@ public class TradeCommand extends BaseCommandExecutor {
             return;
         }
         
-        logService.unblockPlayer(player, target.getUniqueId());
+        if (!replyIfNotSaved(player, logService.unblock(player, target.getUniqueId()))) {
+            return;
+        }
         player.sendMessage(withPlayer(plugin.i18n("unblock_success"), target.getName()));
     }
     

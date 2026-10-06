@@ -230,7 +230,6 @@ log_cleanup_not_scheduled: "未安排交易日志清理任务：UltiTools 插件
 log_settings_save_failed: "保存玩家设置失败：{PLAYER}"
 log_trade_write_failed: "记录交易失败"
 log_cancelled_trade_write_failed: "记录已取消的交易失败"
-log_settings_write_failed: "保存玩家设置失败"
 log_settings_row_recreated: "{PLAYER} 的交易设置存储行已不存在（在服务器运行期间被删除）；已用当前设置重建该行"
 log_settings_write_contended: "重试写入期间存储行一直在变化（共享数据库的另一台服务器正在写入）；未写入任何内容"
 log_logs_cleaned: "已清理 {COUNT} 条过期交易日志（早于 {DAYS} 天）"

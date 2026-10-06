@@ -285,13 +285,18 @@ public class TradeLogService {
     }
 
     /**
-     * Update player trade statistics.
+     * Add one completed trade to a player's statistics, as a compare-and-set loop through
+     * {@link #change}: the stored counters are read again and the trade added to them, written only if
+     * the row still holds what was read. A trade the player completed on another server sharing the
+     * database in the meantime is therefore added to, never overwritten (UltiKits/UltiTrade#54). A
+     * failure is logged by {@link #change}; the trade itself is already complete.
      */
-    private void updatePlayerStats(UUID playerUuid, String playerName, 
+    private void updatePlayerStats(UUID playerUuid, String playerName,
                                    double moneyTraded, int expTraded) {
-        PlayerTradeSettings settings = getOrCreateSettings(playerUuid, playerName);
-        settings.incrementTradeStats(moneyTraded, expTraded);
-        saveSettings(settings);
+        change(playerUuid, playerName, row -> {
+            row.incrementTradeStats(moneyTraded, expTraded);
+            return true;
+        });
     }
     
     /**
@@ -324,65 +329,119 @@ public class TradeLogService {
     }
     
     // ==================== Player Settings Management ====================
-    
+
+    /*
+     * The settings cache (UltiKits/UltiTrade#54; maintainer decision of 2026-10-06 00:04).
+     *
+     * settingsCache is a READ cache scoped to a player's time on this server: an entry is added when the
+     * player joins (playerJoined) or on the first read while they are online here (cacheIfOnline), holds
+     * the row as written after each change (rememberWritten), and is dropped when they quit
+     * (playerQuit) and at shutdown. Nothing is ever written from it: every change re-reads the stored row
+     * and writes conditionally, so a copy held here can never revert what another server sharing the
+     * database changed.
+     */
+
     /**
-     * Get or create player settings.
+     * Load a joining player's stored settings into the cache. A player with no stored row is not
+     * cached (their first change creates the row). When the stored name differs from the player's
+     * current name, the name is written through {@link #change}, so nothing else in the row is touched.
+     *
+     * @param player the player who joined this server
+     */
+    public void playerJoined(Player player) {
+        UUID playerUuid = player.getUniqueId();
+        PlayerTradeSettings row = readStoredRow(playerUuid);
+        if (row == null) {
+            return;
+        }
+        if (!player.getName().equals(row.getPlayerName())) {
+            ChangeResult renamed = change(playerUuid, player.getName(), unchanged -> false);
+            if (renamed.row != null) {
+                row = renamed.row;
+            }
+        }
+        settingsCache.put(playerUuid, row);
+    }
+
+    /**
+     * Drop a player who left this server from the cache. Nothing is written: every change was written
+     * when it was made, and the copy held here may be older than what another server has stored since.
+     *
+     * @param playerUuid the player who quit
+     */
+    public void playerQuit(UUID playerUuid) {
+        settingsCache.remove(playerUuid);
+    }
+
+    /**
+     * Cache {@code row} for {@code playerUuid} if that player is online on this server and not cached
+     * yet (a player who joined before this module was loaded). A player who is not online here -- an
+     * offline player's placeholder, for example -- is never cached, so no entry outlives a player's
+     * time on this server.
+     */
+    private void cacheIfOnline(UUID playerUuid, PlayerTradeSettings row) {
+        if (row != null && Bukkit.getPlayer(playerUuid) != null) {
+            settingsCache.putIfAbsent(playerUuid, row);
+        }
+    }
+
+    /**
+     * After a write, the cache holds the row as written: an existing entry is replaced, and on the main
+     * thread an entry is added for a player online here (their first row was created after they joined,
+     * so the next change can re-create it with these settings if it is deleted, UltiKits/UltiTrade#57).
+     * Off the main thread -- the post-trade statistics -- an entry is only replaced, never added, so a
+     * write finishing after the player quit cannot bring their entry back.
+     */
+    private void rememberWritten(UUID playerUuid, PlayerTradeSettings row) {
+        if (Bukkit.isPrimaryThread() && Bukkit.getPlayer(playerUuid) != null) {
+            settingsCache.put(playerUuid, row);
+        } else {
+            settingsCache.computeIfPresent(playerUuid, (uuid, cached) -> row);
+        }
+    }
+
+    /**
+     * Get or create player settings: the cached settings of a player online here, otherwise the stored
+     * row, created (with the defaults) when there is none. A stored name that differs from
+     * {@code playerName} is updated through {@link #change}.
      *
      * @param playerUuid Player UUID
      * @param playerName Player name
-     * @return PlayerTradeSettings instance
+     * @return the player's settings; read-only -- a change goes through this service's change methods
      */
     public PlayerTradeSettings getOrCreateSettings(UUID playerUuid, String playerName) {
-        // Check cache first
         PlayerTradeSettings cached = settingsCache.get(playerUuid);
         if (cached != null) {
             return cached;
         }
-        
-        // Try to load from database
-        List<PlayerTradeSettings> existing = settingsOperator.query()
-            .where("player_uuid").eq(playerUuid.toString())
-            .list();
-        
-        PlayerTradeSettings settings;
-        if (existing != null && !existing.isEmpty()) {
-            settings = selectCanonicalSettings(existing);
-            // Update name if changed
-            if (!playerName.equals(settings.getPlayerName())) {
-                settings.setPlayerName(playerName);
-                saveSettings(settings);
-            }
-        } else {
+        PlayerTradeSettings settings = readStoredRow(playerUuid);
+        if (settings == null) {
             settings = createSettings(playerUuid, playerName);
+        } else if (playerName != null && !playerName.equals(settings.getPlayerName())) {
+            ChangeResult renamed = change(playerUuid, playerName, unchanged -> false);
+            if (renamed.row != null) {
+                settings = renamed.row;
+            }
         }
-        
-        settingsCache.put(playerUuid, settings);
+        cacheIfOnline(playerUuid, settings);
         return settings;
     }
-    
+
     /**
-     * Get player settings (may return null if not found).
+     * Get player settings (may return null if not found): the cached settings of a player online here,
+     * otherwise the stored row.
      *
      * @param playerUuid Player UUID
-     * @return PlayerTradeSettings or null
+     * @return PlayerTradeSettings or null; read-only
      */
     public PlayerTradeSettings getSettings(UUID playerUuid) {
         PlayerTradeSettings cached = settingsCache.get(playerUuid);
         if (cached != null) {
             return cached;
         }
-
-        List<PlayerTradeSettings> existing = settingsOperator.query()
-            .where("player_uuid").eq(playerUuid.toString())
-            .list();
-        
-        if (existing != null && !existing.isEmpty()) {
-            PlayerTradeSettings settings = selectCanonicalSettings(existing);
-            settingsCache.put(playerUuid, settings);
-            return settings;
-        }
-        
-        return null;
+        PlayerTradeSettings settings = readStoredRow(playerUuid);
+        cacheIfOnline(playerUuid, settings);
+        return settings;
     }
 
     private PlayerTradeSettings selectCanonicalSettings(List<PlayerTradeSettings> existing) {
@@ -397,6 +456,8 @@ public class TradeLogService {
      * A new row's id is the player's UUID, not a random one, so two servers sharing a database that both
      * read "no row" and both create one address the same primary key: the second insert fails instead of
      * adding a second row, and that server takes the row the first one wrote (UltiKits/UltiTrade#57).
+     * An insert never overwrites a stored row, so it cannot revert another server's change
+     * (UltiKits/UltiTrade#54).
      */
     private PlayerTradeSettings createSettings(UUID playerUuid, String playerName) {
         PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, playerName);
@@ -421,72 +482,6 @@ public class TradeLogService {
     }
 
     /**
-     * Save player settings. A write that matched no stored row -- the row was deleted while the server
-     * ran, and this cached object still carries its id -- re-creates the row (UltiKits/UltiTrade#57); a
-     * save that still reaches no row is logged with the same line as a write that threw, instead of
-     * passing as saved (UltiKits/UltiTrade#52).
-     *
-     * @param settings Settings to save
-     */
-    public void saveSettings(PlayerTradeSettings settings) {
-        String failureLine = i18n("log_settings_write_failed");
-        submitLogWrite(failureLine, () -> {
-            if (!writeSettings(settings) && plugin != null) {
-                plugin.getLogger().warn(failureLine);
-            }
-        });
-    }
-
-    /**
-     * Write {@code settings} over its stored row, re-creating the row when the write matched none
-     * (maintainer decision of 2026-10-04, UltiKits/UltiTrade#57). Returns whether a stored row now holds
-     * the settings.
-     * <p>
-     * The row is re-created so that later reads find it and no second row appears:
-     * <ul>
-     *   <li>reads select by {@code player_uuid} and take the lowest id, so if another server has already
-     *       created a row for this player, the settings are written onto that row (and this object takes
-     *       its id) rather than inserted beside it;</li>
-     *   <li>otherwise the row is inserted under the player's UUID as its id -- the id every server derives
-     *       for this player, also for a first row ({@link #createSettings}) -- so two servers re-creating
-     *       at once address one primary key; the loser's insert fails, and its write lands on the row the
-     *       winner inserted.</li>
-     * </ul>
-     * The values written are this server's current copy; when two servers hold different copies, the
-     * last write wins, as for any save (UltiKits/UltiTrade#54).
-     */
-    private boolean writeSettings(PlayerTradeSettings settings) {
-        if (settingsOperator.updateCounted(settings) > 0) {
-            return true;
-        }
-        List<PlayerTradeSettings> existing = rowsOf(settings.getPlayerUuid());
-        if (!existing.isEmpty()) {
-            settings.setId(selectCanonicalSettings(existing).getId());
-            return settingsOperator.updateCounted(settings) > 0;
-        }
-        settings.setId(settings.getPlayerUuid());
-        RuntimeException insertFailed = null;
-        try {
-            settingsOperator.insert(settings);
-        } catch (RuntimeException e) {
-            insertFailed = e; // another server inserted the same id first: the write below lands on its row
-        }
-        // Also after an insert that returned normally: the JSON backend ignores an insert whose id it
-        // already holds, so only this write proves the row holds these settings.
-        if (settingsOperator.updateCounted(settings) > 0) {
-            if (plugin != null) {
-                plugin.getLogger().warn(i18n("log_settings_row_recreated")
-                    .replace("{PLAYER}", String.valueOf(settings.getPlayerName())));
-            }
-            return true;
-        }
-        if (insertFailed != null) {
-            throw insertFailed;
-        }
-        return false;
-    }
-    
-    /**
      * Check if player has trade enabled.
      *
      * @param playerUuid Player UUID
@@ -501,13 +496,29 @@ public class TradeLogService {
      * Toggle trade status for player.
      *
      * @param player Player
-     * @return new trade enabled status
+     * @return the trade-enabled state now stored: the toggled state when it was written, otherwise the
+     *         state as it is (see {@link #toggle} for whether the write happened)
      */
     public boolean toggleTrade(Player player) {
-        PlayerTradeSettings settings = getOrCreateSettings(player.getUniqueId(), player.getName());
-        settings.setTradeEnabled(!settings.isTradeEnabled());
-        saveSettings(settings);
-        return settings.isTradeEnabled();
+        SettingsChangeResult result = toggle(player);
+        return result.getSettings() != null ? result.getSettings().isTradeEnabled() : isTradeEnabled(player.getUniqueId());
+    }
+
+    /**
+     * Flip {@code player}'s trading on or off, through {@link #change}: the stored state is read again
+     * and flipped, written only if the row still holds what was read. The state flipped is the stored
+     * one, so a toggle another server made in the meantime is not reverted -- both toggles count
+     * (UltiKits/UltiTrade#54).
+     *
+     * @param player the player toggling
+     * @return what happened, and the settings as now stored ({@code null} unless written)
+     */
+    public SettingsChangeResult toggle(Player player) {
+        ChangeResult result = change(player.getUniqueId(), player.getName(), row -> {
+            row.setTradeEnabled(!row.isTradeEnabled());
+            return true;
+        });
+        return new SettingsChangeResult(result.write, result.write == SettingsWrite.WRITTEN ? result.row : null);
     }
     
     /**
@@ -588,6 +599,31 @@ public class TradeLogService {
         }
     }
 
+    /** What a settings change did, and the settings as now stored. */
+    public static final class SettingsChangeResult {
+        private final SettingsWrite write;
+        private final PlayerTradeSettings settings;
+
+        /**
+         * @param write    what the change did
+         * @param settings the settings as now stored when the change was written; otherwise {@code null}
+         */
+        public SettingsChangeResult(SettingsWrite write, PlayerTradeSettings settings) {
+            this.write = write;
+            this.settings = settings;
+        }
+
+        /** @return what the change did */
+        public SettingsWrite getWrite() {
+            return write;
+        }
+
+        /** @return the settings as now stored when the change was written; otherwise {@code null} */
+        public PlayerTradeSettings getSettings() {
+            return settings;
+        }
+    }
+
     /**
      * Apply one change to a player's stored settings so that it can never revert a change another server
      * sharing the database made (UltiKits/UltiTrade#54; maintainer decision of 2026-10-06, the UltiEconomy
@@ -606,7 +642,7 @@ public class TradeLogService {
      * current settings (UltiKits/UltiTrade#57) -- and from the defaults otherwise. When another server
      * inserts the same id first, the insert fails and the change is applied to that server's row instead.
      * <p>
-     * After a write, a cached entry for the player is replaced by the row as written; no entry is added.
+     * After a write, the cache holds the row as written ({@link #rememberWritten}).
      * A failure is logged with the player named and nothing is written: a contended row with the reason,
      * a storage error with its exception.
      */
@@ -620,7 +656,7 @@ public class TradeLogService {
                         : updateWith(row, playerName, change);
                 if (result != null) {
                     if (result.row != null) {
-                        settingsCache.computeIfPresent(playerUuid, (uuid, cached) -> result.row);
+                        rememberWritten(playerUuid, result.row);
                     }
                     return result;
                 }
@@ -685,6 +721,11 @@ public class TradeLogService {
             }
             return null;
         }
+        if (readStoredRow(playerUuid) == null) {
+            // The JSON backend ignores an insert whose id it already holds, and returns normally: only
+            // reading the row back proves it is stored (UltiKits/UltiTrade#52, #57).
+            throw new IllegalStateException("the inserted trade settings row of " + playerUuid + " is not stored");
+        }
         if (held != null && plugin != null) {
             plugin.getLogger().warn(i18n("log_settings_row_recreated")
                 .replace("{PLAYER}", String.valueOf(row.getPlayerName())));
@@ -740,12 +781,23 @@ public class TradeLogService {
      * @return true if unblocked successfully
      */
     public boolean unblockPlayer(Player player, UUID targetUuid) {
-        PlayerTradeSettings settings = getOrCreateSettings(player.getUniqueId(), player.getName());
-        boolean result = settings.unblockPlayer(targetUuid.toString());
-        if (result) {
-            saveSettings(settings);
-        }
-        return result;
+        return unblock(player, targetUuid) == SettingsWrite.WRITTEN;
+    }
+
+    /**
+     * Remove {@code targetUuid} from {@code player}'s blocklist, through {@link #change}: the stored list
+     * is read again and only that player removed, so a block another server added is kept
+     * (UltiKits/UltiTrade#54).
+     *
+     * @param player     the player doing the unblocking
+     * @param targetUuid the player to unblock
+     * @return {@link SettingsWrite#WRITTEN}; {@link SettingsWrite#UNCHANGED} when the stored list does not
+     *         hold the target; {@link SettingsWrite#BUSY} or {@link SettingsWrite#FAILED} when nothing
+     *         could be written
+     */
+    public SettingsWrite unblock(Player player, UUID targetUuid) {
+        String target = targetUuid.toString();
+        return change(player.getUniqueId(), player.getName(), row -> row.unblockPlayer(target)).write;
     }
     
     /**

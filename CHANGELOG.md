@@ -124,34 +124,43 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   type. The module keeps each player's settings in memory for the server's lifetime, so if their
   `trade_player_settings` row was deleted while the server ran, the next toggle, block, unblock, post-trade
   statistics update or the save at shutdown wrote nothing and passed as saved on SQLite and MySQL (only the JSON
-  backend reported it). It now logs `Failed to save player settings` (and, at shutdown, the player's UUID), the
-  same line a failed write logs (UltiKits/UltiTrade#52).
+  backend reported it). A change that reaches no row is now logged as `Failed to save player settings: <player>`,
+  the same line a failed write logs; there is no save at shutdown any more
+  (UltiKits/UltiTrade#52, UltiKits/UltiTrade#54).
 - 玩家交易设置的存储行已不存在时，保存现在在所有存储类型上都报告为失败。模块在服务器运行期间一直缓存每位玩家的设置，因此若其 `trade_player_settings`
   行在运行中被删除，之后的开关交易、拉黑、取消拉黑、交易后统计更新或关服时的保存在 SQLite 与 MySQL 上什么也没写却当作已保存（只有 JSON 后端会报告）。
-  现在会记录 `保存玩家设置失败`（关服时附带玩家 UUID），与写入出错时的日志行相同（UltiKits/UltiTrade#52）。
+  现在未命中任何行的修改会记录 `保存玩家设置失败：<玩家>`，与写入出错时的日志行相同；关服时已不再保存（UltiKits/UltiTrade#52、UltiKits/UltiTrade#54）。
 
 - A change to a player's trade settings is no longer lost at the next restart when their stored row was deleted
   while the server ran. Such a save matched no row and wrote nothing (since UltiKits/UltiTrade#52 it was at least
-  logged as failed), while the player's chat confirmed the change. The save now re-creates the row with the current
-  settings and logs a WARNING naming the player. If another server sharing the database has already created a row
+  logged as failed), while the player's chat confirmed the change. The next change now re-creates the row with the
+  current settings (those this server last held for the player while they are online here) and logs a WARNING naming
+  the player. If another server sharing the database has already created a row
   for that player, the settings are written onto it instead; a player's settings row now takes the player's UUID as
   its id, so two servers creating or re-creating it at once leave one row, not two (UltiKits/UltiTrade#57).
 - 玩家的交易设置存储行在服务器运行期间被删除后，其设置修改不再在下次重启时丢失。此前这种保存匹配不到任何行、什么也没写（自 UltiKits/UltiTrade#52
-  起至少会记录为失败），玩家聊天栏却显示修改成功。现在保存会用当前设置重建该行，并记录一条指名该玩家的 WARNING。若共享数据库的另一台服务器已为该玩家创建了行，
+  起至少会记录为失败），玩家聊天栏却显示修改成功。现在下一次修改会用当前设置（该玩家在线于本服期间本服最后持有的设置）重建该行，并记录一条指名该玩家的 WARNING。若共享数据库的另一台服务器已为该玩家创建了行，
   则写入那一行；玩家设置行现在以玩家 UUID 作为 id，因此两台服务器同时创建或重建时只会留下一行（UltiKits/UltiTrade#57）。
 
-- On servers sharing one database, a player's trade settings changed on another server are no longer reverted by this
-  server. The module kept each player's settings in memory and wrote that whole copy back on a change and again at
-  shutdown, so a setting another server had changed in between went back to the old value. Now nothing is written at
-  shutdown, and `/trade block` reads the stored settings again and adds only the block, written only if the stored
-  settings still hold what was read; if another server keeps changing them, it retries up to three times and then logs
+- On servers sharing one database, a player's trade settings and trade statistics changed on another server are no
+  longer reverted or lost. The module kept each player's settings in memory for the server's lifetime and wrote that
+  whole copy back on every change and again at shutdown, so a setting another server had changed in between went back
+  to the old value, and a trade completed on another server was lost from `total_trades` and the money and experience
+  totals. Now a player's settings are cached only while the player is online on this server (loaded on join, dropped on
+  quit) and never written back: nothing is written at quit or at shutdown. Every change — `/trade toggle`,
+  `/trade block`, `/trade unblock`, a new player name at join, and the statistics of a completed trade — reads the
+  stored settings again, applies only that change and writes it only if the stored settings still hold what was read;
+  otherwise it reads them again and re-applies the change, up to three times. A toggle flips the stored state, so two
+  toggles on two servers both count. If another server keeps changing the settings, the module logs
   `Failed to save player settings: <player>: the stored row kept changing …` and tells the player to try again
-  (`settings_busy`). A block the storage refused is no longer confirmed: the player gets `settings_not_saved`
-  (UltiKits/UltiTrade#54).
-- 多台服务器共享同一数据库时，另一台服务器上修改的交易设置不再被本服务器还原。此前模块在内存中保留每位玩家的设置，并在修改时和关服时整份写回，
-  因此另一台服务器期间所做的修改会被改回旧值。现在关服时不再写入；`/trade block` 会重新读取存储的设置、只添加这一条拉黑，并且仅当存储的设置仍是读取时的
-  值时才写入；若另一台服务器持续修改，最多重试三次，然后记录 `保存玩家设置失败：<玩家>：重试写入期间存储行一直在变化……` 并提示玩家重试（`settings_busy`）。
-  存储拒绝的拉黑不再提示成功：玩家会收到 `settings_not_saved`（UltiKits/UltiTrade#54）。
+  (`settings_busy`); a change the storage refused is no longer confirmed — the player gets `settings_not_saved` and the
+  console line names the player and the error (UltiKits/UltiTrade#54).
+- 多台服务器共享同一数据库时，另一台服务器上修改的交易设置与交易统计不再被还原或丢失。此前模块在服务器运行期间一直在内存中保留每位玩家的设置，并在每次修改和关服时整份写回，
+  因此另一台服务器期间所做的设置修改会被改回旧值，另一台服务器上完成的交易也会从 `total_trades` 及金币、经验累计中丢失。现在玩家设置只在该玩家在线于本服期间缓存
+  （进服时加载、退出时丢弃），且从不写回：退出与关服时都不写入。每次修改——`/trade toggle`、`/trade block`、`/trade unblock`、进服时的新玩家名，以及交易完成后的统计——
+  都会重新读取存储的设置、只应用这一项修改，并且仅当存储的设置仍是读取时的值时才写入；否则重新读取并再次应用，最多三次。开关交易翻转的是存储中的状态，
+  因此两台服务器上的两次开关都会生效。若另一台服务器持续修改，模块会记录 `保存玩家设置失败：<玩家>：重试写入期间存储行一直在变化……` 并提示玩家重试（`settings_busy`）；
+  存储拒绝的修改不再提示成功——玩家会收到 `settings_not_saved`，控制台日志写明玩家与错误（UltiKits/UltiTrade#54）。
 
 - `/ul reload UltiTrade` (and a bare `/ul reload`) no longer reports a plain success when part of this module's
   reload failed. If rescheduling the trade-log cleanup task, applying `enable-money-trade`, or voiding open trades'

@@ -230,7 +230,6 @@ log_cleanup_not_scheduled: "Not scheduling the trade-log cleanup task: the UltiT
 log_settings_save_failed: "Failed to save player settings: {PLAYER}"
 log_trade_write_failed: "Failed to log trade"
 log_cancelled_trade_write_failed: "Failed to log cancelled trade"
-log_settings_write_failed: "Failed to save player settings"
 log_settings_row_recreated: "The stored trade settings of {PLAYER} were missing (deleted while the server ran); the row was re-created with the current settings"
 log_settings_write_contended: "the stored row kept changing while the write was retried (another server sharing the database is writing it); nothing was written"
 log_logs_cleaned: "Cleaned up {COUNT} expired trade logs (older than {DAYS} days)"
