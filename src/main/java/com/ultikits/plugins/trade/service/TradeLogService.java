@@ -375,12 +375,14 @@ public class TradeLogService {
 
     /**
      * Cache {@code row} for {@code playerUuid} if that player is online on this server and not cached
-     * yet (a player who joined before this module was loaded). A player who is not online here -- an
+     * yet (a player who joined before this module was loaded), on the main thread only. A player who is not online here -- an
      * offline player's placeholder, for example -- is never cached, so no entry outlives a player's
      * time on this server.
      */
     private void cacheIfOnline(UUID playerUuid, PlayerTradeSettings row) {
-        if (row != null && Bukkit.getPlayer(playerUuid) != null) {
+        // Main thread only, as rememberWritten: a read off it (a placeholder evaluated as the player quits) could add the
+        // entry after the quit handler dropped it (gate-1 F4 of PR #66).
+        if (row != null && Bukkit.isPrimaryThread() && Bukkit.getPlayer(playerUuid) != null) {
             settingsCache.putIfAbsent(playerUuid, row);
         }
     }

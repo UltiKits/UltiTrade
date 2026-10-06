@@ -1029,8 +1029,9 @@ public class TradeService {
      * and nothing was transferred. Only then are the payees paid, each the payer's amount less the tax.
      * A deposit that is refused or throws cancels the trade the same way: every deposit that already
      * landed is taken back from its payee, and every payer is refunded in full. A refund or a take-back
-     * that fails is logged at SEVERE, naming both players, their UUIDs, the amount and the currency, so an
-     * operator can correct the balances by hand.
+     * that the economy refuses is logged at SEVERE, naming both players, their UUIDs, the amount and the
+     * currency, so an operator can correct the balances by hand; one that throws has only the outcome-unknown
+     * line of {@link #moved}, because it may have gone through (gate-1 F6 of PR #66).
      * <p>
      * The economy is passed as {@code Object} and cast where it is used, so no method signature names a
      * Vault type: the class must stay loadable without Vault (UltiKits/UltiTrade#49).
@@ -1046,7 +1047,7 @@ public class TradeService {
             if (amounts[i] <= 0) {
                 continue;
             }
-            if (!moved(economy, payers[i], amounts[i], true)) {
+            if (moved(economy, payers[i], amounts[i], true) != Moved.YES) {
                 boolean restored = refundWithdrawn(economy, payers, payees, amounts, withdrawn);
                 cancelTrade(session, restored
                         ? i18n("cancel_reason_money_withdraw_refused").replace("{PLAYER}", payers[i].getName())
@@ -1060,11 +1061,19 @@ public class TradeService {
             if (amounts[i] <= 0) {
                 continue;
             }
-            if (!moved(economy, payees[i], amounts[i] - taxes[i], false)) {
+            if (moved(economy, payees[i], amounts[i] - taxes[i], false) != Moved.YES) {
                 boolean restored = true;
                 for (int j = 0; j < 2; j++) {
-                    if (deposited[j] && !moved(economy, payees[j], amounts[j] - taxes[j], true)) {
+                    if (!deposited[j]) {
+                        continue;
+                    }
+                    Moved takenBack = moved(economy, payees[j], amounts[j] - taxes[j], true);
+                    if (takenBack == Moved.REFUSED) {
                         logLostMoney(i18n("log_trade_money_takeback_failed"), economy, payees[j], payers[j], amounts[j] - taxes[j]);
+                    }
+                    // UNKNOWN: moved() already logged the outcome-unknown line; a second, certain "take it back by hand"
+                    // line would have an operator take it twice if the call went through (gate-1 F6 of PR #66).
+                    if (takenBack != Moved.YES) {
                         restored = false;
                     }
                 }
@@ -1081,14 +1090,23 @@ public class TradeService {
     }
 
     /**
-     * Refund every payer whose withdrawal went through; a refund that fails is logged at SEVERE. Returns
-     * whether every refund went through.
+     * Refund every payer whose withdrawal went through. A refused refund is logged at SEVERE with the certain
+     * "give it back by hand" line; a refund that threw has only the outcome-unknown line {@link #moved} logs.
+     * Returns whether every refund went through.
      */
     private boolean refundWithdrawn(Object economy, Player[] payers, Player[] payees, double[] amounts, boolean[] withdrawn) {
         boolean all = true;
         for (int i = 0; i < 2; i++) {
-            if (withdrawn[i] && !moved(economy, payers[i], amounts[i], false)) {
+            if (!withdrawn[i]) {
+                continue;
+            }
+            Moved refunded = moved(economy, payers[i], amounts[i], false);
+            if (refunded == Moved.REFUSED) {
                 logLostMoney(i18n("log_trade_money_refund_failed"), economy, payers[i], payees[i], amounts[i]);
+            }
+            // UNKNOWN: moved() already logged the outcome-unknown line, which is the only instruction: a certain
+            // "give it back by hand" line would have an operator refund twice if the call went through (gate-1 F6).
+            if (refunded != Moved.YES) {
                 all = false;
             }
         }
@@ -1105,19 +1123,34 @@ public class TradeService {
      * can check that balance (UltiKits/UltiTrade#60; maintainer decision of 2026-10-06). Reading the
      * balance again cannot settle it: another writer may have changed it too.
      */
-    private boolean moved(Object economy, Player player, double amount, boolean withdraw) {
+    private Moved moved(Object economy, Player player, double amount, boolean withdraw) {
         try {
             Economy vault = (Economy) economy;
             EconomyResponse response = withdraw ? vault.withdrawPlayer(player, amount) : vault.depositPlayer(player, amount);
-            return response != null && response.transactionSuccess();
+            return response != null && response.transactionSuccess() ? Moved.YES : Moved.REFUSED;
         } catch (RuntimeException e) {
             String template = withdraw ? i18n("log_trade_money_withdraw_threw") : i18n("log_trade_money_deposit_threw");
             String line = Placeholders.fill(template,
                     "{PLAYER}", player.getName(),
-                    "{AMOUNT}", BigDecimal.valueOf(amount).toPlainString()); // exact: the operator checks this amount
+                    "{AMOUNT}", exactAmount(amount)); // exact: the operator checks this amount
             logQuietly(() -> plugin.getLogger().error(e, line));
-            return false;
+            return Moved.UNKNOWN;
         }
+    }
+
+    /** What one economy call did: moved, refused (certainly not moved), or unknown (it threw). */
+    private enum Moved {
+        YES, REFUSED, UNKNOWN
+    }
+
+    /**
+     * {@code amount} in full for an operator's line ({@code 12345678.9}, never {@code 1.23456789E7}). A non-finite
+     * amount -- reachable only through a NaN {@code trade-tax}, which the framework refuses at load since
+     * UltiTools-Reborn#625 -- is printed as {@code String.valueOf} prints it, because {@code BigDecimal.valueOf} throws for
+     * it, and a throw here would escape the money path after money had moved (gate-1 F5 of PR #66).
+     */
+    private static String exactAmount(double amount) {
+        return Double.isFinite(amount) ? BigDecimal.valueOf(amount).toPlainString() : String.valueOf(amount);
     }
 
     /** The SEVERE line for money a failed trade could not put back: {@code template} says whose and why. */
@@ -1133,7 +1166,7 @@ public class TradeService {
                 "{UUID}", holder.getUniqueId().toString(),
                 "{OTHER}", other.getName(),
                 "{OTHER_UUID}", other.getUniqueId().toString(),
-                "{AMOUNT}", java.math.BigDecimal.valueOf(amount).toPlainString(), // exact: the operator restores this by hand
+                "{AMOUNT}", exactAmount(amount), // exact: the operator restores this by hand
                 "{CURRENCY}", String.valueOf(currency));
         logQuietly(() -> plugin.getLogger().error(line));
     }

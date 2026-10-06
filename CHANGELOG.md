@@ -167,10 +167,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   taken, but the economy may have taken it. Check <player>'s balance for <amount>` (and the same for paying), with
   the amount in full (`12345678.9`, not `1.23456789E7`). It was a WARNING that said only "it counts as refused". The
   trade still counts such a call as refused; a call that committed and then threw is documented as a known
-  limitation (UltiKits/UltiTrade#60).
+  limitation. A refund or take-back that throws now logs only this line, not also the certain "give it back by hand" /
+  "take it back by hand" line, which would have had an operator correct a call that went through a second time; a
+  refused refund or take-back keeps that line (UltiKits/UltiTrade#60).
 - 交易的扣款或付款在经济插件中抛出异常时，现在记录一条服主可据以处理的 SEVERE 日志：`结果未知：交易扣除 <金额>（来自 <玩家>）时出错，交易按未扣除处理，
   但经济插件可能已经扣除。请检查 <玩家> 的余额是否有 <金额> 的变动`（付款同理），金额完整显示（`12345678.9`，而非 `1.23456789E7`）。此前是一条只说明
-  「按拒绝处理」的 WARNING。交易仍将此类调用视为被拒绝；已生效后才抛出异常的调用作为已知限制记录在文档中（UltiKits/UltiTrade#60）。
+  「按拒绝处理」的 WARNING。交易仍将此类调用视为被拒绝；已生效后才抛出异常的调用作为已知限制记录在文档中。退款或收回付款抛出异常时，现在只记录这一条，
+  不再同时记录确定性的「请手动退还 / 手动收回」日志，以免服主对实际已生效的调用再更正一次；被拒绝的退款或收回仍保留那条日志（UltiKits/UltiTrade#60）。
 
 - A player at a very high level no longer reads a negative experience total. From 15,466 levels (for example after
   `/xp set <player> 16000 levels`) the total overflowed, so the experience prompt and the trade window showed a negative
