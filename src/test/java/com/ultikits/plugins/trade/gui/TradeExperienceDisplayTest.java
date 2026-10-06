@@ -135,4 +135,20 @@ class TradeExperienceDisplayTest {
         List<String> lore = item.getValue().getItemMeta().getLore();
         assertThat(lore).contains(line("confirm_tax_line", "29"), line("confirm_exp_line", "36"));
     }
+
+    @Test
+    @DisplayName("A player whose total is at the cap (25,000 levels) sees why experience cannot be offered, not a capped number (UltiTrade#65 F1)")
+    void tradeWindowShowsTheCapReasonInsteadOfANumber() {
+        when(player1.getLevel()).thenReturn(25_000);
+        when(player1.getExpToLevel()).thenReturn(9 * 25_000 - 158);
+        when(tradeService.getTotalExperience(player1)).thenReturn(Integer.MAX_VALUE);
+        Inventory inventory = Bukkit.createInventory(null, 54, "x");
+        clearInvocations(inventory);
+
+        new TradeGUI(tradeService, session, player1);
+
+        List<String> lore = loreAt(inventory, TradeGUI.YOUR_EXP_SLOT);
+        assertThat(lore).contains(ChatColor.translateAlternateColorCodes('&', tradeService.i18n("exp_total_unreadable")));
+        assertThat(String.join("\n", lore)).doesNotContain(String.valueOf(Integer.MAX_VALUE));
+    }
 }
