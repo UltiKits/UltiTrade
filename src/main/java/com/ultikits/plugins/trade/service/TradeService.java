@@ -928,6 +928,16 @@ public class TradeService {
             }
         }
         if (expAvailable) {
+            // A total above Integer.MAX_VALUE is read capped, and the rebuild below would set the sender to the cap less
+            // the offer, taking far more than offered: such an offer is refused (UltiKits/UltiTrade#65, gate-1 F1).
+            if (exp1 > 0 && !isExperienceTotalReadable(player1)) {
+                cancelTrade(session, i18n("cancel_reason_exp_unreadable").replace("{PLAYER}", player1.getName()));
+                return;
+            }
+            if (exp2 > 0 && !isExperienceTotalReadable(player2)) {
+                cancelTrade(session, i18n("cancel_reason_exp_unreadable").replace("{PLAYER}", player2.getName()));
+                return;
+            }
             if (exp1 > 0 && getTotalExperience(player1) < exp1) {
                 cancelTrade(session, i18n("cancel_reason_insufficient_exp").replace("{PLAYER}", player1.getName()));
                 return;
@@ -2103,11 +2113,33 @@ public class TradeService {
      * {@link #setTotalExperience}, left them one point lower after a trade (UltiKits/UltiTrade#64).
      */
     public int getTotalExperience(Player player) {
+        // In long, then clamped: a level total near Integer.MAX_VALUE plus the progress inside the level must not wrap to a
+        // negative total (UltiKits/UltiTrade#65). A clamped total is not exact: see isExperienceTotalReadable.
+        return (int) Math.min(trueTotalExperience(player), Integer.MAX_VALUE);
+    }
+
+    /**
+     * Whether {@code player}'s experience total can be read exactly: its true total, computed in {@code long}, fits an
+     * {@code int}. From 21,864 levels it does not, and {@link #getTotalExperience} answers the capped value; an experience
+     * offer from such a player is refused (at the experience slot, at the amount prompt and before a trade moves anything),
+     * because taking the offer off a capped total would rebuild the player far below their real total
+     * (UltiKits/UltiTrade#65, gate-1 finding F1; maintainer decision of 2026-10-06). Decided on the true total, so a total
+     * of exactly {@code Integer.MAX_VALUE} still counts as readable.
+     *
+     * @param player the player
+     * @return whether the player's total fits an {@code int}
+     */
+    public static boolean isExperienceTotalReadable(Player player) {
+        return trueTotalExperience(player) <= Integer.MAX_VALUE;
+    }
+
+    /** The player's true experience total in {@code long}; {@code Long.MAX_VALUE} for a level far above the int range. */
+    private static long trueTotalExperience(Player player) {
         int level = player.getLevel();
-        int exp = Math.round(player.getExp() * player.getExpToLevel());
-        // In long, then clamped: a level total already at Integer.MAX_VALUE plus the progress inside the level
-        // must not wrap to a negative total (UltiKits/UltiTrade#65).
-        return (int) Math.min((long) pointsToReachLevel(level) + exp, Integer.MAX_VALUE);
+        if (level > LEVEL_TOTAL_SURELY_ABOVE_INT) {
+            return Long.MAX_VALUE;
+        }
+        return pointsToReachLevelExact(level) + Math.round(player.getExp() * player.getExpToLevel());
     }
 
     /**
@@ -2130,8 +2162,18 @@ public class TradeService {
         } else if (level > LEVEL_TOTAL_SURELY_ABOVE_INT) {
             return Integer.MAX_VALUE;
         }
+        return (int) Math.min(pointsToReachLevelExact(level), Integer.MAX_VALUE);
+    }
+
+    /** {@link #pointsToReachLevel} without the clamp, for a level at most {@link #LEVEL_TOTAL_SURELY_ABOVE_INT}. */
+    private static long pointsToReachLevelExact(int level) {
         long l = level;
-        return (int) Math.min((9 * l * l - 325 * l) / 2 + 2220, Integer.MAX_VALUE);
+        if (level <= 16) {
+            return l * l + 6 * l;
+        } else if (level <= 31) {
+            return (5 * l * l - 81 * l) / 2 + 360;
+        }
+        return (9 * l * l - 325 * l) / 2 + 2220;
     }
 
     /** A level whose total is far above {@code Integer.MAX_VALUE}, low enough that {@code 9 * level * level} fits a long. */

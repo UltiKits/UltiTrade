@@ -174,11 +174,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - A player at a very high level no longer reads a negative experience total. From 15,466 levels (for example after
   `/xp set <player> 16000 levels`) the total overflowed, so the experience prompt and the trade window showed a negative
-  number and every experience offer was refused as insufficient. The total is now exact up to 21,863 levels and
-  capped at 2,147,483,647 points above. Paper's own experience arithmetic drifting above about 411,616 points is
-  documented as a known limitation (UltiKits/UltiTrade#65).
+  number and every experience offer was refused as insufficient. The total is now exact up to 21,863 levels. Above
+  that it exceeds 2,147,483,647 points and cannot be counted exactly, so such a player cannot offer experience: the
+  experience slot and the amount prompt answer `exp_total_unreadable` ("Your experience is too high to be counted
+  exactly …"), the trade window shows that line instead of a total, and a trade whose offer was set before the player
+  reached such a level is cancelled before anything moves (`cancel_reason_exp_unreadable`). Taking an offer off the
+  capped total would have rebuilt the player hundreds of millions of points below their real total. Paper's own
+  experience arithmetic drifting above about 411,616 points is documented as a known limitation (UltiKits/UltiTrade#65).
 - 等级极高的玩家不再读到负数的经验总量。此前从 15,466 级起（例如执行 `/xp set <玩家> 16000 levels` 后）经验总量会溢出，经验输入提示和交易界面显示负数，
-  所有经验报价都被判为经验不足而拒绝。现在经验总量在 21,863 级以内精确计算，更高等级则封顶为 2,147,483,647 点。Paper 自身经验计算在约 411,616 点以上的偏差
+  所有经验报价都被判为经验不足而拒绝。现在经验总量在 21,863 级以内精确计算；更高等级的总量超过 2,147,483,647 点，无法精确计算，因此这类玩家不能出价经验：
+  点击经验栏位与经验数量输入都会提示 `exp_total_unreadable`，交易界面显示该提示而非总量；若出价在玩家达到此等级之前已设置，交易会在任何东西转移之前取消
+  （`cancel_reason_exp_unreadable`）。若从封顶后的数值中扣除报价，会使玩家的经验比实际少数亿点。Paper 自身经验计算在约 411,616 点以上的偏差
   作为已知限制记录在文档中（UltiKits/UltiTrade#65）。
 
 - `exp-tax-rate: .nan` no longer breaks experience trades: a rate that is not greater than zero, NaN included, takes no

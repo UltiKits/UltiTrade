@@ -225,6 +225,13 @@ public class TradeListener implements Listener {
             // As for money: TradeSession#setExp resets both confirmations when an amount is set
             // (UltiKits/UltiTrade#36).
 
+            // A total above Integer.MAX_VALUE cannot be read exactly, so no amount can be offered from it
+            // (UltiKits/UltiTrade#65, gate-1 F1): say why instead of opening the prompt.
+            if (!TradeService.isExperienceTotalReadable(player)) {
+                player.sendMessage(text(tradeService.i18n("exp_total_unreadable")));
+                return;
+            }
+
             // Start exp input conversation
             player.closeInventory();
             player.sendMessage(text(tradeService.i18n("input_exp_prompt")));
@@ -567,6 +574,11 @@ public class TradeListener implements Listener {
                 }
                 // Check experience
                 int expValue = (int) value;
+                if (expValue > 0 && !TradeService.isExperienceTotalReadable(player)) {
+                    player.sendMessage(text(tradeService.i18n("exp_total_unreadable")));
+                    reopenGUI(player, prompt);
+                    return;
+                }
                 if (tradeService.getTotalExperience(player) < expValue) {
                     player.sendMessage(text(tradeService.i18n("insufficient_exp")));
                     reopenGUI(player, prompt);
