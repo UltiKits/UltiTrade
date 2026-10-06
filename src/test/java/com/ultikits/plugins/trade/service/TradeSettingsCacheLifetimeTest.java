@@ -343,6 +343,49 @@ class TradeSettingsCacheLifetimeTest {
     }
 
     @Nested
+    @DisplayName("Cache publication follows the order of this server's writes (Codex run 1, P2; gate-1 F3)")
+    class PublicationOrder {
+
+        @Test
+        @DisplayName("A background statistics write that publishes after the player's newer toggle does not put the older row back into the cache")
+        void olderBackgroundWriteDoesNotOverwriteANewerEntry() throws Exception {
+            server().toggleTrade(player);
+            server().toggleTrade(player); // on
+            TradeLogService serverA = server();
+            UltiTradeTestHelper.setField(serverA, "logOperator", database.openAs(com.ultikits.plugins.trade.entity.TradeLogData.class));
+            doReturn(player).when(Bukkit.getServer()).getPlayer(playerUuid);
+            serverA.playerJoined(player);
+            Thread main = Thread.currentThread();
+            java.util.concurrent.CountDownLatch written = new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.CountDownLatch toggled = new java.util.concurrent.CountDownLatch(1);
+            DataOperator<PlayerTradeSettings> own = UltiTradeTestHelper.getField(serverA, "settingsOperator");
+            UltiTradeTestHelper.setField(serverA, "settingsOperator", InterleavingOperator.afterFirstUpdateOffThread(own, main, () -> {
+                written.countDown();
+                try {
+                    toggled.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }));
+            Player partner = UltiTradeTestHelper.createMockPlayer("Partner", UUID.randomUUID());
+            Thread statistics = new Thread(() -> serverA.logCompletedTrade(
+                    new com.ultikits.plugins.trade.entity.TradeSession(player, partner), player, partner, 0.0, 0));
+
+            statistics.start();
+            assertThat(written.await(10, java.util.concurrent.TimeUnit.SECONDS)).as("the background write happened").isTrue();
+            serverA.toggleTrade(player); // the player's own, newer change on the main thread: trading off
+            toggled.countDown();
+            statistics.join();
+
+            PlayerTradeSettings stored = storedRow();
+            assertThat(stored.isTradeEnabled()).as("stored: off").isFalse();
+            assertThat(stored.getTotalTrades()).as("stored: the trade counted").isEqualTo(1);
+            assertThat(cacheOf(serverA).get(playerUuid).isTradeEnabled())
+                    .as("the cache agrees with the stored row: the older background row did not replace the toggle").isFalse();
+        }
+    }
+
+    @Nested
     @DisplayName("The listener drives the lifetime")
     class Listener {
 

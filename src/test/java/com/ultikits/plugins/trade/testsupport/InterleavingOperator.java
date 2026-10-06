@@ -43,4 +43,46 @@ public final class InterleavingOperator {
     public static <T extends BaseDataEntity<String>> DataOperator<T> beforeFirstUpdate(DataOperator<T> operator, Runnable hook) {
         return beforeUpdates(operator, 1, hook);
     }
+
+    /** {@code operator}, with {@code hook} run once, just before its first insert. */
+    @SuppressWarnings("unchecked")
+    public static <T extends BaseDataEntity<String>> DataOperator<T> beforeFirstInsert(DataOperator<T> operator, Runnable hook) {
+        boolean[] ran = {false};
+        return (DataOperator<T>) Proxy.newProxyInstance(
+                DataOperator.class.getClassLoader(), new Class<?>[] {DataOperator.class}, (proxy, method, args) -> {
+                    if (method.getName().equals("insert") && !ran[0]) {
+                        ran[0] = true;
+                        hook.run();
+                    }
+                    try {
+                        return method.invoke(operator, args);
+                    } catch (InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                });
+    }
+
+    /**
+     * {@code operator}, with {@code hook} run right after the first update call made off {@code mainThread} has
+     * returned -- the window between a background writer's database write and its publication to the cache.
+     */
+    @SuppressWarnings("unchecked")
+    public static <T extends BaseDataEntity<String>> DataOperator<T> afterFirstUpdateOffThread(
+            DataOperator<T> operator, Thread mainThread, Runnable hook) {
+        boolean[] ran = {false};
+        return (DataOperator<T>) Proxy.newProxyInstance(
+                DataOperator.class.getClassLoader(), new Class<?>[] {DataOperator.class}, (proxy, method, args) -> {
+                    Object result;
+                    try {
+                        result = method.invoke(operator, args);
+                    } catch (InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                    if (method.getName().startsWith("update") && Thread.currentThread() != mainThread && !ran[0]) {
+                        ran[0] = true;
+                        hook.run();
+                    }
+                    return result;
+                });
+    }
 }

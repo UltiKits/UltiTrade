@@ -148,4 +148,24 @@ class TradeExperienceCapSettlementTest {
         assertThat(service.getTotalExperience(alice)).as("1395 - 100").isEqualTo(1295);
         assertThat(count(bob, Material.EMERALD)).isEqualTo(4);
     }
+
+    @Test
+    @DisplayName("Both offer: each sender is rebuilt from their total before anything moves, never from a total capped after receiving (Codex run 1, P1)")
+    void eachSenderIsRebuiltFromThePreTradeTotal() throws Exception {
+        // Both at 21,000 levels (1,981,089,720 points, readable). Alice offers 200,000,000, Bob 100. Bob's total after
+        // receiving Alice's offer exceeds the int range: rebuilding Bob from it would take his remainder off the cap.
+        alice.setLevel(21_000);
+        alice.setExp(0.0f);
+        bob.setLevel(21_000);
+        bob.setExp(0.0f);
+        TradeSession session = openTrade(200_000_000);
+        session.setExp(bob.getUniqueId(), 100);
+
+        service.completeTrade(session);
+
+        assertThat(session.getState()).isEqualTo(TradeSession.TradeState.COMPLETED);
+        // 1,981,089,720 - 100 + 200,000,000 = 2,181,089,620 points: level 22,033 by Minecraft's table. Rebuilt from the
+        // cap instead, Bob ends below 21,864 levels.
+        assertThat(bob.getLevel()).as("Bob keeps his own total less 100, plus Alice's 200,000,000").isBetween(22_030, 22_036);
+    }
 }
