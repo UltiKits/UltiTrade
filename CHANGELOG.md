@@ -158,8 +158,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `/trade unblock` now write on the main thread before replying (they wrote in the background), so with MySQL each
   waits for two to eight database round trips; each join does one database read on the main thread; and a placeholder
   for an offline player queries the database on every evaluation (an offline player used to be cached for the
-  server's lifetime). A server makes one player's settings writes one at a time, so such a command can also wait for
-  that player's post-trade statistics write in progress (UltiKits/UltiTrade#54).
+  server's lifetime). A server makes one player's settings writes one at a time; no player waits for another player's
+  write. On the main thread a command, a join or a settings read waits at most about 50 ms (one tick) for that player's
+  write in progress (the post-trade statistics): a command that would wait longer answers `settings_busy` and changes
+  nothing, and a join or read then reads the stored settings without caching them (UltiKits/UltiTrade#54).
 - 多台服务器共享同一数据库时，另一台服务器上修改的交易设置与交易统计不再被还原或丢失。此前模块在服务器运行期间一直在内存中保留每位玩家的设置，并在每次修改和关服时整份写回，
   因此另一台服务器期间所做的设置修改会被改回旧值，另一台服务器上完成的交易也会从 `total_trades` 及金币、经验累计中丢失。现在玩家设置只在该玩家在线于本服期间缓存
   （进服时加载、退出时丢弃），且从不写回：退出与关服时都不写入。每次修改——`/trade toggle`、`/trade block`、`/trade unblock`、进服时的新玩家名，以及交易完成后的统计——
@@ -167,7 +169,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   因此两台服务器上的两次开关都会生效。若另一台服务器持续修改，模块会记录 `保存玩家设置失败：<玩家>：重试写入期间存储行一直在变化……` 并提示玩家重试（`settings_busy`）；
   存储拒绝的修改不再提示成功——玩家会收到 `settings_not_saved`，控制台日志写明玩家与错误。随之而来的三项开销：`/trade toggle`、`/trade block`、`/trade unblock`
   现在在回复前于主线程写入（此前在后台写入），使用 MySQL 时每条命令需等待两到八次数据库往返；每次进服在主线程进行一次数据库读取；离线玩家的占位符每次求值都会查询数据库
-  （此前离线玩家会在服务器运行期间一直被缓存）。同一服务器对同一玩家的设置写入逐个进行，因此上述命令也可能等待该玩家正在进行的交易统计写入（UltiKits/UltiTrade#54）。
+  （此前离线玩家会在服务器运行期间一直被缓存）。同一服务器对同一玩家的设置写入逐个进行；玩家不会等待其他玩家的写入。主线程上的命令、进服或设置读取最多等待约 50 毫秒（一个 tick）该玩家正在进行的写入
+  （交易统计）：需要更久的命令回复 `settings_busy` 且不做任何修改，进服或读取则直接读取存储的设置而不缓存（UltiKits/UltiTrade#54）。
 
 - A trade withdrawal or deposit whose economy call threw now logs a SEVERE line an operator can act on:
   `Outcome unknown: taking <amount> from <player> for a trade failed with an error, so the trade treats it as not

@@ -18,6 +18,8 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Service for managing trade logs and player settings.
@@ -38,25 +40,78 @@ public class TradeLogService {
     private final Map<UUID, PlayerTradeSettings> settingsCache = new ConcurrentHashMap<>();
 
     /**
-     * Per-player write order on this server (striped). Every settings write -- a command's change on the main
-     * thread, the post-trade statistics off it, a rename at join -- and every fill of the cache from a read runs
-     * under the player's stripe, together with publishing its result to the cache, so the cache follows the order of
-     * this server's writes. Comparing a background write's read values with the cached entry instead (Codex run 1)
-     * still let two overlapping background writes publish out of order (Codex run 2 on PR #66); ordering removes the
-     * case rather than detecting it. The main thread can wait for one database write of the same player.
+     * Per-player write order on this server. Every settings write -- a command's change on the main thread, the
+     * post-trade statistics off it, a rename at join -- and every fill of the cache from a read holds the player's
+     * lock, together with publishing its result to the cache, so the cache follows the order of this server's writes
+     * for that player (comparing a background write's read values with the cached entry let two overlapping writes
+     * publish out of order, Codex run 2 on PR #66). One lock per player: no player waits for another player's write
+     * (maintainer decision 2026-10-06, gate-1 top-up T1).
+     * <p>
+     * <b>No entry outlives its use.</b> An entry counts the threads holding or waiting for its lock; the count changes
+     * only inside {@code ConcurrentHashMap#compute} for the player's key, so it is exact, and the entry is removed when
+     * the count reaches zero. Every {@link #acquire} that returns an entry is paired with a {@link #release} in a
+     * {@code finally}. A quit removes nothing: removing the entry while a background write holds it would let the next
+     * writer create a second lock for the same player, and two writes would run at once. An entry is removed only when
+     * no thread holds or waits for it, so an entry created after the removal is equivalent to the removed one.
      */
-    private final Object[] writeOrder = newStripes(64);
+    private final Map<UUID, PlayerLock> writeLocks = new ConcurrentHashMap<>();
 
-    private static Object[] newStripes(int count) {
-        Object[] stripes = new Object[count];
-        for (int i = 0; i < count; i++) {
-            stripes[i] = new Object();
-        }
-        return stripes;
+    /**
+     * How long the main thread waits for a player's lock, about one tick (maintainer decision 2026-10-06, top-up T2).
+     * Background threads wait as long as needed.
+     */
+    static final long MAIN_THREAD_WAIT_MILLIS = 50;
+
+    /** A player's lock and the number of threads holding or waiting for it (changed only inside {@code compute}). */
+    private static final class PlayerLock {
+        final ReentrantLock lock = new ReentrantLock();
+        int users;
     }
 
-    private Object writeOrderOf(UUID playerUuid) {
-        return writeOrder[(playerUuid.hashCode() & 0x7fffffff) % writeOrder.length];
+    /**
+     * Take {@code playerUuid}'s lock: on the main thread for at most {@link #MAIN_THREAD_WAIT_MILLIS} (re-entrant: a
+     * thread already holding it gets it at once), elsewhere for as long as needed. Returns the entry to pass to
+     * {@link #release}, or {@code null} when the main thread could not get the lock in time (nothing is held then).
+     */
+    private PlayerLock acquire(UUID playerUuid) {
+        PlayerLock entry = writeLocks.compute(playerUuid, (uuid, current) -> {
+            PlayerLock lock = current != null ? current : new PlayerLock();
+            lock.users++;
+            return lock;
+        });
+        boolean held;
+        if (Bukkit.isPrimaryThread()) {
+            try {
+                held = entry.lock.tryLock(MAIN_THREAD_WAIT_MILLIS, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                held = false;
+            }
+        } else {
+            entry.lock.lock();
+            held = true;
+        }
+        if (!held) {
+            leave(playerUuid, entry);
+            return null;
+        }
+        return entry;
+    }
+
+    /** Release a lock {@link #acquire} returned. */
+    private void release(UUID playerUuid, PlayerLock entry) {
+        entry.lock.unlock();
+        leave(playerUuid, entry);
+    }
+
+    private void leave(UUID playerUuid, PlayerLock entry) {
+        writeLocks.computeIfPresent(playerUuid, (uuid, current) -> {
+            if (current != entry) {
+                return current; // cannot happen while this thread is counted in entry; kept defensive
+            }
+            current.users--;
+            return current.users == 0 ? null : current;
+        });
     }
 
     /**
@@ -372,7 +427,13 @@ public class TradeLogService {
      */
     public void playerJoined(Player player) {
         UUID playerUuid = player.getUniqueId();
-        synchronized (writeOrderOf(playerUuid)) {
+        PlayerLock held = acquire(playerUuid);
+        if (held == null) {
+            // A write of this player is in progress beyond the main thread's wait: skip the cache. A read published now
+            // could be older than that write; the player's first read once it is done caches the stored row.
+            return;
+        }
+        try {
             PlayerTradeSettings row = readStoredRow(playerUuid);
             if (row == null) {
                 return;
@@ -384,6 +445,8 @@ public class TradeLogService {
                 }
             }
             settingsCache.put(playerUuid, row);
+        } finally {
+            release(playerUuid, held);
         }
     }
 
@@ -419,7 +482,7 @@ public class TradeLogService {
      * write finishing after the player quit cannot bring their entry back.
      */
     private void rememberWritten(UUID playerUuid, PlayerTradeSettings row) {
-        // Called under the player's write-order stripe (change), so the last publication is the last write.
+        // Called holding the player's lock (change), so the last publication is the last write.
         if (Bukkit.isPrimaryThread() && Bukkit.getPlayer(playerUuid) != null) {
             settingsCache.put(playerUuid, row);
         } else {
@@ -441,7 +504,13 @@ public class TradeLogService {
         if (cached != null) {
             return cached;
         }
-        synchronized (writeOrderOf(playerUuid)) {
+        PlayerLock held = acquire(playerUuid);
+        if (held == null) {
+            // Main thread, a write of this player in progress: read without caching (an insert never overwrites).
+            PlayerTradeSettings stored = readStoredRow(playerUuid);
+            return stored != null ? stored : createSettings(playerUuid, playerName);
+        }
+        try {
             PlayerTradeSettings settings = readStoredRow(playerUuid);
             if (settings == null) {
                 settings = createSettings(playerUuid, playerName);
@@ -453,6 +522,8 @@ public class TradeLogService {
             }
             cacheIfOnline(playerUuid, settings);
             return settings;
+        } finally {
+            release(playerUuid, held);
         }
     }
 
@@ -471,10 +542,18 @@ public class TradeLogService {
         if (!Bukkit.isPrimaryThread()) {
             return readStoredRow(playerUuid); // never cached off the main thread (cacheIfOnline): no ordering needed
         }
-        synchronized (writeOrderOf(playerUuid)) {
+        PlayerLock held = acquire(playerUuid);
+        if (held == null) {
+            // A write of this player is in progress beyond the main thread's wait: read without caching. Only a
+            // publication can put the cache out of write order; a read that publishes nothing cannot.
+            return readStoredRow(playerUuid);
+        }
+        try {
             PlayerTradeSettings settings = readStoredRow(playerUuid);
             cacheIfOnline(playerUuid, settings);
             return settings;
+        } finally {
+            release(playerUuid, held);
         }
     }
 
@@ -690,12 +769,20 @@ public class TradeLogService {
      */
     private ChangeResult change(UUID playerUuid, String playerName, SettingsChange change) {
         String failureLine = i18n("log_settings_save_failed").replace("{PLAYER}", String.valueOf(playerName));
-        synchronized (writeOrderOf(playerUuid)) {
+        PlayerLock held = acquire(playerUuid);
+        if (held == null) {
+            // Main thread only: another write of this player did not finish within about one tick. Nothing is read or
+            // written; the command answers settings_busy, as for a contended row (maintainer decision 2026-10-06).
+            return new ChangeResult(SettingsWrite.BUSY, null);
+        }
+        try {
             return changeInOrder(playerUuid, playerName, change, failureLine);
+        } finally {
+            release(playerUuid, held);
         }
     }
 
-    /** {@link #change}, under the player's write-order stripe. */
+    /** {@link #change}, holding the player's lock. */
     private ChangeResult changeInOrder(UUID playerUuid, String playerName, SettingsChange change, String failureLine) {
         try {
             for (int attempt = 1; ; attempt++) {
