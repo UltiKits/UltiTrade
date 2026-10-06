@@ -623,45 +623,26 @@ class TradeLogServiceTest {
         }
 
         @Test
-        @DisplayName("shutdown should save cached settings")
-        void saveCachedSettings() throws Exception {
+        @DisplayName("shutdown writes no cached settings: every change was written when made, and a cached copy would revert another server's change (UltiKits/UltiTrade#54, decision 2026-10-06 00:04)")
+        void shutdownWritesNoCachedSettings() throws Exception {
             Map<UUID, PlayerTradeSettings> cache = UltiTradeTestHelper.getField(service, "settingsCache");
             PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, "TestPlayer");
+            settings.setTradeEnabled(false);
             cache.put(playerUuid, settings);
+            PlayerTradeSettings gone = new PlayerTradeSettings(UUID.randomUUID(), "Other");
+            gone.setId("row-deleted-while-running");
+            cache.put(UUID.fromString(gone.getPlayerUuid()), gone);
 
             service.shutdown();
 
-            verify(settingsOperator).updateCounted(settings);
-            verify(settingsOperator, never()).update(any(PlayerTradeSettings.class));
+            verifyNoInteractions(settingsOperator);
             verify(UltiTradeTestHelper.getMockLogger(), never()).warn(anyString());
             verify(UltiTradeTestHelper.getMockLogger(), never()).warn(any(Throwable.class), anyString());
+            assertThat(cache).isEmpty();
         }
 
         @Test
-        @DisplayName("a cached settings object whose stored row is gone and cannot be re-created is logged as not saved at shutdown, naming the player (UltiKits/UltiTrade#52)")
-        void shutdownSaveOfAMissingRowIsLoggedAsFailed() throws Exception {
-            Map<UUID, PlayerTradeSettings> cache = UltiTradeTestHelper.getField(service, "settingsCache");
-            PlayerTradeSettings gone = new PlayerTradeSettings(playerUuid, "TestPlayer");
-            gone.setId("row-deleted-while-running");
-            cache.put(playerUuid, gone);
-            UUID otherUuid = UUID.randomUUID();
-            PlayerTradeSettings kept = new PlayerTradeSettings(otherUuid, "Other");
-            cache.put(otherUuid, kept);
-            when(settingsOperator.updateCounted(gone)).thenReturn(0);
-            noRowCanBeRecreated();
-
-            service.shutdown();
-
-            verify(UltiTradeTestHelper.getMockLogger()).warn(
-                    zhLine("log_settings_save_failed").replace("{PLAYER}", playerUuid.toString()));
-            verify(UltiTradeTestHelper.getMockLogger(), never()).warn(
-                    zhLine("log_settings_save_failed").replace("{PLAYER}", otherUuid.toString()));
-            verify(settingsOperator).updateCounted(kept);
-            assertThat(cache).as("the cache is cleared whatever the writes returned").isEmpty();
-        }
-
-        @Test
-        @DisplayName("shutdown should clear cache after saving")
+        @DisplayName("shutdown should clear the cache")
         void clearCacheAfterSaving() throws Exception {
             Map<UUID, PlayerTradeSettings> cache = UltiTradeTestHelper.getField(service, "settingsCache");
             cache.put(playerUuid, new PlayerTradeSettings(playerUuid, "TestPlayer"));
@@ -669,24 +650,6 @@ class TradeLogServiceTest {
             service.shutdown();
 
             assertThat(cache).isEmpty();
-        }
-
-        @Test
-        @DisplayName("shutdown should handle update failure gracefully")
-        void handleUpdateFailure() throws Exception {
-            Map<UUID, PlayerTradeSettings> cache = UltiTradeTestHelper.getField(service, "settingsCache");
-            PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, "TestPlayer");
-            cache.put(playerUuid, settings);
-
-            RuntimeException failure = new RuntimeException("DB error");
-            doThrow(failure).when(settingsOperator).updateCounted(settings);
-
-            // Should not throw
-            service.shutdown();
-
-            assertThat(cache).isEmpty();
-            verify(UltiTradeTestHelper.getMockLogger()).warn(failure,
-                    zhLine("log_settings_save_failed").replace("{PLAYER}", playerUuid.toString()));
         }
 
         @Test

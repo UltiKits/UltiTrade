@@ -126,34 +126,36 @@ class TradeSettingsRowRecreateTest {
     }
 
     @Test
-    @DisplayName("The shutdown save re-creates a deleted row with the cached settings")
-    void shutdownRecreatesTheRow() throws Exception {
+    @DisplayName("A deleted row is not written back at shutdown (decision 2026-10-06 00:04); the next change re-creates it")
+    void shutdownWritesNothingForADeletedRow() throws Exception {
         TradeLogService serverA = server();
         serverA.toggleTrade(player); // off
         deleteThePlayersRow();
 
         serverA.shutdown();
 
-        PlayerTradeSettings read = readAfterRestart();
-        assertThat(read).isNotNull();
-        assertThat(read.isTradeEnabled()).isFalse();
-        assertThat(rowsOfPlayer()).hasSize(1);
+        assertThat(rowsOfPlayer()).as("shutdown writes no cached settings").isEmpty();
     }
 
     @Test
-    @DisplayName("Two servers that both cached the row and both save after it was deleted leave one row, not two")
+    @DisplayName("Two servers that both cached the row and both change it after it was deleted leave one row, not two")
     void twoServersRecreatingLeaveOneRow() throws Exception {
         TradeLogService serverA = server();
         TradeLogService serverB = server();
         serverA.toggleTrade(player); // off; A caches the row
         assertThat(serverB.getSettings(playerUuid)).as("B caches the same row").isNotNull();
         deleteThePlayersRow();
+        UUID blockedByA = UUID.randomUUID();
+        UUID blockedByB = UUID.randomUUID();
 
-        serverA.shutdown();
-        serverB.shutdown();
+        serverA.blockPlayer(player, blockedByA);
+        serverB.blockPlayer(player, blockedByB);
 
         assertThat(rowsOfPlayer()).as("one row for the player").hasSize(1);
-        assertThat(readAfterRestart()).isNotNull();
+        PlayerTradeSettings read = readAfterRestart();
+        assertThat(read).isNotNull();
+        assertThat(read.isBlocked(blockedByA.toString())).as("A's change").isTrue();
+        assertThat(read.isBlocked(blockedByB.toString())).as("B's change, applied to the row A re-created").isTrue();
     }
 
     @Test
@@ -166,7 +168,7 @@ class TradeSettingsRowRecreateTest {
         serverB.toggleTrade(player); // B has nothing cached: it creates a fresh row
         assertThat(rowsOfPlayer()).hasSize(1);
 
-        serverA.shutdown(); // A's cached copy matches no row
+        serverA.blockPlayer(player, UUID.randomUUID()); // A's cached copy matches no row
 
         assertThat(rowsOfPlayer()).as("still one row for the player").hasSize(1);
         assertThat(readAfterRestart()).isNotNull();

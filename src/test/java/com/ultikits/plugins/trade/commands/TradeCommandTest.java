@@ -173,11 +173,42 @@ class TradeCommandTest {
             YamlConfiguration catalogue = answerI18nFrom(code);
             when(server.getPlayerExact("Target")).thenReturn(target);
             when(logService.isBlocked(playerUuid, targetUuid)).thenReturn(false);
+            when(logService.block(player, targetUuid)).thenReturn(TradeLogService.SettingsWrite.WRITTEN);
 
             command.blockPlayer(player, "Target");
 
-            verify(logService).blockPlayer(player, targetUuid);
+            verify(logService).block(player, targetUuid);
             verify(player).sendMessage(rendered(catalogue, "block_success", "Target"));
+        }
+
+        @ParameterizedTest(name = "lang/{0}.yml")
+        @ValueSource(strings = {"en", "zh"})
+        @DisplayName("/trade block whose row another server kept changing answers with settings_busy, not block_success (UltiTrade#54)")
+        void blockBusy(String code) throws Exception {
+            YamlConfiguration catalogue = answerI18nFrom(code);
+            when(server.getPlayerExact("Target")).thenReturn(target);
+            when(logService.isBlocked(playerUuid, targetUuid)).thenReturn(false);
+            when(logService.block(player, targetUuid)).thenReturn(TradeLogService.SettingsWrite.BUSY);
+
+            command.blockPlayer(player, "Target");
+
+            verify(player).sendMessage(rendered(catalogue, "settings_busy"));
+            verify(player, times(1)).sendMessage(anyString());
+        }
+
+        @ParameterizedTest(name = "lang/{0}.yml")
+        @ValueSource(strings = {"en", "zh"})
+        @DisplayName("/trade block that the storage refused answers with settings_not_saved, not block_success (UltiTrade#54)")
+        void blockNotSaved(String code) throws Exception {
+            YamlConfiguration catalogue = answerI18nFrom(code);
+            when(server.getPlayerExact("Target")).thenReturn(target);
+            when(logService.isBlocked(playerUuid, targetUuid)).thenReturn(false);
+            when(logService.block(player, targetUuid)).thenReturn(TradeLogService.SettingsWrite.FAILED);
+
+            command.blockPlayer(player, "Target");
+
+            verify(player).sendMessage(rendered(catalogue, "settings_not_saved"));
+            verify(player, times(1)).sendMessage(anyString());
         }
 
         @ParameterizedTest(name = "lang/{0}.yml")
@@ -192,7 +223,7 @@ class TradeCommandTest {
 
             verify(player).sendMessage(rendered(catalogue, "already_blocked", "Target"));
             verify(player, times(1)).sendMessage(anyString());
-            verify(logService, never()).blockPlayer(any(), any());
+            verify(logService, never()).block(any(), any());
         }
 
         @ParameterizedTest(name = "lang/{0}.yml")
@@ -389,10 +420,11 @@ class TradeCommandTest {
         void blockOnline() {
             when(logService.isBlocked(playerUuid, targetUuid)).thenReturn(false);
             when(server.getPlayerExact("Target")).thenReturn(target);
+            when(logService.block(player, targetUuid)).thenReturn(TradeLogService.SettingsWrite.WRITTEN);
 
             command.blockPlayer(player, "Target");
 
-            verify(logService).blockPlayer(player, targetUuid);
+            verify(logService).block(player, targetUuid);
             verify(player).sendMessage(ChatColor.GREEN + "Added Target to your trade blacklist!");
         }
 
@@ -404,7 +436,7 @@ class TradeCommandTest {
             command.blockPlayer(player, "Offline");
 
             verify(player).sendMessage(contains("is not online"));
-            verify(logService, never()).blockPlayer(any(), any());
+            verify(logService, never()).block(any(), any());
         }
 
         @Test
@@ -416,7 +448,7 @@ class TradeCommandTest {
             command.blockPlayer(player, "Player1");
 
             verify(player).sendMessage(contains("cannot add yourself to the blacklist"));
-            verify(logService, never()).blockPlayer(any(), any());
+            verify(logService, never()).block(any(), any());
         }
 
         @Test
@@ -428,7 +460,7 @@ class TradeCommandTest {
             command.blockPlayer(player, "Target");
 
             verify(player).sendMessage(ChatColor.RED + "Target is already in your blacklist!");
-            verify(logService, never()).blockPlayer(any(), any());
+            verify(logService, never()).block(any(), any());
         }
     }
 
