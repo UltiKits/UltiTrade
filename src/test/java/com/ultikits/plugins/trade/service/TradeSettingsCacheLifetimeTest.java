@@ -362,7 +362,9 @@ class TradeSettingsCacheLifetimeTest {
             UltiTradeTestHelper.setField(serverA, "settingsOperator", InterleavingOperator.afterFirstUpdateOffThread(own, main, () -> {
                 written.countDown();
                 try {
-                    toggled.await();
+                    // At most 500 ms: where this server orders a player's writes, the toggle waits for this write to
+                    // be published and cannot finish inside the window (Codex run 2 route change).
+                    toggled.await(500, java.util.concurrent.TimeUnit.MILLISECONDS);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
@@ -373,8 +375,13 @@ class TradeSettingsCacheLifetimeTest {
 
             statistics.start();
             assertThat(written.await(10, java.util.concurrent.TimeUnit.SECONDS)).as("the background write happened").isTrue();
-            serverA.toggleTrade(player); // the player's own, newer change on the main thread: trading off
-            toggled.countDown();
+            // The player's own, newer change (trading off), made while the background write is in its window
+            Thread toggle = new Thread(() -> {
+                serverA.toggleTrade(player);
+                toggled.countDown();
+            });
+            toggle.start();
+            toggle.join();
             statistics.join();
 
             PlayerTradeSettings stored = storedRow();

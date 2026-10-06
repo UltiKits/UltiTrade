@@ -1076,7 +1076,7 @@ class TradeServiceTest {
 
             service.completeTrade(session);
 
-            verify(logService).logCompletedTrade(eq(session), eq(player1), eq(player2), anyDouble(), anyInt());
+            verify(logService).logCompletedTrade(eq(session), eq(player1), eq(player2), anyDouble(), anyLong());
         }
 
         @Test
