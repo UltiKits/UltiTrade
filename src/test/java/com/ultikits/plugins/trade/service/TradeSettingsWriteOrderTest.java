@@ -35,7 +35,7 @@ import static org.mockito.Mockito.doReturn;
  * <ul>
  *   <li>A lock per player: no player waits for another player's write.</li>
  *   <li>The main thread waits about 50 ms for the player's lock: a command that cannot get it answers BUSY (nothing
- *       written), a join or an uncached read that cannot get it reads without caching. Background writes wait as long as
+ *       written), a join that cannot get it reads and caches nothing, an uncached read reads without caching. Background writes wait as long as
  *       needed, never on the main thread.</li>
  *   <li>Lock entries do not outlive their use: when nothing holds or waits for a player's lock, it is gone.</li>
  * </ul>

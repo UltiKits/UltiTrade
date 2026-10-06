@@ -28,7 +28,7 @@ block_success: "&a已将 {PLAYER} 添加到交易黑名单！"
 unblock_success: "&a已将 {PLAYER} 从交易黑名单移除！"
 already_blocked: "&c{PLAYER} 已在黑名单中！"
 not_blocked: "&c{PLAYER} 不在黑名单中！"
-settings_busy: "&c你的交易设置正在另一台服务器上被修改，请稍后重试。"
+settings_busy: "&c你的交易设置正在保存中，请稍后重试。"
 settings_not_saved: "&c无法保存你的交易设置，未做任何修改。请稍后重试。"
 
 # 交易确认

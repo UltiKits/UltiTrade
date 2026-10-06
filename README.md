@@ -241,7 +241,7 @@ private String guiTitle = "&6与 {PLAYER} 交易";
 - **Edit `trade_player_settings` by hand only with the values the module writes.** Every settings change is written
   only if the stored row still holds what was read (UltiKits/UltiTrade#54). On SQLite a hand-written value in another
   form — `trade_enabled = 'false'` instead of `0`, `total_money_traded = '1.50'` instead of `1.5` — never compares
-  equal, so every later change for that player answers "being changed on another server, please try again" and their
+  equal, so every later change for that player answers "Your trade settings are being saved right now; please try again in a moment." and their
   trade statistics are not counted, until the cell is rewritten as `0`/`1` or a plain number. MySQL compares numbers
   numerically and is not affected.
 - **On Paper a failed player-data save is not reported to the module.** Paper's `Player#saveData()` logs
@@ -265,7 +265,7 @@ private String guiTitle = "&6与 {PLAYER} 交易";
   重新读取余额无法判断，因为其他插件或服务器也可能修改余额。
 - **手动编辑 `trade_player_settings` 时只写入本模块会写入的取值形式。** 每次设置修改仅在存储行仍为读取时的值时才写入（UltiKits/UltiTrade#54）。在 SQLite 上，
   以其他形式手写的值（如用 `trade_enabled = 'false'` 代替 `0`，用 `total_money_traded = '1.50'` 代替 `1.5`）永远不会比较相等，该玩家之后的每次修改都会提示
-  「正在另一台服务器上被修改，请重试」，其交易统计也不会被计入，直到该单元格改写为 `0`/`1` 或普通数字为止。MySQL 按数值比较数字，不受影响。
+  「你的交易设置正在保存中，请稍后重试」，其交易统计也不会被计入，直到该单元格改写为 `0`/`1` 或普通数字为止。MySQL 按数值比较数字，不受影响。
 - **在 Paper 上，玩家数据保存失败不会通知本模块。** Paper 的 `Player#saveData()` 只记录其自身的 `Failed to save player data for <name>` 并正常返回，
   因此本模块无法得知押入物品发还时的玩家数据保存失败（UltiKits/UltiTrade#60）。
 - **经验超过约 411,616 点（约 320 级）时，Paper 自身的经验计算存在偏差。** 交易后发送方剩余的经验通过 `Player#giveExp` 重建，

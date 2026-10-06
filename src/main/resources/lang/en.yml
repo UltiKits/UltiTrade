@@ -28,7 +28,7 @@ block_success: "&aAdded {PLAYER} to your trade blacklist!"
 unblock_success: "&aRemoved {PLAYER} from your trade blacklist!"
 already_blocked: "&c{PLAYER} is already in your blacklist!"
 not_blocked: "&c{PLAYER} is not in your blacklist!"
-settings_busy: "&cYour trade settings are being changed on another server right now; please try again."
+settings_busy: "&cYour trade settings are being saved right now; please try again in a moment."
 settings_not_saved: "&cYour trade settings could not be saved; nothing was changed. Please try again later."
 
 # Trade Confirmation
