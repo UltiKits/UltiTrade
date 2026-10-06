@@ -125,4 +125,61 @@ class TradeExperienceTwoWaySettlementTest {
         // A: 1,981,089,720 - 200,000,000 + 100 = 1,781,089,820 points = level 19,912 by the table.
         assertThat(a.getLevel()).isEqualTo(19_912);
     }
+
+    /** Register a trade between {@code a} and {@code b}, offering {@code expA} and {@code expB}. */
+    private TradeSession openTrade(Player a, Player b, int expA, int expB) throws Exception {
+        UUID aId = a.getUniqueId();
+        UUID bId = b.getUniqueId();
+        doReturn(a).when(Bukkit.getServer()).getPlayer(aId);
+        doReturn(b).when(Bukkit.getServer()).getPlayer(bId);
+        TradeSession session = new TradeSession(a, b);
+        session.setExp(aId, expA);
+        session.setExp(bId, expB);
+        Map<UUID, TradeSession> active = UltiTradeTestHelper.getField(service, "activeSessions");
+        Map<UUID, UUID> bySession = UltiTradeTestHelper.getField(service, "playerSessionMap");
+        active.put(session.getSessionId(), session);
+        bySession.put(aId, session.getSessionId());
+        bySession.put(bId, session.getSessionId());
+        return session;
+    }
+
+    @Test
+    @DisplayName("Two offers of 1,500,000,000 each are a large trade: the confirmation page opens, the int sum does not wrap below the threshold (Codex run 2, P2)")
+    void twoHugeOffersNeedTheLargeTradeConfirmation() throws Exception {
+        Player a = experiencePlayer("A", 21_000);
+        Player b = experiencePlayer("B", 21_000);
+        openTrade(a, b, 1_500_000_000, 1_500_000_000);
+
+        service.confirmTrade(a);
+
+        java.util.Set<UUID> transitions = UltiTradeTestHelper.getField(service, "confirmPageTransitions");
+        assertThat(transitions).as("the confirmation page is being opened for A").contains(a.getUniqueId());
+    }
+
+    @Test
+    @DisplayName("At a 100% experience tax two offers of 1,500,000,000 log a tax of 3,000,000,000, not a wrapped negative number (Codex run 2, P2)")
+    void taxOfTwoHugeOffersIsLoggedExactly(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+        TradeConfig config = UltiTradeTestHelper.getField(service, "config");
+        lenient().when(config.getExpTaxRate()).thenReturn(1.0);
+        com.ultikits.plugins.trade.testsupport.SharedSqliteDatabase database =
+                com.ultikits.plugins.trade.testsupport.SharedSqliteDatabase.in(dir);
+        TradeLogService log = new TradeLogService();
+        UltiTradeTestHelper.setField(log, "plugin", UltiTradeTestHelper.getMockPlugin());
+        UltiTradeTestHelper.setField(log, "config", config);
+        UltiTradeTestHelper.setField(log, "settingsOperator", database.openAs(com.ultikits.plugins.trade.entity.PlayerTradeSettings.class));
+        com.ultikits.ultitools.interfaces.DataOperator<com.ultikits.plugins.trade.entity.TradeLogData> logs =
+                database.openAs(com.ultikits.plugins.trade.entity.TradeLogData.class);
+        UltiTradeTestHelper.setField(log, "logOperator", logs);
+        UltiTradeTestHelper.setField(service, "logService", log);
+        Player a = experiencePlayer("A", 21_000);
+        Player b = experiencePlayer("B", 21_000);
+        TradeSession session = openTrade(a, b, 1_500_000_000, 1_500_000_000);
+
+        service.completeTrade(session);
+
+        assertThat(session.getState()).isEqualTo(TradeSession.TradeState.COMPLETED);
+        java.util.List<com.ultikits.plugins.trade.entity.TradeLogData> rows = logs.getAll();
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getExpTaxCollected()).isEqualTo(3_000_000_000L);
+    }
 }

@@ -383,6 +383,43 @@ class TradeSettingsCacheLifetimeTest {
             assertThat(cacheOf(serverA).get(playerUuid).isTradeEnabled())
                     .as("the cache agrees with the stored row: the older background row did not replace the toggle").isFalse();
         }
+
+        @Test
+        @DisplayName("Two background statistics writes for one player overlap: the cache ends with the last stored row, not the earlier one (Codex run 2, P2)")
+        void overlappingBackgroundWritesPublishInWriteOrder() throws Exception {
+            server().toggleTrade(player);
+            server().toggleTrade(player); // on, a row exists
+            TradeLogService serverA = server();
+            UltiTradeTestHelper.setField(serverA, "logOperator", database.openAs(com.ultikits.plugins.trade.entity.TradeLogData.class));
+            doReturn(player).when(Bukkit.getServer()).getPlayer(playerUuid);
+            serverA.playerJoined(player);
+            Player partner = UltiTradeTestHelper.createMockPlayer("Partner", UUID.randomUUID());
+            Runnable oneTrade = () -> serverA.logCompletedTrade(
+                    new com.ultikits.plugins.trade.entity.TradeSession(player, partner), player, partner, 0.0, 0);
+            Thread[] second = new Thread[1];
+            DataOperator<PlayerTradeSettings> own = UltiTradeTestHelper.getField(serverA, "settingsOperator");
+            // The first task pauses right after its write; the second task runs in that pause (or, when this server
+            // orders its writes for a player, waits for the first to publish -- the pause gives it 500 ms either way).
+            UltiTradeTestHelper.setField(serverA, "settingsOperator", InterleavingOperator.afterFirstUpdateOffThread(own, Thread.currentThread(), () -> {
+                second[0] = new Thread(oneTrade);
+                second[0].start();
+                try {
+                    second[0].join(500);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }));
+            Thread first = new Thread(oneTrade);
+
+            first.start();
+            first.join();
+            second[0].join();
+
+            PlayerTradeSettings stored = storedRow();
+            assertThat(stored.getTotalTrades()).as("both trades counted").isEqualTo(2);
+            assertThat(cacheOf(serverA).get(playerUuid).getTotalTrades())
+                    .as("the cache holds the last stored row").isEqualTo(stored.getTotalTrades());
+        }
     }
 
     @Nested

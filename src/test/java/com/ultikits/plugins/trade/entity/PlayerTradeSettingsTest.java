@@ -387,4 +387,15 @@ class PlayerTradeSettingsTest {
             assertThat(str).contains("totalTrades=1");
         }
     }
+
+    @Test
+    @DisplayName("Experience given over several trades is counted past the int range (two trades of 1,500,000,000: 3,000,000,000; Codex run 2 sweep)")
+    void experienceTradedIsCountedPastTheIntRange() {
+        PlayerTradeSettings settings = new PlayerTradeSettings(java.util.UUID.randomUUID(), "Giver");
+
+        settings.incrementTradeStats(0.0, 1_500_000_000);
+        settings.incrementTradeStats(0.0, 1_500_000_000);
+
+        assertThat(settings.getTotalExpTraded()).isEqualTo(3_000_000_000L);
+    }
 }
