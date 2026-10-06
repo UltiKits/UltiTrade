@@ -101,7 +101,7 @@ public class TradeLogData extends BaseDataEntity<String> {
      * Total tax collected (experience)
      */
     @Column("exp_tax_collected")
-    private int expTaxCollected;
+    private long expTaxCollected; // long: two taxes near the int range exceed it (Codex run 2 on PR #66)
     
     /**
      * Trade timestamp

@@ -70,7 +70,7 @@ public class PlayerTradeSettings extends BaseDataEntity<String> {
      * Total experience traded (given)
      */
     @Column("total_exp_traded")
-    private int totalExpTraded = 0;
+    private long totalExpTraded = 0; // long: experience given over several trades exceeds the int range (#65)
     
     /**
      * Last trade timestamp

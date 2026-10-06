@@ -723,8 +723,10 @@ public class TradeService {
         double threshold = config.getConfirmThreshold();
         double totalMoney = session.getPlayerMoney(player.getUniqueId()) + 
                            session.getOtherPlayerMoney(player.getUniqueId());
-        int totalExp = session.getPlayerExp(player.getUniqueId()) + 
-                       session.getOtherPlayerExp(player.getUniqueId());
+        // In long: two offers of up to 2,147,483,647 points each would wrap an int sum below the threshold and skip
+        // the large-trade confirmation (Codex run 2 on PR #66).
+        long totalExp = (long) session.getPlayerExp(player.getUniqueId())
+                       + session.getOtherPlayerExp(player.getUniqueId());
         
         // If already confirmed once (in session), proceed
         if (!session.isConfirmed(player.getUniqueId()) && 
@@ -888,7 +890,7 @@ public class TradeService {
         }
         
         double moneyTax = 0;
-        int expTax = 0;
+        long expTax = 0;
 
         double money1 = session.getPlayerMoney(session.getPlayer1());
         double money2 = session.getPlayerMoney(session.getPlayer2());
@@ -964,7 +966,7 @@ public class TradeService {
             double expTaxRate = config.getExpTaxRate();
             int tax1 = experienceTax(exp1, expTaxRate);
             int tax2 = experienceTax(exp2, expTaxRate);
-            expTax = tax1 + tax2;
+            expTax = (long) tax1 + tax2; // in long: two taxes near the int range would wrap (Codex run 2 on PR #66)
             // Both senders' totals are read before any experience moves, both senders rebuilt, and only then is
             // either side paid: a total read after its owner received the other offer can exceed the int range and
             // read capped, and a rebuild from it would take the remainder off the cap (Codex run 1 on PR #66).

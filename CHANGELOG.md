@@ -158,7 +158,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `/trade unblock` now write on the main thread before replying (they wrote in the background), so with MySQL each
   waits for two to eight database round trips; each join does one database read on the main thread; and a placeholder
   for an offline player queries the database on every evaluation (an offline player used to be cached for the
-  server's lifetime) (UltiKits/UltiTrade#54).
+  server's lifetime). A server makes one player's settings writes one at a time, so such a command can also wait for
+  that player's post-trade statistics write in progress (UltiKits/UltiTrade#54).
 - 多台服务器共享同一数据库时，另一台服务器上修改的交易设置与交易统计不再被还原或丢失。此前模块在服务器运行期间一直在内存中保留每位玩家的设置，并在每次修改和关服时整份写回，
   因此另一台服务器期间所做的设置修改会被改回旧值，另一台服务器上完成的交易也会从 `total_trades` 及金币、经验累计中丢失。现在玩家设置只在该玩家在线于本服期间缓存
   （进服时加载、退出时丢弃），且从不写回：退出与关服时都不写入。每次修改——`/trade toggle`、`/trade block`、`/trade unblock`、进服时的新玩家名，以及交易完成后的统计——
@@ -166,7 +167,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   因此两台服务器上的两次开关都会生效。若另一台服务器持续修改，模块会记录 `保存玩家设置失败：<玩家>：重试写入期间存储行一直在变化……` 并提示玩家重试（`settings_busy`）；
   存储拒绝的修改不再提示成功——玩家会收到 `settings_not_saved`，控制台日志写明玩家与错误。随之而来的三项开销：`/trade toggle`、`/trade block`、`/trade unblock`
   现在在回复前于主线程写入（此前在后台写入），使用 MySQL 时每条命令需等待两到八次数据库往返；每次进服在主线程进行一次数据库读取；离线玩家的占位符每次求值都会查询数据库
-  （此前离线玩家会在服务器运行期间一直被缓存）（UltiKits/UltiTrade#54）。
+  （此前离线玩家会在服务器运行期间一直被缓存）。同一服务器对同一玩家的设置写入逐个进行，因此上述命令也可能等待该玩家正在进行的交易统计写入（UltiKits/UltiTrade#54）。
 
 - A trade withdrawal or deposit whose economy call threw now logs a SEVERE line an operator can act on:
   `Outcome unknown: taking <amount> from <player> for a trade failed with an error, so the trade treats it as not
@@ -188,12 +189,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   experience slot and the amount prompt answer `exp_total_unreadable` ("Your experience is too high to be counted
   exactly …"), the trade window shows that line instead of a total, and a trade whose offer was set before the player
   reached such a level is cancelled before anything moves (`cancel_reason_exp_unreadable`). Taking an offer off the
-  capped total would have rebuilt the player hundreds of millions of points below their real total. Paper's own
+  capped total would have rebuilt the player hundreds of millions of points below their real total. Sums of
+  experience past the int range are counted in full: two large offers still require the large-trade confirmation,
+  and the logged experience tax and `total_exp_traded` no longer wrap to negative numbers. Paper's own
   experience arithmetic drifting above about 411,616 points is documented as a known limitation (UltiKits/UltiTrade#65).
 - 等级极高的玩家不再读到负数的经验总量。此前从 15,466 级起（例如执行 `/xp set <玩家> 16000 levels` 后）经验总量会溢出，经验输入提示和交易界面显示负数，
   所有经验报价都被判为经验不足而拒绝。现在经验总量在 21,863 级以内精确计算；更高等级的总量超过 2,147,483,647 点，无法精确计算，因此这类玩家不能出价经验：
   点击经验栏位与经验数量输入都会提示 `exp_total_unreadable`，交易界面显示该提示而非总量；若出价在玩家达到此等级之前已设置，交易会在任何东西转移之前取消
-  （`cancel_reason_exp_unreadable`）。若从封顶后的数值中扣除报价，会使玩家的经验比实际少数亿点。Paper 自身经验计算在约 411,616 点以上的偏差
+  （`cancel_reason_exp_unreadable`）。若从封顶后的数值中扣除报价，会使玩家的经验比实际少数亿点。超出 int 范围的经验合计现在完整计算：两笔大额报价仍需大额交易确认，
+  记录的经验税与 `total_exp_traded` 不再变为负数。Paper 自身经验计算在约 411,616 点以上的偏差
   作为已知限制记录在文档中（UltiKits/UltiTrade#65）。
 
 - `exp-tax-rate: .nan` no longer breaks experience trades: a rate that is not greater than zero, NaN included, takes no

@@ -38,6 +38,28 @@ public class TradeLogService {
     private final Map<UUID, PlayerTradeSettings> settingsCache = new ConcurrentHashMap<>();
 
     /**
+     * Per-player write order on this server (striped). Every settings write -- a command's change on the main
+     * thread, the post-trade statistics off it, a rename at join -- and every fill of the cache from a read runs
+     * under the player's stripe, together with publishing its result to the cache, so the cache follows the order of
+     * this server's writes. Comparing a background write's read values with the cached entry instead (Codex run 1)
+     * still let two overlapping background writes publish out of order (Codex run 2 on PR #66); ordering removes the
+     * case rather than detecting it. The main thread can wait for one database write of the same player.
+     */
+    private final Object[] writeOrder = newStripes(64);
+
+    private static Object[] newStripes(int count) {
+        Object[] stripes = new Object[count];
+        for (int i = 0; i < count; i++) {
+            stripes[i] = new Object();
+        }
+        return stripes;
+    }
+
+    private Object writeOrderOf(UUID playerUuid) {
+        return writeOrder[(playerUuid.hashCode() & 0x7fffffff) % writeOrder.length];
+    }
+
+    /**
      * This module's language-file text for {@code key}, in the server's language, so the console lines
      * follow the {@code language} setting (UltiKits/UltiTrade#16). Without an injected plugin the key
      * itself is returned, as the framework renders a missing key: a log write must never fail for want
@@ -142,7 +164,7 @@ public class TradeLogService {
      * @param expTax Experience tax collected
      */
     public void logCompletedTrade(TradeSession session, Player player1, Player player2,
-                                   double moneyTax, int expTax) {
+                                   double moneyTax, long expTax) {
         if (!config.isEnableTradeLog()) {
             return;
         }
@@ -350,17 +372,19 @@ public class TradeLogService {
      */
     public void playerJoined(Player player) {
         UUID playerUuid = player.getUniqueId();
-        PlayerTradeSettings row = readStoredRow(playerUuid);
-        if (row == null) {
-            return;
-        }
-        if (!player.getName().equals(row.getPlayerName())) {
-            ChangeResult renamed = change(playerUuid, player.getName(), unchanged -> false);
-            if (renamed.row != null) {
-                row = renamed.row;
+        synchronized (writeOrderOf(playerUuid)) {
+            PlayerTradeSettings row = readStoredRow(playerUuid);
+            if (row == null) {
+                return;
             }
+            if (!player.getName().equals(row.getPlayerName())) {
+                ChangeResult renamed = change(playerUuid, player.getName(), unchanged -> false);
+                if (renamed.row != null) {
+                    row = renamed.row;
+                }
+            }
+            settingsCache.put(playerUuid, row);
         }
-        settingsCache.put(playerUuid, row);
     }
 
     /**
@@ -394,28 +418,13 @@ public class TradeLogService {
      * Off the main thread -- the post-trade statistics -- an entry is only replaced, never added, so a
      * write finishing after the player quit cannot bring their entry back.
      */
-    private void rememberWritten(UUID playerUuid, PlayerTradeSettings row, PlayerTradeSettings read) {
+    private void rememberWritten(UUID playerUuid, PlayerTradeSettings row) {
+        // Called under the player's write-order stripe (change), so the last publication is the last write.
         if (Bukkit.isPrimaryThread() && Bukkit.getPlayer(playerUuid) != null) {
             settingsCache.put(playerUuid, row);
         } else {
-            // Only over the entry this write read: if the main thread published a newer row of the player's own
-            // change between this write and here, keeping it keeps the cache in this server's write order (Codex
-            // run 1 on PR #66, gate-1 F3). An entry that was already stale stays as it was until the next change.
-            settingsCache.computeIfPresent(playerUuid, (uuid, cached) -> sameValues(cached, read) ? row : cached);
+            settingsCache.computeIfPresent(playerUuid, (uuid, cached) -> row);
         }
-    }
-
-    /** Whether two settings rows hold the same value in every stored column ({@code read} may be null). */
-    private static boolean sameValues(PlayerTradeSettings a, PlayerTradeSettings read) {
-        return read != null
-            && Objects.equals(a.getPlayerUuid(), read.getPlayerUuid())
-            && Objects.equals(a.getPlayerName(), read.getPlayerName())
-            && a.isTradeEnabled() == read.isTradeEnabled()
-            && Objects.equals(a.getBlockedPlayersJson(), read.getBlockedPlayersJson())
-            && a.getTotalTrades() == read.getTotalTrades()
-            && Double.compare(a.getTotalMoneyTraded(), read.getTotalMoneyTraded()) == 0
-            && a.getTotalExpTraded() == read.getTotalExpTraded()
-            && a.getLastTradeTime() == read.getLastTradeTime();
     }
 
     /**
@@ -432,17 +441,19 @@ public class TradeLogService {
         if (cached != null) {
             return cached;
         }
-        PlayerTradeSettings settings = readStoredRow(playerUuid);
-        if (settings == null) {
-            settings = createSettings(playerUuid, playerName);
-        } else if (playerName != null && !playerName.equals(settings.getPlayerName())) {
-            ChangeResult renamed = change(playerUuid, playerName, unchanged -> false);
-            if (renamed.row != null) {
-                settings = renamed.row;
+        synchronized (writeOrderOf(playerUuid)) {
+            PlayerTradeSettings settings = readStoredRow(playerUuid);
+            if (settings == null) {
+                settings = createSettings(playerUuid, playerName);
+            } else if (playerName != null && !playerName.equals(settings.getPlayerName())) {
+                ChangeResult renamed = change(playerUuid, playerName, unchanged -> false);
+                if (renamed.row != null) {
+                    settings = renamed.row;
+                }
             }
+            cacheIfOnline(playerUuid, settings);
+            return settings;
         }
-        cacheIfOnline(playerUuid, settings);
-        return settings;
     }
 
     /**
@@ -457,9 +468,14 @@ public class TradeLogService {
         if (cached != null) {
             return cached;
         }
-        PlayerTradeSettings settings = readStoredRow(playerUuid);
-        cacheIfOnline(playerUuid, settings);
-        return settings;
+        if (!Bukkit.isPrimaryThread()) {
+            return readStoredRow(playerUuid); // never cached off the main thread (cacheIfOnline): no ordering needed
+        }
+        synchronized (writeOrderOf(playerUuid)) {
+            PlayerTradeSettings settings = readStoredRow(playerUuid);
+            cacheIfOnline(playerUuid, settings);
+            return settings;
+        }
     }
 
     private PlayerTradeSettings selectCanonicalSettings(List<PlayerTradeSettings> existing) {
@@ -618,17 +634,10 @@ public class TradeLogService {
     private static final class ChangeResult {
         final SettingsWrite write;
         final PlayerTradeSettings row;
-        /** The row's values as this change read them, before applying it; {@code null} when no row was read. */
-        final PlayerTradeSettings read;
 
         ChangeResult(SettingsWrite write, PlayerTradeSettings row) {
-            this(write, row, null);
-        }
-
-        ChangeResult(SettingsWrite write, PlayerTradeSettings row, PlayerTradeSettings read) {
             this.write = write;
             this.row = row;
-            this.read = read;
         }
     }
 
@@ -681,6 +690,13 @@ public class TradeLogService {
      */
     private ChangeResult change(UUID playerUuid, String playerName, SettingsChange change) {
         String failureLine = i18n("log_settings_save_failed").replace("{PLAYER}", String.valueOf(playerName));
+        synchronized (writeOrderOf(playerUuid)) {
+            return changeInOrder(playerUuid, playerName, change, failureLine);
+        }
+    }
+
+    /** {@link #change}, under the player's write-order stripe. */
+    private ChangeResult changeInOrder(UUID playerUuid, String playerName, SettingsChange change, String failureLine) {
         try {
             for (int attempt = 1; ; attempt++) {
                 PlayerTradeSettings row = readStoredRow(playerUuid);
@@ -699,7 +715,7 @@ public class TradeLogService {
                 ChangeResult result = updateWith(row, playerName, change);
                 if (result != null) {
                     if (result.row != null) {
-                        rememberWritten(playerUuid, result.row, result.read);
+                        rememberWritten(playerUuid, result.row);
                     }
                     return result;
                 }
@@ -730,16 +746,15 @@ public class TradeLogService {
      */
     private ChangeResult updateWith(PlayerTradeSettings row, String playerName, SettingsChange change) {
         WhereCondition[] asRead = valuesAsRead(row);
-        PlayerTradeSettings read = copyOf(row);
         boolean renamed = playerName != null && !playerName.equals(row.getPlayerName());
         if (renamed) {
             row.setPlayerName(playerName);
         }
         boolean changed = change.apply(row);
         if (!changed && !renamed) {
-            return new ChangeResult(SettingsWrite.UNCHANGED, row, read);
+            return new ChangeResult(SettingsWrite.UNCHANGED, row);
         }
-        return settingsOperator.updateIf(row, asRead) ? new ChangeResult(SettingsWrite.WRITTEN, row, read) : null;
+        return settingsOperator.updateIf(row, asRead) ? new ChangeResult(SettingsWrite.WRITTEN, row) : null;
     }
 
     /**
