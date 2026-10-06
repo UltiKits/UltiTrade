@@ -181,6 +181,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   所有经验报价都被判为经验不足而拒绝。现在经验总量在 21,863 级以内精确计算，更高等级则封顶为 2,147,483,647 点。Paper 自身经验计算在约 411,616 点以上的偏差
   作为已知限制记录在文档中（UltiKits/UltiTrade#65）。
 
+- `exp-tax-rate: .nan` no longer breaks experience trades: a rate that is not greater than zero, NaN included, takes no
+  experience tax. NaN used to throw while the tax was computed — in a completing trade after the money had already
+  moved, and in both trade windows (UltiKits/UltiTrade#65).
+- `exp-tax-rate: .nan` 不再导致经验交易出错：任何不大于零的税率（包括 NaN）都不收取经验税。此前 NaN 会在计算税额时抛出异常——在完成交易时发生于金币已转移之后，
+  两个交易界面也会出错（UltiKits/UltiTrade#65）。
+
 - `/ul reload UltiTrade` (and a bare `/ul reload`) no longer reports a plain success when part of this module's
   reload failed. If rescheduling the trade-log cleanup task, applying `enable-money-trade`, or voiding open trades'
   confirmations and redrawing their windows fails, or one player's open trade window cannot be redrawn, the module

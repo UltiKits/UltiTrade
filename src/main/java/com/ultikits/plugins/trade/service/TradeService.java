@@ -2075,12 +2075,16 @@ public class TradeService {
      * the rule says (follow-up of UltiKits/UltiTrade#64). The trade itself and every window that shows the tax or the
      * amount received after it use this method, so what is shown is what is taken.
      *
+     * <p>A rate that is not greater than zero takes no tax -- NaN included: {@code rate <= 0} is false for NaN, which
+     * then reached {@code BigDecimal.valueOf} and threw, in the trade itself after money had moved and in both trade
+     * windows (UltiKits/UltiTrade#65; the framework also refuses NaN at load since UltiTools-Reborn#625).
+     *
      * @param offered the experience points offered
      * @param rate    the configured {@code exp-tax-rate} (0 to 1)
      * @return the points taken as tax, never more than {@code offered}
      */
     public static int experienceTax(int offered, double rate) {
-        if (offered <= 0 || rate <= 0) {
+        if (offered <= 0 || !(rate > 0)) {
             return 0;
         }
         // BigDecimal.valueOf goes through Double.toString, the shortest decimal that reads back as the configured
