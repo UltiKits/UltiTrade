@@ -59,7 +59,27 @@ public class TradeCommand extends BaseCommandExecutor {
     private static String text(String languageText) {
         return ChatColor.translateAlternateColorCodes('&', languageText);
     }
-    
+
+    /**
+     * Tell the player when a settings change was not saved, and say whether it was. A change is saved
+     * when it was written or the stored settings already held it; otherwise nothing changed anywhere and
+     * the success reply would be false (UltiKits/UltiTrade#54): a row another server kept changing gets
+     * the try-again reply, a storage failure the not-saved reply (the console line names the cause).
+     *
+     * @return whether the change is in the stored settings
+     */
+    private boolean replyIfNotSaved(Player player, TradeLogService.SettingsWrite write) {
+        if (write == TradeLogService.SettingsWrite.BUSY) {
+            player.sendMessage(text(plugin.i18n("settings_busy")));
+            return false;
+        }
+        if (write == TradeLogService.SettingsWrite.FAILED) {
+            player.sendMessage(text(plugin.i18n("settings_not_saved")));
+            return false;
+        }
+        return true;
+    }
+
     @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "<player>")
     public void sendRequest(@CmdSender Player sender, @CmdParam("player") String targetName) {
@@ -128,7 +148,9 @@ public class TradeCommand extends BaseCommandExecutor {
             return;
         }
         
-        logService.blockPlayer(player, target.getUniqueId());
+        if (!replyIfNotSaved(player, logService.block(player, target.getUniqueId()))) {
+            return;
+        }
         player.sendMessage(withPlayer(plugin.i18n("block_success"), target.getName()));
         player.sendMessage(text(plugin.i18n("block_success_hint")));
     }

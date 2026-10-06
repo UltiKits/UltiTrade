@@ -140,6 +140,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   起至少会记录为失败），玩家聊天栏却显示修改成功。现在保存会用当前设置重建该行，并记录一条指名该玩家的 WARNING。若共享数据库的另一台服务器已为该玩家创建了行，
   则写入那一行；玩家设置行现在以玩家 UUID 作为 id，因此两台服务器同时创建或重建时只会留下一行（UltiKits/UltiTrade#57）。
 
+- On servers sharing one database, a player's trade settings changed on another server are no longer reverted by this
+  server. The module kept each player's settings in memory and wrote that whole copy back on a change and again at
+  shutdown, so a setting another server had changed in between went back to the old value. Now nothing is written at
+  shutdown, and `/trade block` reads the stored settings again and adds only the block, written only if the stored
+  settings still hold what was read; if another server keeps changing them, it retries up to three times and then logs
+  `Failed to save player settings: <player>: the stored row kept changing …` and tells the player to try again
+  (`settings_busy`). A block the storage refused is no longer confirmed: the player gets `settings_not_saved`
+  (UltiKits/UltiTrade#54).
+- 多台服务器共享同一数据库时，另一台服务器上修改的交易设置不再被本服务器还原。此前模块在内存中保留每位玩家的设置，并在修改时和关服时整份写回，
+  因此另一台服务器期间所做的修改会被改回旧值。现在关服时不再写入；`/trade block` 会重新读取存储的设置、只添加这一条拉黑，并且仅当存储的设置仍是读取时的
+  值时才写入；若另一台服务器持续修改，最多重试三次，然后记录 `保存玩家设置失败：<玩家>：重试写入期间存储行一直在变化……` 并提示玩家重试（`settings_busy`）。
+  存储拒绝的拉黑不再提示成功：玩家会收到 `settings_not_saved`（UltiKits/UltiTrade#54）。
+
 - `/ul reload UltiTrade` (and a bare `/ul reload`) no longer reports a plain success when part of this module's
   reload failed. If rescheduling the trade-log cleanup task, applying `enable-money-trade`, or voiding open trades'
   confirmations and redrawing their windows fails, or one player's open trade window cannot be redrawn, the module

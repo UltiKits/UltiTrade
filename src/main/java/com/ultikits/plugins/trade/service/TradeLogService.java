@@ -7,6 +7,7 @@ import com.ultikits.plugins.trade.entity.TradeSession;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.Autowired;
 import com.ultikits.ultitools.annotations.Service;
+import com.ultikits.ultitools.entities.WhereCondition;
 import com.ultikits.ultitools.interfaces.DataOperator;
 
 import org.bukkit.Bukkit;
@@ -118,24 +119,15 @@ public class TradeLogService {
     
     /**
      * Shutdown the service.
+     * <p>
+     * Cached settings are discarded, never written: every change was written when it was made, and a
+     * cached copy written back here would revert whatever another server sharing the database changed
+     * since this server read it (UltiKits/UltiTrade#54; maintainer decision of 2026-10-06).
      */
     public void shutdown() {
         if (cleanupTask != null) {
             cleanupTask.cancel();
             cleanupTask = null;
-        }
-        
-        // Save all cached settings. A row deleted while the server ran is re-created (UltiKits/UltiTrade#57);
-        // a write that still reaches no row is logged like a write that threw (UltiKits/UltiTrade#52).
-        for (PlayerTradeSettings settings : settingsCache.values()) {
-            String failureLine = i18n("log_settings_save_failed").replace("{PLAYER}", String.valueOf(settings.getPlayerUuid()));
-            try {
-                if (!writeSettings(settings)) {
-                    plugin.getLogger().warn(failureLine);
-                }
-            } catch (Exception e) {
-                plugin.getLogger().warn(e, failureLine);
-            }
         }
         settingsCache.clear();
     }
@@ -538,12 +530,206 @@ public class TradeLogService {
      * @return true if blocked successfully
      */
     public boolean blockPlayer(Player player, UUID targetUuid) {
-        PlayerTradeSettings settings = getOrCreateSettings(player.getUniqueId(), player.getName());
-        boolean result = settings.blockPlayer(targetUuid.toString());
-        if (result) {
-            saveSettings(settings);
+        return block(player, targetUuid) == SettingsWrite.WRITTEN;
+    }
+
+    /**
+     * Add {@code targetUuid} to {@code player}'s blocklist, through {@link #change}: the stored row is
+     * read again and only the block is added to it, so a setting another server changed is kept.
+     *
+     * @param player     the player doing the blocking
+     * @param targetUuid the player to block
+     * @return {@link SettingsWrite#WRITTEN}; {@link SettingsWrite#UNCHANGED} when the stored list already
+     *         holds the target; {@link SettingsWrite#BUSY} or {@link SettingsWrite#FAILED} when nothing
+     *         could be written
+     */
+    public SettingsWrite block(Player player, UUID targetUuid) {
+        String target = targetUuid.toString();
+        return change(player.getUniqueId(), player.getName(), row -> row.blockPlayer(target)).write;
+    }
+
+    // ==================== Conditional settings writes (UltiKits/UltiTrade#54) ====================
+
+    /**
+     * How many times one settings change is tried before it is given up as contended -- the same bound
+     * as UltiEconomy's balance changes (UltiKits/UltiEconomy#41).
+     */
+    static final int MAX_WRITE_ATTEMPTS = 3;
+
+    /** What one settings change did. */
+    public enum SettingsWrite {
+        /** The change was written to the stored row. */
+        WRITTEN,
+        /** The stored row already held what the change asked for; nothing was written. */
+        UNCHANGED,
+        /**
+         * The stored row changed again on every attempt (another server is writing it); nothing was
+         * written, and the player is asked to try again.
+         */
+        BUSY,
+        /** The storage failed; nothing was written. */
+        FAILED
+    }
+
+    /** One change to a player's settings, applied to the row as read. Returns whether it changed anything. */
+    @FunctionalInterface
+    private interface SettingsChange {
+        boolean apply(PlayerTradeSettings row);
+    }
+
+    /** The result of {@link #change}: what happened, and the row as now stored ({@code null} when unknown). */
+    private static final class ChangeResult {
+        final SettingsWrite write;
+        final PlayerTradeSettings row;
+
+        ChangeResult(SettingsWrite write, PlayerTradeSettings row) {
+            this.write = write;
+            this.row = row;
         }
-        return result;
+    }
+
+    /**
+     * Apply one change to a player's stored settings so that it can never revert a change another server
+     * sharing the database made (UltiKits/UltiTrade#54; maintainer decision of 2026-10-06, the UltiEconomy
+     * pattern).
+     * <p>
+     * The row is read from the database -- never from the cache -- the change is applied to it, and it is
+     * written with {@code DataOperator#updateIf} conditioned on <b>every</b> value it was read with.
+     * {@code updateIf} writes every column, so conditioning on all of them is what makes the write change
+     * only what this change changed: if any column moved since the read, nothing is written, the row is
+     * read again and the change decided again on the new values, at most {@link #MAX_WRITE_ATTEMPTS} times.
+     * The player's live name is written with the change when the stored one differs.
+     * <p>
+     * A player with no stored row gets one, under the player's UUID as id (as {@link #createSettings}):
+     * built from the settings this server last held for the player when it holds any -- the row was
+     * deleted while the server ran, and the maintainer's decision of 2026-10-04 re-creates it with the
+     * current settings (UltiKits/UltiTrade#57) -- and from the defaults otherwise. When another server
+     * inserts the same id first, the insert fails and the change is applied to that server's row instead.
+     * <p>
+     * After a write, a cached entry for the player is replaced by the row as written; no entry is added.
+     * A failure is logged with the player named and nothing is written: a contended row with the reason,
+     * a storage error with its exception.
+     */
+    private ChangeResult change(UUID playerUuid, String playerName, SettingsChange change) {
+        String failureLine = i18n("log_settings_save_failed").replace("{PLAYER}", String.valueOf(playerName));
+        try {
+            for (int attempt = 1; ; attempt++) {
+                PlayerTradeSettings row = readStoredRow(playerUuid);
+                ChangeResult result = row == null
+                        ? createWith(playerUuid, playerName, change)
+                        : updateWith(row, playerName, change);
+                if (result != null) {
+                    if (result.row != null) {
+                        settingsCache.computeIfPresent(playerUuid, (uuid, cached) -> result.row);
+                    }
+                    return result;
+                }
+                if (attempt >= MAX_WRITE_ATTEMPTS) {
+                    if (plugin != null) {
+                        plugin.getLogger().warn(failureLine + ": " + i18n("log_settings_write_contended"));
+                    }
+                    return new ChangeResult(SettingsWrite.BUSY, null);
+                }
+            }
+        } catch (RuntimeException e) {
+            if (plugin != null) {
+                plugin.getLogger().warn(e, failureLine);
+            }
+            return new ChangeResult(SettingsWrite.FAILED, null);
+        }
+    }
+
+    /** The player's stored row as it is now in the database (the canonical lowest-id row), or {@code null}. */
+    private PlayerTradeSettings readStoredRow(UUID playerUuid) {
+        List<PlayerTradeSettings> rows = rowsOf(playerUuid.toString());
+        return rows.isEmpty() ? null : selectCanonicalSettings(rows);
+    }
+
+    /**
+     * One attempt on an existing row: apply the change and write it only if the row still holds every
+     * value it was read with. Returns {@code null} when it did not (re-read and try again).
+     */
+    private ChangeResult updateWith(PlayerTradeSettings row, String playerName, SettingsChange change) {
+        WhereCondition[] asRead = valuesAsRead(row);
+        boolean renamed = playerName != null && !playerName.equals(row.getPlayerName());
+        if (renamed) {
+            row.setPlayerName(playerName);
+        }
+        boolean changed = change.apply(row);
+        if (!changed && !renamed) {
+            return new ChangeResult(SettingsWrite.UNCHANGED, row);
+        }
+        return settingsOperator.updateIf(row, asRead) ? new ChangeResult(SettingsWrite.WRITTEN, row) : null;
+    }
+
+    /**
+     * One attempt for a player with no stored row: insert one with the change applied. Returns
+     * {@code null} when another server inserted the player's row first (apply the change to that row).
+     */
+    private ChangeResult createWith(UUID playerUuid, String playerName, SettingsChange change) {
+        PlayerTradeSettings held = settingsCache.get(playerUuid);
+        PlayerTradeSettings row = held != null ? copyOf(held) : new PlayerTradeSettings(playerUuid, playerName);
+        row.setId(playerUuid.toString());
+        if (playerName != null) {
+            row.setPlayerName(playerName);
+        }
+        if (!change.apply(row) && held == null) {
+            // Nothing to record for a player with no row and no settings this server knows of.
+            return new ChangeResult(SettingsWrite.UNCHANGED, null);
+        }
+        try {
+            settingsOperator.insert(row);
+        } catch (RuntimeException insertFailed) {
+            if (readStoredRow(playerUuid) == null) {
+                throw insertFailed;
+            }
+            return null;
+        }
+        if (held != null && plugin != null) {
+            plugin.getLogger().warn(i18n("log_settings_row_recreated")
+                .replace("{PLAYER}", String.valueOf(row.getPlayerName())));
+        }
+        return new ChangeResult(SettingsWrite.WRITTEN, row);
+    }
+
+    /** A detached copy of {@code settings}, so a row built from it never shares state with the cache. */
+    private static PlayerTradeSettings copyOf(PlayerTradeSettings settings) {
+        PlayerTradeSettings copy = new PlayerTradeSettings();
+        copy.setPlayerUuid(settings.getPlayerUuid());
+        copy.setPlayerName(settings.getPlayerName());
+        copy.setTradeEnabled(settings.isTradeEnabled());
+        copy.setBlockedPlayersJson(settings.getBlockedPlayersJson());
+        copy.setTotalTrades(settings.getTotalTrades());
+        copy.setTotalMoneyTraded(settings.getTotalMoneyTraded());
+        copy.setTotalExpTraded(settings.getTotalExpTraded());
+        copy.setLastTradeTime(settings.getLastTradeTime());
+        return copy;
+    }
+
+    /**
+     * One condition per stored column, holding the value {@code row} was read with -- the
+     * compare-and-set of {@link #change}. The values are bound exactly as the framework binds them when
+     * it writes the row, so a column compares equal to the value it was read as on every backend. A
+     * column read as {@code null} cannot be compared ({@code updateIf} refuses a null value, because
+     * {@code = NULL} is never true) and is left out; this module never writes a null into any of them.
+     */
+    private static WhereCondition[] valuesAsRead(PlayerTradeSettings row) {
+        List<WhereCondition> conditions = new ArrayList<>();
+        addCondition(conditions, "player_uuid", row.getPlayerUuid());
+        addCondition(conditions, "player_name", row.getPlayerName());
+        addCondition(conditions, "trade_enabled", row.isTradeEnabled());
+        addCondition(conditions, "blocked_players", row.getBlockedPlayersJson());
+        addCondition(conditions, "total_trades", row.getTotalTrades());
+        addCondition(conditions, "total_money_traded", row.getTotalMoneyTraded());
+        addCondition(conditions, "total_exp_traded", row.getTotalExpTraded());
+        addCondition(conditions, "last_trade_time", row.getLastTradeTime());
+        return conditions.toArray(new WhereCondition[0]);
+    }
+
+    private static void addCondition(List<WhereCondition> conditions, String column, Object value) {
+        if (value != null) {
+            conditions.add(WhereCondition.builder().column(column).value(value).build());
+        }
     }
     
     /**
