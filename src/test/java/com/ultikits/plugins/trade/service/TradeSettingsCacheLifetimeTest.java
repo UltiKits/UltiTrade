@@ -204,6 +204,19 @@ class TradeSettingsCacheLifetimeTest {
         }
 
         @Test
+        @DisplayName("A change by a player online here caches the row as written, also their first row (so a deleted row can be re-created with it, UltiTrade#57)")
+        void changeWhileOnlineCachesTheWrittenRow() throws Exception {
+            TradeLogService serverA = server();
+            doReturn(player).when(Bukkit.getServer()).getPlayer(playerUuid);
+            serverA.playerJoined(player); // no row yet: nothing cached
+
+            serverA.toggleTrade(player);
+
+            assertThat(cacheOf(serverA)).containsKey(playerUuid);
+            assertThat(cacheOf(serverA).get(playerUuid).isTradeEnabled()).isFalse();
+        }
+
+        @Test
         @DisplayName("A join under a new name stores the new name and keeps every other stored value")
         void joinUnderANewNameStoresIt() throws Exception {
             server().toggleTrade(player); // off, stored as "Visitor"
