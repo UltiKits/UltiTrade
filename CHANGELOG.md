@@ -162,6 +162,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   因此两台服务器上的两次开关都会生效。若另一台服务器持续修改，模块会记录 `保存玩家设置失败：<玩家>：重试写入期间存储行一直在变化……` 并提示玩家重试（`settings_busy`）；
   存储拒绝的修改不再提示成功——玩家会收到 `settings_not_saved`，控制台日志写明玩家与错误（UltiKits/UltiTrade#54）。
 
+- A trade withdrawal or deposit whose economy call threw now logs a SEVERE line an operator can act on:
+  `Outcome unknown: taking <amount> from <player> for a trade failed with an error, so the trade treats it as not
+  taken, but the economy may have taken it. Check <player>'s balance for <amount>` (and the same for paying), with
+  the amount in full (`12345678.9`, not `1.23456789E7`). It was a WARNING that said only "it counts as refused". The
+  trade still counts such a call as refused; a call that committed and then threw is documented as a known
+  limitation (UltiKits/UltiTrade#60).
+- 交易的扣款或付款在经济插件中抛出异常时，现在记录一条服主可据以处理的 SEVERE 日志：`结果未知：交易扣除 <金额>（来自 <玩家>）时出错，交易按未扣除处理，
+  但经济插件可能已经扣除。请检查 <玩家> 的余额是否有 <金额> 的变动`（付款同理），金额完整显示（`12345678.9`，而非 `1.23456789E7`）。此前是一条只说明
+  「按拒绝处理」的 WARNING。交易仍将此类调用视为被拒绝；已生效后才抛出异常的调用作为已知限制记录在文档中（UltiKits/UltiTrade#60）。
+
 - `/ul reload UltiTrade` (and a bare `/ul reload`) no longer reports a plain success when part of this module's
   reload failed. If rescheduling the trade-log cleanup task, applying `enable-money-trade`, or voiding open trades'
   confirmations and redrawing their windows fails, or one player's open trade window cannot be redrawn, the module

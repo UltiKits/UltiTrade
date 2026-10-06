@@ -146,6 +146,7 @@ imperative GUI base classes.
 
 | ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
 |---|---|---|---|---|---|---|---|---|
+| ultitrade.money.outcome-unknown-log | A trade's withdrawal or deposit whose economy call threw is treated as not moved (the trade is refused as in `ultitrade.session.complete.money-settlement`), and one SEVERE console line says the outcome is unknown, naming the player and the exact amount and which balance to check: `log_trade_money_withdraw_threw` (`Outcome unknown: taking <amount> from <player> for a trade failed with an error, so the trade treats it as not taken, but the economy may have taken it. Check <player>'s balance for <amount>`) or `log_trade_money_deposit_threw` (the same for paying). The amount is printed in full (`12345678.9`, never `1.23456789E7`). A call that committed and then threw is the known limitation below (`UltiKits/UltiTrade#60`, maintainer decision of 2026-10-06). ID convention exception: the plan that added this row (Phase 17 plan 17-83) fixed the ID, whose `money` area names no section of this document; it sits with the trade-settlement rows | event | an economy call that throws while a trade's money is settled | n/a | n/a | admin | detailed | TradeService#moved |
 | ultitrade.session.cancel | Cancel the sender's own currently active trade (session or pending confirmation), returning both sides' placed items to their original owners (overflow drops on the ground rather than being discarded) and logging the cancellation. Every path that cancels a trade does the same; the stake of a participant the server cannot find at that moment is kept for them (`ultitrade.persistence.pending-stake-return`) | command | `/trade cancel` | ultitrade.use | player | player | detailed | TradeCommand#cancel, TradeService#cancelTrade(Player), TradeService#cancelTrade(TradeSession,String) |
 | ultitrade.session.chat-input | Capture the next chat line from a player who clicked the money or experience slot, applying it on the server thread as the new offer amount (or cancelling on the literal text `cancel`), with balance/experience sufficiency checks — re-entering the amount already offered changes nothing and clears no confirmation; the chat message itself is always cancelled (never broadcast) while an input is pending | event | click the money or experience slot in `TradeGUI`, then send any chat message | n/a | n/a | player | detailed | TradeListener#onPlayerChat |
 | ultitrade.session.close-cancels | Closing the trade GUI (any means: Escape, another inventory, `/trade cancel` uses its own path) while a trade is still in the `TRADING` state cancels the trade one tick later, UNLESS the close was itself caused by opening the money/experience chat-input prompt of that same trade (a prompt left over from an earlier, cancelled trade does not count, `UltiKits/UltiTrade#40`) | event | close the `TradeGUI` inventory while a trade is active and no chat input is pending | n/a | n/a | player | detailed | TradeListener#onInventoryClose |
@@ -304,3 +305,17 @@ appears outside one.
 | ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
 |---|---|---|---|---|---|---|---|---|
 | ultitrade.i18n.language | All of this module's chat, window, BossBar, placeholder, command-description and console text in the server's language: `lang/en.yml` under `language: en`, `lang/zh.yml` under `language: zh` | config | framework `config.yml: language` | n/a | both | admin | none | `lang/en.yml`, `lang/zh.yml`, every `i18n(...)` call |
+
+## Known limitations
+
+- **An economy or storage call that committed and then threw is treated as not applied.** A trade's
+  withdrawal or deposit whose call threw counts as not moved, so if the economy had in fact applied it
+  (its storage committed and the connection was lost before the answer arrived), money is created (a
+  deposit: the payer is refunded and the payee keeps the payment) or destroyed (a withdrawal: never
+  refunded). Reading the balance again cannot tell, because other writers may change it too. The SEVERE
+  line of `ultitrade.money.outcome-unknown-log` names whose balance to check and for how much
+  (`UltiKits/UltiTrade#60`). The claim of a saved stake (`trade_pending_returns`) already reads its row
+  again after a throw and logs the outcome when the row changed (`UltiKits/UltiTrade#56`).
+- **On Paper a failed player-data save is not reported to the module.** `Player#saveData()` logs
+  vanilla's own `Failed to save player data for <name>` and returns normally, so the module's "player
+  save failed" branch is not reached on Paper (`UltiKits/UltiTrade#60`).

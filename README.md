@@ -231,6 +231,16 @@ private String guiTitle = "&6与 {PLAYER} 交易";
 - **All servers sharing one database must run the same UltiTrade version.** Stop them all, upgrade, then
   start them: a server still running a build from before UltiKits/UltiTrade#55 does not know the CLAIMED
   state and can hand over an entry that an upgraded server holds.
+- **A trade payment that committed and then failed counts as not made.** If the economy plugin's
+  withdrawal or deposit throws an error after its storage had already applied it (the connection was lost
+  before the answer arrived), the trade treats it as not moved: money can then be created (a deposit:
+  the payer is refunded and the payee keeps the payment) or destroyed (a withdrawal: never refunded).
+  The console logs a SEVERE line beginning `Outcome unknown:` that names the player and the exact amount;
+  check that player's balance for that amount and correct it by hand (UltiKits/UltiTrade#60). Reading the
+  balance again cannot settle it, because other plugins or servers may change it too.
+- **On Paper a failed player-data save is not reported to the module.** Paper's `Player#saveData()` logs
+  its own `Failed to save player data for <name>` and returns normally, so the module cannot tell a stake
+  hand-over's player save failed (UltiKits/UltiTrade#60).
 - **服务器在发还保存的押入物品时崩溃，这次发还会被暂扣，交由服主处理。** 交易取消时若服务器找不到一方，其押入物品保存在
   `trade_pending_returns` 中，并在其下次进服时发还。该表记录每次发还的状态：发还前进服会将条目标记为「已占用」（只有一台服务器能成功），
   玩家数据保存完成后再删除条目（UltiKits/UltiTrade#55）。因崩溃（或保存失败）而停留在「已占用」状态的条目不会再自动发还，因为仅凭该表无法判断物品是否已送达。
@@ -239,6 +249,12 @@ private String guiTitle = "&6与 {PLAYER} 交易";
   条目被暂扣期间，玩家每次进服都会收到一条提示：有待返还物品正在等待管理员核对（含笔数）。
 - **共享同一数据库的所有服务器必须运行同一版本的 UltiTrade。** 请全部停服、升级后再启动：仍运行 UltiKits/UltiTrade#55 之前版本的服务器不认识「已占用」状态，
   可能发还已被暂扣的条目。
+- **已在经济插件中生效、随后才报错的交易付款按未付款处理。** 若经济插件的扣款或付款在其存储已经生效后才抛出错误（应答返回前连接中断），
+  交易会按未转移处理：此时可能凭空产生金币（付款：付款方被退款而收款方保留了这笔钱）或使金币消失（扣款：永远不会退还）。
+  控制台会记录一条以 `结果未知：` 开头的 SEVERE 日志，写明玩家与精确金额；请检查该玩家的余额是否有这笔金额的变动并手动更正（UltiKits/UltiTrade#60）。
+  重新读取余额无法判断，因为其他插件或服务器也可能修改余额。
+- **在 Paper 上，玩家数据保存失败不会通知本模块。** Paper 的 `Player#saveData()` 只记录其自身的 `Failed to save player data for <name>` 并正常返回，
+  因此本模块无法得知押入物品发还时的玩家数据保存失败（UltiKits/UltiTrade#60）。
 
 ## 📜 许可证
 

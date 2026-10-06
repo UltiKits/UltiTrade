@@ -1088,6 +1088,12 @@ public class TradeService {
     /**
      * One withdrawal ({@code withdraw}) or deposit through the economy. Returns whether the economy
      * reported success; a refused response, a missing one and a thrown exception all count as not moved.
+     * <p>
+     * A thrown exception does not say whether the economy applied the call before it failed (its storage
+     * may have committed and then lost the connection), so the trade treats it as not moved and logs one
+     * SEVERE line saying the outcome is unknown and naming the player and the exact amount, so an operator
+     * can check that balance (UltiKits/UltiTrade#60; maintainer decision of 2026-10-06). Reading the
+     * balance again cannot settle it: another writer may have changed it too.
      */
     private boolean moved(Object economy, Player player, double amount, boolean withdraw) {
         try {
@@ -1096,9 +1102,10 @@ public class TradeService {
             return response != null && response.transactionSuccess();
         } catch (RuntimeException e) {
             String template = withdraw ? i18n("log_trade_money_withdraw_threw") : i18n("log_trade_money_deposit_threw");
-            logQuietly(() -> plugin.getLogger().warn(e, template
-                    .replace("{PLAYER}", player.getName())
-                    .replace("{AMOUNT}", String.valueOf(amount))));
+            String line = Placeholders.fill(template,
+                    "{PLAYER}", player.getName(),
+                    "{AMOUNT}", BigDecimal.valueOf(amount).toPlainString()); // exact: the operator checks this amount
+            logQuietly(() -> plugin.getLogger().error(e, line));
             return false;
         }
     }
