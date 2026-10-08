@@ -29,6 +29,23 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- This version requires UltiTools 6.3.0 or later and declares `api-version: 630` in `plugin.yml`
+  (it was `621`). An older framework refuses the module before its start-up runs, with a warning
+  that the UltiTools version is outdated; the refusal names the module by its `plugin.yml` `name:`,
+  `UltiTrade`. The README's framework minimum and badge now say UltiTools 6.3.0+, and its install
+  step says a server restart is needed to load the module (`/ul reload` does not load a new module
+  jar) (UltiKits/UltiTools-Reborn#544).
+- 本版本需要 UltiTools 6.3.0 或更高版本，并在 `plugin.yml` 中声明 `api-version: 630`（原为 `621`）。更早的框架会在模块的启动逻辑
+  运行之前拒绝加载它，并给出 UltiTools 版本过旧的警告；拒绝信息以 `plugin.yml` 的 `name:` 即 `UltiTrade` 指代本模块。
+  README 中的框架最低版本与徽章已改为 UltiTools 6.3.0+，安装步骤改为需要重启服务器（`/ul reload` 不会加载新的模块 JAR）
+  （UltiKits/UltiTools-Reborn#544）。
+- `plugin.yml` now declares `identify-string: ultitrade`, the key of this module's entry in the
+  UltiCloud catalogue. The framework's update check and `/upm update` skip a module that does not
+  declare it, so this module now takes part in both: a later published version carrying the same key
+  is reported at startup and can be installed with `/upm update` (UltiKits/UltiTools-Reborn#474).
+- `plugin.yml` 现在声明 `identify-string: ultitrade`，即本模块在 UltiCloud 模块目录中的条目键。框架的更新检查和
+  `/upm update` 会跳过未声明该键的模块，因此本模块现在会参与两者：带有同一键的更高发布版本会在启动时提示，
+  并可用 `/upm update` 安装（UltiKits/UltiTools-Reborn#474）。
 - Message and title settings in `config/trade.yml` — the trade-window title (`gui-title`) and the seven
   messages (`messages.request-sent`, `request-received`, `request-timeout`, `trade-complete`,
   `trade-cancelled`, `trade-disabled`, `player-blocked`) — are written in the server's language when the
