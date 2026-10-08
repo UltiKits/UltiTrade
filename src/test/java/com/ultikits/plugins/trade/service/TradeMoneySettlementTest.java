@@ -29,9 +29,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 /**
@@ -319,7 +321,8 @@ class TradeMoneySettlementTest {
     void failedRefundIsLoggedSevere() throws Exception {
         TradeSession session = openTrade();
         withdrawFault.put(bob.getUniqueId(), "refuse");
-        depositFault.put(alice.getUniqueId(), "throw-always"); // Alice's refund cannot be written
+        // Alice's refund is refused (a refused call is certain; a thrown one logs the outcome-unknown line instead, gate-1 F6)
+        depositFault.put(alice.getUniqueId(), "refuse-always");
 
         service.completeTrade(session);
 
@@ -343,7 +346,7 @@ class TradeMoneySettlementTest {
         TradeSession session = openTrade();
         session.setMoney(alice.getUniqueId(), 0.005);
         withdrawFault.put(bob.getUniqueId(), "refuse");
-        depositFault.put(alice.getUniqueId(), "throw-always");
+        depositFault.put(alice.getUniqueId(), "refuse-always"); // refused, so the certain refund line is the one logged (gate-1 F6)
 
         service.completeTrade(session);
 
@@ -361,6 +364,108 @@ class TradeMoneySettlementTest {
         assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
         assertThat(balance(alice)).isEqualTo(1000.0);
         assertThat(balance(bob)).isEqualTo(1000.0);
+        assertNoItemsMoved();
+    }
+
+    /** The outcome-unknown line of {@code key} (`lang/en.yml`), filled as the module fills it. */
+    private static String outcomeUnknown(String key, String player, String amount) {
+        return CatalogueText.text("en", key).replace("{PLAYER}", player).replace("{AMOUNT}", amount);
+    }
+
+    @Test
+    @DisplayName("A withdrawal that throws logs one SEVERE outcome-unknown line naming the player and the exact amount, no WARNING; the trade is still refused (UltiTrade#60)")
+    void throwingWithdrawalLogsOutcomeUnknownAtSevere() throws Exception {
+        TradeSession session = openTrade();
+        balances.put(bob.getUniqueId(), 20000000.0); // enough to pass the balance check made before anything moves
+        session.setMoney(bob.getUniqueId(), 12345678.9); // String.valueOf would print 1.23456789E7
+        withdrawFault.put(bob.getUniqueId(), "throw");
+
+        service.completeTrade(session);
+
+        verify(logger, times(1)).error(any(IllegalStateException.class),
+                eq(outcomeUnknown("log_trade_money_withdraw_threw", "Bob", "12345678.9")));
+        verify(logger, never()).warn(any(Throwable.class), anyString());
+        assertThat(session.getState()).as("the refusal behaviour is unchanged").isEqualTo(TradeSession.TradeState.CANCELLED);
+        assertThat(balance(alice)).isEqualTo(1000.0);
+        assertThat(balance(bob)).isEqualTo(20000000.0);
+        assertNoItemsMoved();
+    }
+
+    @Test
+    @DisplayName("A deposit that throws logs one SEVERE outcome-unknown line naming the payee and the exact amount, no WARNING; the payer is still refunded (UltiTrade#60)")
+    void throwingDepositLogsOutcomeUnknownAtSevere() throws Exception {
+        TradeSession session = openTrade();
+        depositFault.put(bob.getUniqueId(), "throw"); // Alice's 90 (100 less 10% tax) to Bob throws
+
+        service.completeTrade(session);
+
+        verify(logger, times(1)).error(any(IllegalStateException.class),
+                eq(outcomeUnknown("log_trade_money_deposit_threw", "Bob", "90.0")));
+        verify(logger, never()).warn(any(Throwable.class), anyString());
+        assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+        assertThat(balance(alice)).as("Alice refunded in full").isEqualTo(1000.0);
+        assertNoItemsMoved();
+    }
+
+    @Test
+    @DisplayName("Both outcome-unknown lines say the outcome is unknown and which balance to check, in every catalogue (UltiTrade#60)")
+    void outcomeUnknownLinesSayWhatToCheck() {
+        for (String key : new String[] {"log_trade_money_withdraw_threw", "log_trade_money_deposit_threw"}) {
+            assertThat(CatalogueText.text("en", key)).as(key).startsWith("Outcome unknown:")
+                    .contains("Check {PLAYER}'s balance for {AMOUNT}");
+            assertThat(CatalogueText.text("zh", key)).as(key).startsWith("结果未知：")
+                    .contains("{PLAYER}").contains("{AMOUNT}");
+        }
+    }
+
+    @Test
+    @DisplayName("A refund that throws logs only the outcome-unknown line for the payer, never the certain 'give it back by hand' line (gate-1 F6 of PR #66)")
+    void thrownRefundLogsOnlyTheOutcomeUnknownLine() throws Exception {
+        TradeSession session = openTrade();
+        withdrawFault.put(bob.getUniqueId(), "refuse");
+        depositFault.put(alice.getUniqueId(), "throw-always"); // Alice's refund throws: it may have been applied
+
+        service.completeTrade(session);
+
+        verify(logger, times(1)).error(any(IllegalStateException.class),
+                eq(outcomeUnknown("log_trade_money_deposit_threw", "Alice", "100.0")));
+        verify(logger, never()).error(argThat((String line) -> line.contains("could not be given back")));
+        assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+        assertNoItemsMoved();
+    }
+
+    @Test
+    @DisplayName("A take-back that throws logs only the outcome-unknown line for the payee, never the certain 'take it back by hand' line (gate-1 F6 of PR #66)")
+    void thrownTakeBackLogsOnlyTheOutcomeUnknownLine() throws Exception {
+        TradeSession session = openTrade();
+        // Alice's 90 to Bob lands; Bob's 180 to Alice is refused; taking the 90 back from Bob throws.
+        depositFault.put(alice.getUniqueId(), "refuse");
+        afterDepositFault = () -> withdrawFault.put(bob.getUniqueId(), "throw");
+
+        service.completeTrade(session);
+
+        verify(logger, times(1)).error(any(IllegalStateException.class),
+                eq(outcomeUnknown("log_trade_money_withdraw_threw", "Bob", "90.0")));
+        verify(logger, never()).error(argThat((String line) -> line.contains("could not be taken back")));
+        assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+        assertNoItemsMoved();
+    }
+
+    @Test
+    @DisplayName("A thrown deposit of a NaN amount (trade-tax: .nan) is logged with 'NaN' and the trade is still undone; nothing escapes the money path (gate-1 F5 of PR #66)")
+    void nanAmountInAThrownCallIsLoggedNotThrown() throws Exception {
+        TradeConfig config = UltiTradeTestHelper.getField(service, "config");
+        lenient().when(config.getTradeTax()).thenReturn(Double.NaN);
+        TradeSession session = openTrade();
+        depositFault.put(bob.getUniqueId(), "throw"); // Alice's NaN deposit to Bob throws
+
+        service.completeTrade(session);
+
+        verify(logger, times(1)).error(any(IllegalStateException.class),
+                eq(outcomeUnknown("log_trade_money_deposit_threw", "Bob", "NaN")));
+        assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+        assertThat(balance(alice)).as("Alice refunded").isEqualTo(1000.0);
+        assertThat(balance(bob)).as("Bob refunded").isEqualTo(1000.0);
         assertNoItemsMoved();
     }
 }

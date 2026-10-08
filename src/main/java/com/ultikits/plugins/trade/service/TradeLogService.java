@@ -7,6 +7,7 @@ import com.ultikits.plugins.trade.entity.TradeSession;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.Autowired;
 import com.ultikits.ultitools.annotations.Service;
+import com.ultikits.ultitools.entities.WhereCondition;
 import com.ultikits.ultitools.interfaces.DataOperator;
 
 import org.bukkit.Bukkit;
@@ -17,6 +18,8 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Service for managing trade logs and player settings.
@@ -35,6 +38,81 @@ public class TradeLogService {
     
     // Player settings cache
     private final Map<UUID, PlayerTradeSettings> settingsCache = new ConcurrentHashMap<>();
+
+    /**
+     * Per-player write order on this server. Every settings write -- a command's change on the main thread, the
+     * post-trade statistics off it, a rename at join -- and every fill of the cache from a read holds the player's
+     * lock, together with publishing its result to the cache, so the cache follows the order of this server's writes
+     * for that player (comparing a background write's read values with the cached entry let two overlapping writes
+     * publish out of order, Codex run 2 on PR #66). One lock per player: no player waits for another player's write
+     * (maintainer decision 2026-10-06, gate-1 top-up T1).
+     * <p>
+     * <b>No entry outlives its use.</b> An entry counts the threads holding or waiting for its lock; the count changes
+     * only inside {@code ConcurrentHashMap#compute} for the player's key, so it is exact, and the entry is removed when
+     * the count reaches zero. Every {@link #acquire} that returns an entry is paired with a {@link #release} in a
+     * {@code finally}. A quit removes nothing: removing the entry while a background write holds it would let the next
+     * writer create a second lock for the same player, and two writes would run at once. An entry is removed only when
+     * no thread holds or waits for it, so an entry created after the removal is equivalent to the removed one.
+     */
+    private final Map<UUID, PlayerLock> writeLocks = new ConcurrentHashMap<>();
+
+    /**
+     * How long the main thread waits for a player's lock, about one tick (maintainer decision 2026-10-06, top-up T2).
+     * Background threads wait as long as needed.
+     */
+    static final long MAIN_THREAD_WAIT_MILLIS = 50;
+
+    /** A player's lock and the number of threads holding or waiting for it (changed only inside {@code compute}). */
+    private static final class PlayerLock {
+        final ReentrantLock lock = new ReentrantLock();
+        int users;
+    }
+
+    /**
+     * Take {@code playerUuid}'s lock: on the main thread for at most {@link #MAIN_THREAD_WAIT_MILLIS} (re-entrant: a
+     * thread already holding it gets it at once), elsewhere for as long as needed. Returns the entry to pass to
+     * {@link #release}, or {@code null} when the main thread could not get the lock in time (nothing is held then).
+     */
+    private PlayerLock acquire(UUID playerUuid) {
+        PlayerLock entry = writeLocks.compute(playerUuid, (uuid, current) -> {
+            PlayerLock lock = current != null ? current : new PlayerLock();
+            lock.users++;
+            return lock;
+        });
+        boolean held;
+        if (Bukkit.isPrimaryThread()) {
+            try {
+                held = entry.lock.tryLock(MAIN_THREAD_WAIT_MILLIS, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                held = false;
+            }
+        } else {
+            entry.lock.lock();
+            held = true;
+        }
+        if (!held) {
+            leave(playerUuid, entry);
+            return null;
+        }
+        return entry;
+    }
+
+    /** Release a lock {@link #acquire} returned. */
+    private void release(UUID playerUuid, PlayerLock entry) {
+        entry.lock.unlock();
+        leave(playerUuid, entry);
+    }
+
+    private void leave(UUID playerUuid, PlayerLock entry) {
+        writeLocks.computeIfPresent(playerUuid, (uuid, current) -> {
+            if (current != entry) {
+                return current; // cannot happen while this thread is counted in entry; kept defensive
+            }
+            current.users--;
+            return current.users == 0 ? null : current;
+        });
+    }
 
     /**
      * This module's language-file text for {@code key}, in the server's language, so the console lines
@@ -118,24 +196,15 @@ public class TradeLogService {
     
     /**
      * Shutdown the service.
+     * <p>
+     * Cached settings are discarded, never written: every change was written when it was made, and a
+     * cached copy written back here would revert whatever another server sharing the database changed
+     * since this server read it (UltiKits/UltiTrade#54; maintainer decision of 2026-10-06).
      */
     public void shutdown() {
         if (cleanupTask != null) {
             cleanupTask.cancel();
             cleanupTask = null;
-        }
-        
-        // Save all cached settings. A row deleted while the server ran is re-created (UltiKits/UltiTrade#57);
-        // a write that still reaches no row is logged like a write that threw (UltiKits/UltiTrade#52).
-        for (PlayerTradeSettings settings : settingsCache.values()) {
-            String failureLine = i18n("log_settings_save_failed").replace("{PLAYER}", String.valueOf(settings.getPlayerUuid()));
-            try {
-                if (!writeSettings(settings)) {
-                    plugin.getLogger().warn(failureLine);
-                }
-            } catch (Exception e) {
-                plugin.getLogger().warn(e, failureLine);
-            }
         }
         settingsCache.clear();
     }
@@ -150,7 +219,7 @@ public class TradeLogService {
      * @param expTax Experience tax collected
      */
     public void logCompletedTrade(TradeSession session, Player player1, Player player2,
-                                   double moneyTax, int expTax) {
+                                   double moneyTax, long expTax) {
         if (!config.isEnableTradeLog()) {
             return;
         }
@@ -293,13 +362,18 @@ public class TradeLogService {
     }
 
     /**
-     * Update player trade statistics.
+     * Add one completed trade to a player's statistics, as a compare-and-set loop through
+     * {@link #change}: the stored counters are read again and the trade added to them, written only if
+     * the row still holds what was read. A trade the player completed on another server sharing the
+     * database in the meantime is therefore added to, never overwritten (UltiKits/UltiTrade#54). A
+     * failure is logged by {@link #change}; the trade itself is already complete.
      */
-    private void updatePlayerStats(UUID playerUuid, String playerName, 
+    private void updatePlayerStats(UUID playerUuid, String playerName,
                                    double moneyTraded, int expTraded) {
-        PlayerTradeSettings settings = getOrCreateSettings(playerUuid, playerName);
-        settings.incrementTradeStats(moneyTraded, expTraded);
-        saveSettings(settings);
+        change(playerUuid, playerName, row -> {
+            row.incrementTradeStats(moneyTraded, expTraded);
+            return true;
+        });
     }
     
     /**
@@ -332,65 +406,155 @@ public class TradeLogService {
     }
     
     // ==================== Player Settings Management ====================
-    
+
+    /*
+     * The settings cache (UltiKits/UltiTrade#54; maintainer decision of 2026-10-06 00:04).
+     *
+     * settingsCache is a READ cache scoped to a player's time on this server: an entry is added when the
+     * player joins (playerJoined) or on the first read while they are online here (cacheIfOnline), holds
+     * the row as written after each change (rememberWritten), and is dropped when they quit
+     * (playerQuit) and at shutdown. Nothing is ever written from it: every change re-reads the stored row
+     * and writes conditionally, so a copy held here can never revert what another server sharing the
+     * database changed.
+     */
+
     /**
-     * Get or create player settings.
+     * Load a joining player's stored settings into the cache. A player with no stored row is not
+     * cached (their first change creates the row). When the stored name differs from the player's
+     * current name, the name is written through {@link #change}, so nothing else in the row is touched.
+     *
+     * @param player the player who joined this server
+     */
+    public void playerJoined(Player player) {
+        UUID playerUuid = player.getUniqueId();
+        PlayerLock held = acquire(playerUuid);
+        if (held == null) {
+            // A write of this player is in progress beyond the main thread's wait: skip the cache. A read published now
+            // could be older than that write; the player's first read once it is done caches the stored row.
+            return;
+        }
+        try {
+            PlayerTradeSettings row = readStoredRow(playerUuid);
+            if (row == null) {
+                return;
+            }
+            if (!player.getName().equals(row.getPlayerName())) {
+                ChangeResult renamed = change(playerUuid, player.getName(), unchanged -> false);
+                if (renamed.row != null) {
+                    row = renamed.row;
+                }
+            }
+            settingsCache.put(playerUuid, row);
+        } finally {
+            release(playerUuid, held);
+        }
+    }
+
+    /**
+     * Drop a player who left this server from the cache. Nothing is written: every change was written
+     * when it was made, and the copy held here may be older than what another server has stored since.
+     *
+     * @param playerUuid the player who quit
+     */
+    public void playerQuit(UUID playerUuid) {
+        settingsCache.remove(playerUuid);
+    }
+
+    /**
+     * Cache {@code row} for {@code playerUuid} if that player is online on this server and not cached
+     * yet (a player who joined before this module was loaded), on the main thread only. A player who is not online here -- an
+     * offline player's placeholder, for example -- is never cached, so no entry outlives a player's
+     * time on this server.
+     */
+    private void cacheIfOnline(UUID playerUuid, PlayerTradeSettings row) {
+        // Main thread only, as rememberWritten: a read off it (a placeholder evaluated as the player quits) could add the
+        // entry after the quit handler dropped it (gate-1 F4 of PR #66).
+        if (row != null && Bukkit.isPrimaryThread() && Bukkit.getPlayer(playerUuid) != null) {
+            settingsCache.putIfAbsent(playerUuid, row);
+        }
+    }
+
+    /**
+     * After a write, the cache holds the row as written: an existing entry is replaced, and on the main
+     * thread an entry is added for a player online here (their first row was created after they joined,
+     * so the next change can re-create it with these settings if it is deleted, UltiKits/UltiTrade#57).
+     * Off the main thread -- the post-trade statistics -- an entry is only replaced, never added, so a
+     * write finishing after the player quit cannot bring their entry back.
+     */
+    private void rememberWritten(UUID playerUuid, PlayerTradeSettings row) {
+        // Called holding the player's lock (change), so the last publication is the last write.
+        if (Bukkit.isPrimaryThread() && Bukkit.getPlayer(playerUuid) != null) {
+            settingsCache.put(playerUuid, row);
+        } else {
+            settingsCache.computeIfPresent(playerUuid, (uuid, cached) -> row);
+        }
+    }
+
+    /**
+     * Get or create player settings: the cached settings of a player online here, otherwise the stored
+     * row, created (with the defaults) when there is none. A stored name that differs from
+     * {@code playerName} is updated through {@link #change}.
      *
      * @param playerUuid Player UUID
      * @param playerName Player name
-     * @return PlayerTradeSettings instance
+     * @return the player's settings; read-only -- a change goes through this service's change methods
      */
     public PlayerTradeSettings getOrCreateSettings(UUID playerUuid, String playerName) {
-        // Check cache first
         PlayerTradeSettings cached = settingsCache.get(playerUuid);
         if (cached != null) {
             return cached;
         }
-        
-        // Try to load from database
-        List<PlayerTradeSettings> existing = settingsOperator.query()
-            .where("player_uuid").eq(playerUuid.toString())
-            .list();
-        
-        PlayerTradeSettings settings;
-        if (existing != null && !existing.isEmpty()) {
-            settings = selectCanonicalSettings(existing);
-            // Update name if changed
-            if (!playerName.equals(settings.getPlayerName())) {
-                settings.setPlayerName(playerName);
-                saveSettings(settings);
-            }
-        } else {
-            settings = createSettings(playerUuid, playerName);
+        PlayerLock held = acquire(playerUuid);
+        if (held == null) {
+            // Main thread, a write of this player in progress: read without caching (an insert never overwrites).
+            PlayerTradeSettings stored = readStoredRow(playerUuid);
+            return stored != null ? stored : createSettings(playerUuid, playerName);
         }
-        
-        settingsCache.put(playerUuid, settings);
-        return settings;
+        try {
+            PlayerTradeSettings settings = readStoredRow(playerUuid);
+            if (settings == null) {
+                settings = createSettings(playerUuid, playerName);
+            } else if (playerName != null && !playerName.equals(settings.getPlayerName())) {
+                ChangeResult renamed = change(playerUuid, playerName, unchanged -> false);
+                if (renamed.row != null) {
+                    settings = renamed.row;
+                }
+            }
+            cacheIfOnline(playerUuid, settings);
+            return settings;
+        } finally {
+            release(playerUuid, held);
+        }
     }
-    
+
     /**
-     * Get player settings (may return null if not found).
+     * Get player settings (may return null if not found): the cached settings of a player online here,
+     * otherwise the stored row.
      *
      * @param playerUuid Player UUID
-     * @return PlayerTradeSettings or null
+     * @return PlayerTradeSettings or null; read-only
      */
     public PlayerTradeSettings getSettings(UUID playerUuid) {
         PlayerTradeSettings cached = settingsCache.get(playerUuid);
         if (cached != null) {
             return cached;
         }
-
-        List<PlayerTradeSettings> existing = settingsOperator.query()
-            .where("player_uuid").eq(playerUuid.toString())
-            .list();
-        
-        if (existing != null && !existing.isEmpty()) {
-            PlayerTradeSettings settings = selectCanonicalSettings(existing);
-            settingsCache.put(playerUuid, settings);
-            return settings;
+        if (!Bukkit.isPrimaryThread()) {
+            return readStoredRow(playerUuid); // never cached off the main thread (cacheIfOnline): no ordering needed
         }
-        
-        return null;
+        PlayerLock held = acquire(playerUuid);
+        if (held == null) {
+            // A write of this player is in progress beyond the main thread's wait: read without caching. Only a
+            // publication can put the cache out of write order; a read that publishes nothing cannot.
+            return readStoredRow(playerUuid);
+        }
+        try {
+            PlayerTradeSettings settings = readStoredRow(playerUuid);
+            cacheIfOnline(playerUuid, settings);
+            return settings;
+        } finally {
+            release(playerUuid, held);
+        }
     }
 
     private PlayerTradeSettings selectCanonicalSettings(List<PlayerTradeSettings> existing) {
@@ -405,13 +569,23 @@ public class TradeLogService {
      * A new row's id is the player's UUID, not a random one, so two servers sharing a database that both
      * read "no row" and both create one address the same primary key: the second insert fails instead of
      * adding a second row, and that server takes the row the first one wrote (UltiKits/UltiTrade#57).
+     * An insert never overwrites a stored row, so it cannot revert another server's change
+     * (UltiKits/UltiTrade#54).
      */
     private PlayerTradeSettings createSettings(UUID playerUuid, String playerName) {
         PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, playerName);
         settings.setId(playerUuid.toString());
         try {
             settingsOperator.insert(settings);
-            return settings;
+            // The stored row, not this object: the JSON backend ignores an insert whose id another writer on this
+            // server stored first, and returns normally (Codex run 1 on PR #66).
+            PlayerTradeSettings stored = readStoredRow(playerUuid);
+            if (stored == null) {
+                throw new IllegalStateException("the inserted trade settings row of " + playerUuid + " is not stored");
+            }
+            return stored;
+        } catch (IllegalStateException notStored) {
+            throw notStored;
         } catch (RuntimeException insertFailed) {
             List<PlayerTradeSettings> existing = rowsOf(playerUuid.toString());
             if (existing.isEmpty()) {
@@ -429,72 +603,6 @@ public class TradeLogService {
     }
 
     /**
-     * Save player settings. A write that matched no stored row -- the row was deleted while the server
-     * ran, and this cached object still carries its id -- re-creates the row (UltiKits/UltiTrade#57); a
-     * save that still reaches no row is logged with the same line as a write that threw, instead of
-     * passing as saved (UltiKits/UltiTrade#52).
-     *
-     * @param settings Settings to save
-     */
-    public void saveSettings(PlayerTradeSettings settings) {
-        String failureLine = i18n("log_settings_write_failed");
-        submitLogWrite(failureLine, () -> {
-            if (!writeSettings(settings) && plugin != null) {
-                plugin.getLogger().warn(failureLine);
-            }
-        });
-    }
-
-    /**
-     * Write {@code settings} over its stored row, re-creating the row when the write matched none
-     * (maintainer decision of 2026-10-04, UltiKits/UltiTrade#57). Returns whether a stored row now holds
-     * the settings.
-     * <p>
-     * The row is re-created so that later reads find it and no second row appears:
-     * <ul>
-     *   <li>reads select by {@code player_uuid} and take the lowest id, so if another server has already
-     *       created a row for this player, the settings are written onto that row (and this object takes
-     *       its id) rather than inserted beside it;</li>
-     *   <li>otherwise the row is inserted under the player's UUID as its id -- the id every server derives
-     *       for this player, also for a first row ({@link #createSettings}) -- so two servers re-creating
-     *       at once address one primary key; the loser's insert fails, and its write lands on the row the
-     *       winner inserted.</li>
-     * </ul>
-     * The values written are this server's current copy; when two servers hold different copies, the
-     * last write wins, as for any save (UltiKits/UltiTrade#54).
-     */
-    private boolean writeSettings(PlayerTradeSettings settings) {
-        if (settingsOperator.updateCounted(settings) > 0) {
-            return true;
-        }
-        List<PlayerTradeSettings> existing = rowsOf(settings.getPlayerUuid());
-        if (!existing.isEmpty()) {
-            settings.setId(selectCanonicalSettings(existing).getId());
-            return settingsOperator.updateCounted(settings) > 0;
-        }
-        settings.setId(settings.getPlayerUuid());
-        RuntimeException insertFailed = null;
-        try {
-            settingsOperator.insert(settings);
-        } catch (RuntimeException e) {
-            insertFailed = e; // another server inserted the same id first: the write below lands on its row
-        }
-        // Also after an insert that returned normally: the JSON backend ignores an insert whose id it
-        // already holds, so only this write proves the row holds these settings.
-        if (settingsOperator.updateCounted(settings) > 0) {
-            if (plugin != null) {
-                plugin.getLogger().warn(i18n("log_settings_row_recreated")
-                    .replace("{PLAYER}", String.valueOf(settings.getPlayerName())));
-            }
-            return true;
-        }
-        if (insertFailed != null) {
-            throw insertFailed;
-        }
-        return false;
-    }
-    
-    /**
      * Check if player has trade enabled.
      *
      * @param playerUuid Player UUID
@@ -509,13 +617,29 @@ public class TradeLogService {
      * Toggle trade status for player.
      *
      * @param player Player
-     * @return new trade enabled status
+     * @return the trade-enabled state now stored: the toggled state when it was written, otherwise the
+     *         state as it is (see {@link #toggle} for whether the write happened)
      */
     public boolean toggleTrade(Player player) {
-        PlayerTradeSettings settings = getOrCreateSettings(player.getUniqueId(), player.getName());
-        settings.setTradeEnabled(!settings.isTradeEnabled());
-        saveSettings(settings);
-        return settings.isTradeEnabled();
+        SettingsChangeResult result = toggle(player);
+        return result.getSettings() != null ? result.getSettings().isTradeEnabled() : isTradeEnabled(player.getUniqueId());
+    }
+
+    /**
+     * Flip {@code player}'s trading on or off, through {@link #change}: the stored state is read again
+     * and flipped, written only if the row still holds what was read. The state flipped is the stored
+     * one, so a toggle another server made in the meantime is not reverted -- both toggles count
+     * (UltiKits/UltiTrade#54).
+     *
+     * @param player the player toggling
+     * @return what happened, and the settings as now stored ({@code null} unless written)
+     */
+    public SettingsChangeResult toggle(Player player) {
+        ChangeResult result = change(player.getUniqueId(), player.getName(), row -> {
+            row.setTradeEnabled(!row.isTradeEnabled());
+            return true;
+        });
+        return new SettingsChangeResult(result.write, result.write == SettingsWrite.WRITTEN ? result.row : null);
     }
     
     /**
@@ -538,12 +662,265 @@ public class TradeLogService {
      * @return true if blocked successfully
      */
     public boolean blockPlayer(Player player, UUID targetUuid) {
-        PlayerTradeSettings settings = getOrCreateSettings(player.getUniqueId(), player.getName());
-        boolean result = settings.blockPlayer(targetUuid.toString());
-        if (result) {
-            saveSettings(settings);
+        return block(player, targetUuid) == SettingsWrite.WRITTEN;
+    }
+
+    /**
+     * Add {@code targetUuid} to {@code player}'s blocklist, through {@link #change}: the stored row is
+     * read again and only the block is added to it, so a setting another server changed is kept.
+     *
+     * @param player     the player doing the blocking
+     * @param targetUuid the player to block
+     * @return {@link SettingsWrite#WRITTEN}; {@link SettingsWrite#UNCHANGED} when the stored list already
+     *         holds the target; {@link SettingsWrite#BUSY} or {@link SettingsWrite#FAILED} when nothing
+     *         could be written
+     */
+    public SettingsWrite block(Player player, UUID targetUuid) {
+        String target = targetUuid.toString();
+        return change(player.getUniqueId(), player.getName(), row -> row.blockPlayer(target)).write;
+    }
+
+    // ==================== Conditional settings writes (UltiKits/UltiTrade#54) ====================
+
+    /**
+     * How many times one settings change is tried before it is given up as contended -- the same bound
+     * as UltiEconomy's balance changes (UltiKits/UltiEconomy#41).
+     */
+    static final int MAX_WRITE_ATTEMPTS = 3;
+
+    /** What one settings change did. */
+    public enum SettingsWrite {
+        /** The change was written to the stored row. */
+        WRITTEN,
+        /** The stored row already held what the change asked for; nothing was written. */
+        UNCHANGED,
+        /**
+         * The stored row changed again on every attempt (another server is writing it); nothing was
+         * written, and the player is asked to try again.
+         */
+        BUSY,
+        /** The storage failed; nothing was written. */
+        FAILED
+    }
+
+    /** One change to a player's settings, applied to the row as read. Returns whether it changed anything. */
+    @FunctionalInterface
+    private interface SettingsChange {
+        boolean apply(PlayerTradeSettings row);
+    }
+
+    /** The result of {@link #change}: what happened, and the row as now stored ({@code null} when unknown). */
+    private static final class ChangeResult {
+        final SettingsWrite write;
+        final PlayerTradeSettings row;
+
+        ChangeResult(SettingsWrite write, PlayerTradeSettings row) {
+            this.write = write;
+            this.row = row;
         }
-        return result;
+    }
+
+    /** What a settings change did, and the settings as now stored. */
+    public static final class SettingsChangeResult {
+        private final SettingsWrite write;
+        private final PlayerTradeSettings settings;
+
+        /**
+         * @param write    what the change did
+         * @param settings the settings as now stored when the change was written; otherwise {@code null}
+         */
+        public SettingsChangeResult(SettingsWrite write, PlayerTradeSettings settings) {
+            this.write = write;
+            this.settings = settings;
+        }
+
+        /** @return what the change did */
+        public SettingsWrite getWrite() {
+            return write;
+        }
+
+        /** @return the settings as now stored when the change was written; otherwise {@code null} */
+        public PlayerTradeSettings getSettings() {
+            return settings;
+        }
+    }
+
+    /**
+     * Apply one change to a player's stored settings so that it can never revert a change another server
+     * sharing the database made (UltiKits/UltiTrade#54; maintainer decision of 2026-10-06, the UltiEconomy
+     * pattern).
+     * <p>
+     * The row is read from the database -- never from the cache -- the change is applied to it, and it is
+     * written with {@code DataOperator#updateIf} conditioned on <b>every</b> value it was read with.
+     * {@code updateIf} writes every column, so conditioning on all of them is what makes the write change
+     * only what this change changed: if any column moved since the read, nothing is written, the row is
+     * read again and the change decided again on the new values, at most {@link #MAX_WRITE_ATTEMPTS} times.
+     * The player's live name is written with the change when the stored one differs.
+     * <p>
+     * A player with no stored row gets one, under the player's UUID as id (as {@link #createSettings}):
+     * built from the settings this server last held for the player when it holds any -- the row was
+     * deleted while the server ran, and the maintainer's decision of 2026-10-04 re-creates it with the
+     * current settings (UltiKits/UltiTrade#57) -- and from the defaults otherwise. When another server
+     * inserts the same id first, the insert fails and the change is applied to that server's row instead.
+     * <p>
+     * After a write, the cache holds the row as written ({@link #rememberWritten}), in this server's write order.
+     * A failure is logged with the player named and nothing is written: a contended row with the reason,
+     * a storage error with its exception.
+     */
+    private ChangeResult change(UUID playerUuid, String playerName, SettingsChange change) {
+        String failureLine = i18n("log_settings_save_failed").replace("{PLAYER}", String.valueOf(playerName));
+        PlayerLock held = acquire(playerUuid);
+        if (held == null) {
+            // Main thread only: another write of this player did not finish within about one tick. Nothing is read or
+            // written; the command answers settings_busy, as for a contended row (maintainer decision 2026-10-06).
+            return new ChangeResult(SettingsWrite.BUSY, null);
+        }
+        try {
+            return changeInOrder(playerUuid, playerName, change, failureLine);
+        } finally {
+            release(playerUuid, held);
+        }
+    }
+
+    /** {@link #change}, holding the player's lock. */
+    private ChangeResult changeInOrder(UUID playerUuid, String playerName, SettingsChange change, String failureLine) {
+        try {
+            for (int attempt = 1; ; attempt++) {
+                PlayerTradeSettings row = readStoredRow(playerUuid);
+                if (row == null) {
+                    ChangeResult unchanged = createWith(playerUuid, playerName, change);
+                    if (unchanged != null) {
+                        return unchanged;
+                    }
+                    row = readStoredRow(playerUuid);
+                    if (row == null) {
+                        // The JSON backend ignores an insert whose id it already holds, and returns normally: only
+                        // reading the row back proves one is stored (UltiKits/UltiTrade#52, #57).
+                        throw new IllegalStateException("the trade settings row of " + playerUuid + " is not stored");
+                    }
+                }
+                ChangeResult result = updateWith(row, playerName, change);
+                if (result != null) {
+                    if (result.row != null) {
+                        rememberWritten(playerUuid, result.row);
+                    }
+                    return result;
+                }
+                if (attempt >= MAX_WRITE_ATTEMPTS) {
+                    if (plugin != null) {
+                        plugin.getLogger().warn(failureLine + ": " + i18n("log_settings_write_contended"));
+                    }
+                    return new ChangeResult(SettingsWrite.BUSY, null);
+                }
+            }
+        } catch (RuntimeException e) {
+            if (plugin != null) {
+                plugin.getLogger().warn(e, failureLine);
+            }
+            return new ChangeResult(SettingsWrite.FAILED, null);
+        }
+    }
+
+    /** The player's stored row as it is now in the database (the canonical lowest-id row), or {@code null}. */
+    private PlayerTradeSettings readStoredRow(UUID playerUuid) {
+        List<PlayerTradeSettings> rows = rowsOf(playerUuid.toString());
+        return rows.isEmpty() ? null : selectCanonicalSettings(rows);
+    }
+
+    /**
+     * One attempt on an existing row: apply the change and write it only if the row still holds every
+     * value it was read with. Returns {@code null} when it did not (re-read and try again).
+     */
+    private ChangeResult updateWith(PlayerTradeSettings row, String playerName, SettingsChange change) {
+        WhereCondition[] asRead = valuesAsRead(row);
+        boolean renamed = playerName != null && !playerName.equals(row.getPlayerName());
+        if (renamed) {
+            row.setPlayerName(playerName);
+        }
+        boolean changed = change.apply(row);
+        if (!changed && !renamed) {
+            return new ChangeResult(SettingsWrite.UNCHANGED, row);
+        }
+        return settingsOperator.updateIf(row, asRead) ? new ChangeResult(SettingsWrite.WRITTEN, row) : null;
+    }
+
+    /**
+     * For a player with no stored row: insert one <b>without</b> the change -- the settings this server last held
+     * for the player (the row was deleted while they were online here; the maintainer's decision of 2026-10-04
+     * re-creates it with the current settings, UltiKits/UltiTrade#57) or the defaults -- under the player's UUID
+     * as id. The change is then applied by {@link #change} to whatever row is stored, through the same conditional
+     * write as every other change. Inserting the change itself could not tell a stored insert from one the JSON
+     * backend ignored because another writer on this server (the statistics task) had inserted the row first, and
+     * would report the change as written while it was not (Codex run 1 on PR #66). On the relational backends a
+     * duplicate insert fails, and the change is likewise applied to the row the other writer stored.
+     * <p>
+     * Returns {@code UNCHANGED} when the change would change nothing for a player this server holds nothing for
+     * (nothing is inserted); otherwise {@code null}.
+     */
+    private ChangeResult createWith(UUID playerUuid, String playerName, SettingsChange change) {
+        PlayerTradeSettings held = settingsCache.get(playerUuid);
+        PlayerTradeSettings base = held != null ? copyOf(held) : new PlayerTradeSettings(playerUuid, playerName);
+        base.setId(playerUuid.toString());
+        if (playerName != null) {
+            base.setPlayerName(playerName);
+        }
+        if (held == null && !change.apply(copyOf(base))) {
+            // Nothing to record for a player with no row and no settings this server knows of.
+            return new ChangeResult(SettingsWrite.UNCHANGED, null);
+        }
+        try {
+            settingsOperator.insert(base);
+        } catch (RuntimeException insertFailed) {
+            if (readStoredRow(playerUuid) == null) {
+                throw insertFailed;
+            }
+            return null; // another server inserted the row first: the change is applied to it
+        }
+        if (held != null && plugin != null) {
+            plugin.getLogger().warn(i18n("log_settings_row_recreated")
+                .replace("{PLAYER}", String.valueOf(base.getPlayerName())));
+        }
+        return null;
+    }
+
+    /** A detached copy of {@code settings}, so a row built from it never shares state with the cache. */
+    private static PlayerTradeSettings copyOf(PlayerTradeSettings settings) {
+        PlayerTradeSettings copy = new PlayerTradeSettings();
+        copy.setPlayerUuid(settings.getPlayerUuid());
+        copy.setPlayerName(settings.getPlayerName());
+        copy.setTradeEnabled(settings.isTradeEnabled());
+        copy.setBlockedPlayersJson(settings.getBlockedPlayersJson());
+        copy.setTotalTrades(settings.getTotalTrades());
+        copy.setTotalMoneyTraded(settings.getTotalMoneyTraded());
+        copy.setTotalExpTraded(settings.getTotalExpTraded());
+        copy.setLastTradeTime(settings.getLastTradeTime());
+        return copy;
+    }
+
+    /**
+     * One condition per stored column, holding the value {@code row} was read with -- the
+     * compare-and-set of {@link #change}. The values are bound exactly as the framework binds them when
+     * it writes the row, so a column compares equal to the value it was read as on every backend. A
+     * column read as {@code null} cannot be compared ({@code updateIf} refuses a null value, because
+     * {@code = NULL} is never true) and is left out; this module never writes a null into any of them.
+     */
+    private static WhereCondition[] valuesAsRead(PlayerTradeSettings row) {
+        List<WhereCondition> conditions = new ArrayList<>();
+        addCondition(conditions, "player_uuid", row.getPlayerUuid());
+        addCondition(conditions, "player_name", row.getPlayerName());
+        addCondition(conditions, "trade_enabled", row.isTradeEnabled());
+        addCondition(conditions, "blocked_players", row.getBlockedPlayersJson());
+        addCondition(conditions, "total_trades", row.getTotalTrades());
+        addCondition(conditions, "total_money_traded", row.getTotalMoneyTraded());
+        addCondition(conditions, "total_exp_traded", row.getTotalExpTraded());
+        addCondition(conditions, "last_trade_time", row.getLastTradeTime());
+        return conditions.toArray(new WhereCondition[0]);
+    }
+
+    private static void addCondition(List<WhereCondition> conditions, String column, Object value) {
+        if (value != null) {
+            conditions.add(WhereCondition.builder().column(column).value(value).build());
+        }
     }
     
     /**
@@ -554,12 +931,23 @@ public class TradeLogService {
      * @return true if unblocked successfully
      */
     public boolean unblockPlayer(Player player, UUID targetUuid) {
-        PlayerTradeSettings settings = getOrCreateSettings(player.getUniqueId(), player.getName());
-        boolean result = settings.unblockPlayer(targetUuid.toString());
-        if (result) {
-            saveSettings(settings);
-        }
-        return result;
+        return unblock(player, targetUuid) == SettingsWrite.WRITTEN;
+    }
+
+    /**
+     * Remove {@code targetUuid} from {@code player}'s blocklist, through {@link #change}: the stored list
+     * is read again and only that player removed, so a block another server added is kept
+     * (UltiKits/UltiTrade#54).
+     *
+     * @param player     the player doing the unblocking
+     * @param targetUuid the player to unblock
+     * @return {@link SettingsWrite#WRITTEN}; {@link SettingsWrite#UNCHANGED} when the stored list does not
+     *         hold the target; {@link SettingsWrite#BUSY} or {@link SettingsWrite#FAILED} when nothing
+     *         could be written
+     */
+    public SettingsWrite unblock(Player player, UUID targetUuid) {
+        String target = targetUuid.toString();
+        return change(player.getUniqueId(), player.getName(), row -> row.unblockPlayer(target)).write;
     }
     
     /**

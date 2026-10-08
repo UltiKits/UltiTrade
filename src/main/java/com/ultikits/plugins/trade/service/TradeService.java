@@ -723,8 +723,10 @@ public class TradeService {
         double threshold = config.getConfirmThreshold();
         double totalMoney = session.getPlayerMoney(player.getUniqueId()) + 
                            session.getOtherPlayerMoney(player.getUniqueId());
-        int totalExp = session.getPlayerExp(player.getUniqueId()) + 
-                       session.getOtherPlayerExp(player.getUniqueId());
+        // In long: two offers of up to 2,147,483,647 points each would wrap an int sum below the threshold and skip
+        // the large-trade confirmation (Codex run 2 on PR #66).
+        long totalExp = (long) session.getPlayerExp(player.getUniqueId())
+                       + session.getOtherPlayerExp(player.getUniqueId());
         
         // If already confirmed once (in session), proceed
         if (!session.isConfirmed(player.getUniqueId()) && 
@@ -888,7 +890,7 @@ public class TradeService {
         }
         
         double moneyTax = 0;
-        int expTax = 0;
+        long expTax = 0;
 
         double money1 = session.getPlayerMoney(session.getPlayer1());
         double money2 = session.getPlayerMoney(session.getPlayer2());
@@ -928,6 +930,16 @@ public class TradeService {
             }
         }
         if (expAvailable) {
+            // A total above Integer.MAX_VALUE is read capped, and the rebuild below would set the sender to the cap less
+            // the offer, taking far more than offered: such an offer is refused (UltiKits/UltiTrade#65, gate-1 F1).
+            if (exp1 > 0 && !isExperienceTotalReadable(player1)) {
+                cancelTrade(session, i18n("cancel_reason_exp_unreadable").replace("{PLAYER}", player1.getName()));
+                return;
+            }
+            if (exp2 > 0 && !isExperienceTotalReadable(player2)) {
+                cancelTrade(session, i18n("cancel_reason_exp_unreadable").replace("{PLAYER}", player2.getName()));
+                return;
+            }
             if (exp1 > 0 && getTotalExperience(player1) < exp1) {
                 cancelTrade(session, i18n("cancel_reason_insufficient_exp").replace("{PLAYER}", player1.getName()));
                 return;
@@ -954,13 +966,22 @@ public class TradeService {
             double expTaxRate = config.getExpTaxRate();
             int tax1 = experienceTax(exp1, expTaxRate);
             int tax2 = experienceTax(exp2, expTaxRate);
-            expTax = tax1 + tax2;
+            expTax = (long) tax1 + tax2; // in long: two taxes near the int range would wrap (Codex run 2 on PR #66)
+            // Both senders' totals are read before any experience moves, both senders rebuilt, and only then is
+            // either side paid: a total read after its owner received the other offer can exceed the int range and
+            // read capped, and a rebuild from it would take the remainder off the cap (Codex run 1 on PR #66).
+            int remaining1 = exp1 > 0 ? getTotalExperience(player1) - exp1 : 0;
+            int remaining2 = exp2 > 0 ? getTotalExperience(player2) - exp2 : 0;
             if (exp1 > 0) {
-                setTotalExperience(player1, getTotalExperience(player1) - exp1);
+                setTotalExperience(player1, remaining1);
+            }
+            if (exp2 > 0) {
+                setTotalExperience(player2, remaining2);
+            }
+            if (exp1 > 0) {
                 player2.giveExp(exp1 - tax1);
             }
             if (exp2 > 0) {
-                setTotalExperience(player2, getTotalExperience(player2) - exp2);
                 player1.giveExp(exp2 - tax2);
             }
         }
@@ -1019,8 +1040,9 @@ public class TradeService {
      * and nothing was transferred. Only then are the payees paid, each the payer's amount less the tax.
      * A deposit that is refused or throws cancels the trade the same way: every deposit that already
      * landed is taken back from its payee, and every payer is refunded in full. A refund or a take-back
-     * that fails is logged at SEVERE, naming both players, their UUIDs, the amount and the currency, so an
-     * operator can correct the balances by hand.
+     * that the economy refuses is logged at SEVERE, naming both players, their UUIDs, the amount and the
+     * currency, so an operator can correct the balances by hand; one that throws has only the outcome-unknown
+     * line of {@link #moved}, because it may have gone through (gate-1 F6 of PR #66).
      * <p>
      * The economy is passed as {@code Object} and cast where it is used, so no method signature names a
      * Vault type: the class must stay loadable without Vault (UltiKits/UltiTrade#49).
@@ -1036,7 +1058,7 @@ public class TradeService {
             if (amounts[i] <= 0) {
                 continue;
             }
-            if (!moved(economy, payers[i], amounts[i], true)) {
+            if (moved(economy, payers[i], amounts[i], true) != Moved.YES) {
                 boolean restored = refundWithdrawn(economy, payers, payees, amounts, withdrawn);
                 cancelTrade(session, restored
                         ? i18n("cancel_reason_money_withdraw_refused").replace("{PLAYER}", payers[i].getName())
@@ -1050,11 +1072,19 @@ public class TradeService {
             if (amounts[i] <= 0) {
                 continue;
             }
-            if (!moved(economy, payees[i], amounts[i] - taxes[i], false)) {
+            if (moved(economy, payees[i], amounts[i] - taxes[i], false) != Moved.YES) {
                 boolean restored = true;
                 for (int j = 0; j < 2; j++) {
-                    if (deposited[j] && !moved(economy, payees[j], amounts[j] - taxes[j], true)) {
+                    if (!deposited[j]) {
+                        continue;
+                    }
+                    Moved takenBack = moved(economy, payees[j], amounts[j] - taxes[j], true);
+                    if (takenBack == Moved.REFUSED) {
                         logLostMoney(i18n("log_trade_money_takeback_failed"), economy, payees[j], payers[j], amounts[j] - taxes[j]);
+                    }
+                    // UNKNOWN: moved() already logged the outcome-unknown line; a second, certain "take it back by hand"
+                    // line would have an operator take it twice if the call went through (gate-1 F6 of PR #66).
+                    if (takenBack != Moved.YES) {
                         restored = false;
                     }
                 }
@@ -1071,14 +1101,23 @@ public class TradeService {
     }
 
     /**
-     * Refund every payer whose withdrawal went through; a refund that fails is logged at SEVERE. Returns
-     * whether every refund went through.
+     * Refund every payer whose withdrawal went through. A refused refund is logged at SEVERE with the certain
+     * "give it back by hand" line; a refund that threw has only the outcome-unknown line {@link #moved} logs.
+     * Returns whether every refund went through.
      */
     private boolean refundWithdrawn(Object economy, Player[] payers, Player[] payees, double[] amounts, boolean[] withdrawn) {
         boolean all = true;
         for (int i = 0; i < 2; i++) {
-            if (withdrawn[i] && !moved(economy, payers[i], amounts[i], false)) {
+            if (!withdrawn[i]) {
+                continue;
+            }
+            Moved refunded = moved(economy, payers[i], amounts[i], false);
+            if (refunded == Moved.REFUSED) {
                 logLostMoney(i18n("log_trade_money_refund_failed"), economy, payers[i], payees[i], amounts[i]);
+            }
+            // UNKNOWN: moved() already logged the outcome-unknown line, which is the only instruction: a certain
+            // "give it back by hand" line would have an operator refund twice if the call went through (gate-1 F6).
+            if (refunded != Moved.YES) {
                 all = false;
             }
         }
@@ -1088,19 +1127,41 @@ public class TradeService {
     /**
      * One withdrawal ({@code withdraw}) or deposit through the economy. Returns whether the economy
      * reported success; a refused response, a missing one and a thrown exception all count as not moved.
+     * <p>
+     * A thrown exception does not say whether the economy applied the call before it failed (its storage
+     * may have committed and then lost the connection), so the trade treats it as not moved and logs one
+     * SEVERE line saying the outcome is unknown and naming the player and the exact amount, so an operator
+     * can check that balance (UltiKits/UltiTrade#60; maintainer decision of 2026-10-06). Reading the
+     * balance again cannot settle it: another writer may have changed it too.
      */
-    private boolean moved(Object economy, Player player, double amount, boolean withdraw) {
+    private Moved moved(Object economy, Player player, double amount, boolean withdraw) {
         try {
             Economy vault = (Economy) economy;
             EconomyResponse response = withdraw ? vault.withdrawPlayer(player, amount) : vault.depositPlayer(player, amount);
-            return response != null && response.transactionSuccess();
+            return response != null && response.transactionSuccess() ? Moved.YES : Moved.REFUSED;
         } catch (RuntimeException e) {
             String template = withdraw ? i18n("log_trade_money_withdraw_threw") : i18n("log_trade_money_deposit_threw");
-            logQuietly(() -> plugin.getLogger().warn(e, template
-                    .replace("{PLAYER}", player.getName())
-                    .replace("{AMOUNT}", String.valueOf(amount))));
-            return false;
+            String line = Placeholders.fill(template,
+                    "{PLAYER}", player.getName(),
+                    "{AMOUNT}", exactAmount(amount)); // exact: the operator checks this amount
+            logQuietly(() -> plugin.getLogger().error(e, line));
+            return Moved.UNKNOWN;
         }
+    }
+
+    /** What one economy call did: moved, refused (certainly not moved), or unknown (it threw). */
+    private enum Moved {
+        YES, REFUSED, UNKNOWN
+    }
+
+    /**
+     * {@code amount} in full for an operator's line ({@code 12345678.9}, never {@code 1.23456789E7}). A non-finite
+     * amount -- reachable only through a NaN {@code trade-tax}, which the framework refuses at load since
+     * UltiTools-Reborn#625 -- is printed as {@code String.valueOf} prints it, because {@code BigDecimal.valueOf} throws for
+     * it, and a throw here would escape the money path after money had moved (gate-1 F5 of PR #66).
+     */
+    private static String exactAmount(double amount) {
+        return Double.isFinite(amount) ? BigDecimal.valueOf(amount).toPlainString() : String.valueOf(amount);
     }
 
     /** The SEVERE line for money a failed trade could not put back: {@code template} says whose and why. */
@@ -1116,7 +1177,7 @@ public class TradeService {
                 "{UUID}", holder.getUniqueId().toString(),
                 "{OTHER}", other.getName(),
                 "{OTHER_UUID}", other.getUniqueId().toString(),
-                "{AMOUNT}", java.math.BigDecimal.valueOf(amount).toPlainString(), // exact: the operator restores this by hand
+                "{AMOUNT}", exactAmount(amount), // exact: the operator restores this by hand
                 "{CURRENCY}", String.valueOf(currency));
         logQuietly(() -> plugin.getLogger().error(line));
     }
@@ -2068,12 +2129,16 @@ public class TradeService {
      * the rule says (follow-up of UltiKits/UltiTrade#64). The trade itself and every window that shows the tax or the
      * amount received after it use this method, so what is shown is what is taken.
      *
+     * <p>A rate that is not greater than zero takes no tax -- NaN included: {@code rate <= 0} is false for NaN, which
+     * then reached {@code BigDecimal.valueOf} and threw, in the trade itself after money had moved and in both trade
+     * windows (UltiKits/UltiTrade#65; the framework also refuses NaN at load since UltiTools-Reborn#625).
+     *
      * @param offered the experience points offered
      * @param rate    the configured {@code exp-tax-rate} (0 to 1)
      * @return the points taken as tax, never more than {@code offered}
      */
     public static int experienceTax(int offered, double rate) {
-        if (offered <= 0 || rate <= 0) {
+        if (offered <= 0 || !(rate > 0)) {
             return 0;
         }
         // BigDecimal.valueOf goes through Double.toString, the shortest decimal that reads back as the configured
@@ -2092,24 +2157,71 @@ public class TradeService {
      * {@link #setTotalExperience}, left them one point lower after a trade (UltiKits/UltiTrade#64).
      */
     public int getTotalExperience(Player player) {
+        // In long, then clamped: a level total near Integer.MAX_VALUE plus the progress inside the level must not wrap to a
+        // negative total (UltiKits/UltiTrade#65). A clamped total is not exact: see isExperienceTotalReadable.
+        return (int) Math.min(trueTotalExperience(player), Integer.MAX_VALUE);
+    }
+
+    /**
+     * Whether {@code player}'s experience total can be read exactly: its true total, computed in {@code long}, fits an
+     * {@code int}. From 21,864 levels it does not, and {@link #getTotalExperience} answers the capped value; an experience
+     * offer from such a player is refused (at the experience slot, at the amount prompt and before a trade moves anything),
+     * because taking the offer off a capped total would rebuild the player far below their real total
+     * (UltiKits/UltiTrade#65, gate-1 finding F1; maintainer decision of 2026-10-06). Decided on the true total, so a total
+     * of exactly {@code Integer.MAX_VALUE} still counts as readable.
+     *
+     * @param player the player
+     * @return whether the player's total fits an {@code int}
+     */
+    public static boolean isExperienceTotalReadable(Player player) {
+        return trueTotalExperience(player) <= Integer.MAX_VALUE;
+    }
+
+    /** The player's true experience total in {@code long}; {@code Long.MAX_VALUE} for a level far above the int range. */
+    private static long trueTotalExperience(Player player) {
         int level = player.getLevel();
-        int exp = Math.round(player.getExp() * player.getExpToLevel());
-        return pointsToReachLevel(level) + exp;
+        if (level > LEVEL_TOTAL_SURELY_ABOVE_INT) {
+            return Long.MAX_VALUE;
+        }
+        return pointsToReachLevelExact(level) + Math.round(player.getExp() * player.getExpToLevel());
     }
 
     /**
      * Total points a player needs to reach {@code level} from zero (Minecraft's own table), in integer arithmetic:
      * {@code L^2 + 6L} up to 16, {@code 2.5L^2 - 40.5L + 360} from 17 to 31 and {@code 4.5L^2 - 162.5L + 2220} above,
      * each of which is a whole number for every whole level.
+     *
+     * <p>Computed in {@code long} and clamped to {@code Integer.MAX_VALUE}: in {@code int}, {@code 9 * level * level}
+     * overflows from level 15,466, and a player set to such a level (for example {@code /xp set <player> 16000
+     * levels}) read a negative total, so every experience offer was refused and {@code /trade} showed a negative
+     * total (UltiKits/UltiTrade#65). The true total exceeds {@code Integer.MAX_VALUE} from level 21,864; above
+     * {@link #LEVEL_TOTAL_SURELY_ABOVE_INT} the answer is the clamp without computing, so the {@code long} product
+     * itself cannot overflow either.
      */
     static int pointsToReachLevel(int level) {
         if (level <= 16) {
             return level * level + 6 * level;
         } else if (level <= 31) {
             return (5 * level * level - 81 * level) / 2 + 360;
+        } else if (level > LEVEL_TOTAL_SURELY_ABOVE_INT) {
+            return Integer.MAX_VALUE;
         }
-        return (9 * level * level - 325 * level) / 2 + 2220;
+        return (int) Math.min(pointsToReachLevelExact(level), Integer.MAX_VALUE);
     }
+
+    /** {@link #pointsToReachLevel} without the clamp, for a level at most {@link #LEVEL_TOTAL_SURELY_ABOVE_INT}. */
+    private static long pointsToReachLevelExact(int level) {
+        long l = level;
+        if (level <= 16) {
+            return l * l + 6 * l;
+        } else if (level <= 31) {
+            return (5 * l * l - 81 * l) / 2 + 360;
+        }
+        return (9 * l * l - 325 * l) / 2 + 2220;
+    }
+
+    /** A level whose total is far above {@code Integer.MAX_VALUE}, low enough that {@code 9 * level * level} fits a long. */
+    private static final int LEVEL_TOTAL_SURELY_ABOVE_INT = 1_000_000;
     
     /**
      * Set total experience points for a player.

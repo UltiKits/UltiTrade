@@ -283,7 +283,10 @@ public class TradeGUI implements InventoryHolder {
             
             List<String> yourLore = new ArrayList<>();
             yourLore.add(text(tradeService.i18n("gui_exp_click")));
-            yourLore.add(taxLine(tradeService.i18n("gui_your_total_exp"), "{AMOUNT}", String.valueOf(totalExp)));
+            // A capped total is not the player's total: show why experience cannot be offered (UltiKits/UltiTrade#65, F1)
+            yourLore.add(TradeService.isExperienceTotalReadable(viewer)
+                ? taxLine(tradeService.i18n("gui_your_total_exp"), "{AMOUNT}", String.valueOf(totalExp))
+                : text(tradeService.i18n("exp_total_unreadable")));
             if (taxRate > 0 && yourExp > 0) {
                 yourLore.add(taxLine(tradeService.i18n("gui_tax_rate"), "{RATE}", String.format("%.1f%%", taxRate * 100)));
                 yourLore.add(taxLine(tradeService.i18n("gui_tax"), "{AMOUNT}", String.valueOf(yourTax)));

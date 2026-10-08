@@ -329,6 +329,23 @@ class TradeListenerTest {
         }
 
         @Test
+        @DisplayName("experience slot of a player whose total is at the cap (25,000 levels): nothing is taken, no prompt opens, the player is told why (UltiTrade#65 F1)")
+        void expSlotAtTheCapRefusesWithoutAPrompt() throws Exception {
+            when(config.isEnableExpTrade()).thenReturn(true);
+            when(player1.getLevel()).thenReturn(25_000);
+            when(player1.getExpToLevel()).thenReturn(9 * 25_000 - 158);
+            InventoryClickEvent event = click(TradeGUI.YOUR_EXP_SLOT, ClickType.LEFT, new ItemStack(Material.EXPERIENCE_BOTTLE));
+
+            listener.onInventoryClick(event);
+
+            assertCancelledAndNothingMoved(event);
+            verify(player1, never()).closeInventory();
+            verify(player1).sendMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&', com.ultikits.plugins.trade.i18n.CatalogueText.text("zh", "exp_total_unreadable")));
+            java.util.Map<UUID, TradeListener.PendingPrompt> waiting = UltiTradeTestHelper.getField(listener, "waitingForInput");
+            assertThat(waiting).doesNotContainKey(uuid1);
+        }
+
+        @Test
         @DisplayName("a click outside the window (raw slot -999) while the trade window is open is cancelled too")
         void clickOutsideWindowIsCancelled() {
             InventoryClickEvent event = click(-999, ClickType.LEFT, null);
@@ -1568,6 +1585,23 @@ class TradeListenerTest {
     @Nested
     @DisplayName("Chat Input Handling")
     class ChatInputHandling {
+
+        @org.junit.jupiter.params.ParameterizedTest(name = "level {0}")
+        @org.junit.jupiter.params.provider.ValueSource(ints = {21_864, 21_865, 25_000})
+        @DisplayName("an experience answer from a player whose total is at the cap is refused with the reason; the offer stays 0 (UltiTrade#65 F1)")
+        void expAnswerAtTheCapIsRefused(int level) throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            addToWaitingForInput(uuid1, 1); // EXPERIENCE
+            when(player1.getLevel()).thenReturn(level);
+            when(player1.getExpToLevel()).thenReturn(9 * level - 158);
+            when(tradeService.getTotalExperience(player1)).thenReturn(Integer.MAX_VALUE);
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, "100", new HashSet<>()));
+
+            assertThat(session.getPlayerExp(uuid1)).as("no experience offered").isZero();
+            verify(player1).sendMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&', com.ultikits.plugins.trade.i18n.CatalogueText.text("zh", "exp_total_unreadable")));
+        }
 
         @Test
         @DisplayName("Should ignore chat if not waiting for input")

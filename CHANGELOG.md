@@ -124,21 +124,92 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   type. The module keeps each player's settings in memory for the server's lifetime, so if their
   `trade_player_settings` row was deleted while the server ran, the next toggle, block, unblock, post-trade
   statistics update or the save at shutdown wrote nothing and passed as saved on SQLite and MySQL (only the JSON
-  backend reported it). It now logs `Failed to save player settings` (and, at shutdown, the player's UUID), the
-  same line a failed write logs (UltiKits/UltiTrade#52).
+  backend reported it). A change that reaches no row is now logged as `Failed to save player settings: <player>`,
+  the same line a failed write logs; there is no save at shutdown any more
+  (UltiKits/UltiTrade#52, UltiKits/UltiTrade#54).
 - 玩家交易设置的存储行已不存在时，保存现在在所有存储类型上都报告为失败。模块在服务器运行期间一直缓存每位玩家的设置，因此若其 `trade_player_settings`
   行在运行中被删除，之后的开关交易、拉黑、取消拉黑、交易后统计更新或关服时的保存在 SQLite 与 MySQL 上什么也没写却当作已保存（只有 JSON 后端会报告）。
-  现在会记录 `保存玩家设置失败`（关服时附带玩家 UUID），与写入出错时的日志行相同（UltiKits/UltiTrade#52）。
+  现在未命中任何行的修改会记录 `保存玩家设置失败：<玩家>`，与写入出错时的日志行相同；关服时已不再保存（UltiKits/UltiTrade#52、UltiKits/UltiTrade#54）。
 
 - A change to a player's trade settings is no longer lost at the next restart when their stored row was deleted
   while the server ran. Such a save matched no row and wrote nothing (since UltiKits/UltiTrade#52 it was at least
-  logged as failed), while the player's chat confirmed the change. The save now re-creates the row with the current
-  settings and logs a WARNING naming the player. If another server sharing the database has already created a row
+  logged as failed), while the player's chat confirmed the change. The next change now re-creates the row with the
+  current settings (those this server last held for the player while they are online here) and logs a WARNING naming
+  the player. If another server sharing the database has already created a row
   for that player, the settings are written onto it instead; a player's settings row now takes the player's UUID as
   its id, so two servers creating or re-creating it at once leave one row, not two (UltiKits/UltiTrade#57).
 - 玩家的交易设置存储行在服务器运行期间被删除后，其设置修改不再在下次重启时丢失。此前这种保存匹配不到任何行、什么也没写（自 UltiKits/UltiTrade#52
-  起至少会记录为失败），玩家聊天栏却显示修改成功。现在保存会用当前设置重建该行，并记录一条指名该玩家的 WARNING。若共享数据库的另一台服务器已为该玩家创建了行，
+  起至少会记录为失败），玩家聊天栏却显示修改成功。现在下一次修改会用当前设置（该玩家在线于本服期间本服最后持有的设置）重建该行，并记录一条指名该玩家的 WARNING。若共享数据库的另一台服务器已为该玩家创建了行，
   则写入那一行；玩家设置行现在以玩家 UUID 作为 id，因此两台服务器同时创建或重建时只会留下一行（UltiKits/UltiTrade#57）。
+
+- On servers sharing one database, a player's trade settings and trade statistics changed on another server are no
+  longer reverted or lost. The module kept each player's settings in memory for the server's lifetime and wrote that
+  whole copy back on every change and again at shutdown, so a setting another server had changed in between went back
+  to the old value, and a trade completed on another server was lost from `total_trades` and the money and experience
+  totals. Now a player's settings are cached only while the player is online on this server (loaded on join, dropped on
+  quit) and never written back: nothing is written at quit or at shutdown. Every change — `/trade toggle`,
+  `/trade block`, `/trade unblock`, a new player name at join, and the statistics of a completed trade — reads the
+  stored settings again, applies only that change and writes it only if the stored settings still hold what was read;
+  otherwise it reads them again and re-applies the change, up to three times. A toggle flips the stored state, so two
+  toggles on two servers both count. If another server keeps changing the settings, the module logs
+  `Failed to save player settings: <player>: the stored row kept changing …` and tells the player to try again
+  (`settings_busy`: "Your trade settings are being saved right now; please try again in a moment."); a change the storage refused is no longer confirmed — the player gets `settings_not_saved` and the
+  console line names the player and the error. Three costs come with this: `/trade toggle`, `/trade block` and
+  `/trade unblock` now write on the main thread before replying (they wrote in the background), so with MySQL each
+  waits for two to eight database round trips; each join does one database read on the main thread; and a placeholder
+  for an offline player queries the database on every evaluation (an offline player used to be cached for the
+  server's lifetime). A server makes one player's settings writes one at a time; no player waits for another player's
+  write. On the main thread a command, a join or a settings read waits at most about 50 ms (one tick) for that player's
+  write in progress (the post-trade statistics): a command that would wait longer answers `settings_busy` and changes
+  nothing; a join then reads nothing and caches nothing — a new player name is then written by the player's next
+  settings write, which always carries the live name — and an uncached read reads the stored settings without caching
+  them (UltiKits/UltiTrade#54).
+- 多台服务器共享同一数据库时，另一台服务器上修改的交易设置与交易统计不再被还原或丢失。此前模块在服务器运行期间一直在内存中保留每位玩家的设置，并在每次修改和关服时整份写回，
+  因此另一台服务器期间所做的设置修改会被改回旧值，另一台服务器上完成的交易也会从 `total_trades` 及金币、经验累计中丢失。现在玩家设置只在该玩家在线于本服期间缓存
+  （进服时加载、退出时丢弃），且从不写回：退出与关服时都不写入。每次修改——`/trade toggle`、`/trade block`、`/trade unblock`、进服时的新玩家名，以及交易完成后的统计——
+  都会重新读取存储的设置、只应用这一项修改，并且仅当存储的设置仍是读取时的值时才写入；否则重新读取并再次应用，最多三次。开关交易翻转的是存储中的状态，
+  因此两台服务器上的两次开关都会生效。若另一台服务器持续修改，模块会记录 `保存玩家设置失败：<玩家>：重试写入期间存储行一直在变化……` 并提示玩家重试（`settings_busy`）；
+  存储拒绝的修改不再提示成功——玩家会收到 `settings_not_saved`，控制台日志写明玩家与错误。随之而来的三项开销：`/trade toggle`、`/trade block`、`/trade unblock`
+  现在在回复前于主线程写入（此前在后台写入），使用 MySQL 时每条命令需等待两到八次数据库往返；每次进服在主线程进行一次数据库读取；离线玩家的占位符每次求值都会查询数据库
+  （此前离线玩家会在服务器运行期间一直被缓存）。同一服务器对同一玩家的设置写入逐个进行；玩家不会等待其他玩家的写入。主线程上的命令、进服或设置读取最多等待约 50 毫秒（一个 tick）该玩家正在进行的写入
+  （交易统计）：需要更久的命令回复 `settings_busy` 且不做任何修改；进服则既不读取也不缓存——新的玩家名会在该玩家下一次设置写入时写入（每次写入都带有当前玩家名）——未缓存的读取则直接读取存储的设置而不缓存（UltiKits/UltiTrade#54）。
+
+- A trade withdrawal or deposit whose economy call threw now logs a SEVERE line an operator can act on:
+  `Outcome unknown: taking <amount> from <player> for a trade failed with an error, so the trade treats it as not
+  taken, but the economy may have taken it. Check <player>'s balance for <amount>` (and the same for paying), with
+  the amount in full (`12345678.9`, not `1.23456789E7`). It was a WARNING that said only "it counts as refused". The
+  trade still counts such a call as refused; a call that committed and then threw is documented as a known
+  limitation. A refund or take-back that throws now logs only this line, not also the certain "give it back by hand" /
+  "take it back by hand" line, which would have had an operator correct a call that went through a second time; a
+  refused refund or take-back keeps that line (UltiKits/UltiTrade#60).
+- 交易的扣款或付款在经济插件中抛出异常时，现在记录一条服主可据以处理的 SEVERE 日志：`结果未知：交易扣除 <金额>（来自 <玩家>）时出错，交易按未扣除处理，
+  但经济插件可能已经扣除。请检查 <玩家> 的余额是否有 <金额> 的变动`（付款同理），金额完整显示（`12345678.9`，而非 `1.23456789E7`）。此前是一条只说明
+  「按拒绝处理」的 WARNING。交易仍将此类调用视为被拒绝；已生效后才抛出异常的调用作为已知限制记录在文档中。退款或收回付款抛出异常时，现在只记录这一条，
+  不再同时记录确定性的「请手动退还 / 手动收回」日志，以免服主对实际已生效的调用再更正一次；被拒绝的退款或收回仍保留那条日志（UltiKits/UltiTrade#60）。
+
+- A player at a very high level no longer reads a negative experience total. From 15,466 levels (for example after
+  `/xp set <player> 16000 levels`) the total overflowed, so the experience prompt and the trade window showed a negative
+  number and every experience offer was refused as insufficient. The total is now exact up to 21,863 levels. Above
+  that it exceeds 2,147,483,647 points and cannot be counted exactly, so such a player cannot offer experience: the
+  experience slot and the amount prompt answer `exp_total_unreadable` ("Your experience is too high to be counted
+  exactly …"), the trade window shows that line instead of a total, and a trade whose offer was set before the player
+  reached such a level is cancelled before anything moves (`cancel_reason_exp_unreadable`). Taking an offer off the
+  capped total would have rebuilt the player hundreds of millions of points below their real total. Sums of
+  experience past the int range are counted in full: two large offers still require the large-trade confirmation,
+  and the logged experience tax and `total_exp_traded` no longer wrap to negative numbers. Paper's own
+  experience arithmetic drifting above about 411,616 points is documented as a known limitation (UltiKits/UltiTrade#65).
+- 等级极高的玩家不再读到负数的经验总量。此前从 15,466 级起（例如执行 `/xp set <玩家> 16000 levels` 后）经验总量会溢出，经验输入提示和交易界面显示负数，
+  所有经验报价都被判为经验不足而拒绝。现在经验总量在 21,863 级以内精确计算；更高等级的总量超过 2,147,483,647 点，无法精确计算，因此这类玩家不能出价经验：
+  点击经验栏位与经验数量输入都会提示 `exp_total_unreadable`，交易界面显示该提示而非总量；若出价在玩家达到此等级之前已设置，交易会在任何东西转移之前取消
+  （`cancel_reason_exp_unreadable`）。若从封顶后的数值中扣除报价，会使玩家的经验比实际少数亿点。超出 int 范围的经验合计现在完整计算：两笔大额报价仍需大额交易确认，
+  记录的经验税与 `total_exp_traded` 不再变为负数。Paper 自身经验计算在约 411,616 点以上的偏差
+  作为已知限制记录在文档中（UltiKits/UltiTrade#65）。
+
+- `exp-tax-rate: .nan` no longer breaks experience trades: a rate that is not greater than zero, NaN included, takes no
+  experience tax. NaN used to throw while the tax was computed — in a completing trade after the money had already
+  moved, and in both trade windows (UltiKits/UltiTrade#65).
+- `exp-tax-rate: .nan` 不再导致经验交易出错：任何不大于零的税率（包括 NaN）都不收取经验税。此前 NaN 会在计算税额时抛出异常——在完成交易时发生于金币已转移之后，
+  两个交易界面也会出错（UltiKits/UltiTrade#65）。
 
 - `/ul reload UltiTrade` (and a bare `/ul reload`) no longer reports a plain success when part of this module's
   reload failed. If rescheduling the trade-log cleanup task, applying `enable-money-trade`, or voiding open trades'

@@ -1,6 +1,7 @@
 package com.ultikits.plugins.trade.commands;
 
 import com.ultikits.plugins.trade.UltiTradeTestHelper;
+import com.ultikits.plugins.trade.entity.PlayerTradeSettings;
 import com.ultikits.plugins.trade.service.TradeLogService;
 import com.ultikits.plugins.trade.service.TradeService;
 import org.bukkit.Bukkit;
@@ -98,6 +99,13 @@ class TradeCommandTest {
      * {@code lang/<code>.yml}, and return an unknown key unchanged, as the framework's
      * {@code Language#getLocalizedText} does.
      */
+    /** A toggle that was written, leaving trading {@code enabled} (UltiKits/UltiTrade#54). */
+    private TradeLogService.SettingsChangeResult written(boolean enabled) {
+        PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, "Player");
+        settings.setTradeEnabled(enabled);
+        return new TradeLogService.SettingsChangeResult(TradeLogService.SettingsWrite.WRITTEN, settings);
+    }
+
     private static YamlConfiguration answerI18nFrom(String code) throws Exception {
         YamlConfiguration catalogue = catalogue(code);
         when(UltiTradeTestHelper.getMockPlugin().i18n(anyString())).thenAnswer(inv -> {
@@ -145,7 +153,7 @@ class TradeCommandTest {
         @DisplayName("/trade toggle, turning trading on, answers with trade_toggle_on")
         void toggleOn(String code) throws Exception {
             YamlConfiguration catalogue = answerI18nFrom(code);
-            when(logService.toggleTrade(player)).thenReturn(true);
+            when(logService.toggle(player)).thenReturn(written(true));
 
             command.toggle(player);
 
@@ -158,11 +166,69 @@ class TradeCommandTest {
         @DisplayName("/trade toggle, turning trading off, answers with trade_toggle_off")
         void toggleOff(String code) throws Exception {
             YamlConfiguration catalogue = answerI18nFrom(code);
-            when(logService.toggleTrade(player)).thenReturn(false);
+            when(logService.toggle(player)).thenReturn(written(false));
 
             command.toggle(player);
 
             verify(player).sendMessage(rendered(catalogue, "trade_toggle_off"));
+            verify(player, times(1)).sendMessage(anyString());
+        }
+
+        @ParameterizedTest(name = "lang/{0}.yml")
+        @ValueSource(strings = {"en", "zh"})
+        @DisplayName("/trade toggle whose row another server kept changing answers with settings_busy only (UltiTrade#54)")
+        void toggleBusy(String code) throws Exception {
+            YamlConfiguration catalogue = answerI18nFrom(code);
+            when(logService.toggle(player)).thenReturn(
+                    new TradeLogService.SettingsChangeResult(TradeLogService.SettingsWrite.BUSY, null));
+
+            command.toggle(player);
+
+            verify(player).sendMessage(rendered(catalogue, "settings_busy"));
+            verify(player, times(1)).sendMessage(anyString());
+        }
+
+        @ParameterizedTest(name = "lang/{0}.yml")
+        @ValueSource(strings = {"en", "zh"})
+        @DisplayName("/trade toggle that the storage refused answers with settings_not_saved only (UltiTrade#54)")
+        void toggleNotSaved(String code) throws Exception {
+            YamlConfiguration catalogue = answerI18nFrom(code);
+            when(logService.toggle(player)).thenReturn(
+                    new TradeLogService.SettingsChangeResult(TradeLogService.SettingsWrite.FAILED, null));
+
+            command.toggle(player);
+
+            verify(player).sendMessage(rendered(catalogue, "settings_not_saved"));
+            verify(player, times(1)).sendMessage(anyString());
+        }
+
+        @ParameterizedTest(name = "lang/{0}.yml")
+        @ValueSource(strings = {"en", "zh"})
+        @DisplayName("/trade unblock whose row another server kept changing answers with settings_busy only (UltiTrade#54)")
+        void unblockBusy(String code) throws Exception {
+            YamlConfiguration catalogue = answerI18nFrom(code);
+            when(server.getPlayerExact("Target")).thenReturn(target);
+            when(logService.isBlocked(playerUuid, targetUuid)).thenReturn(true);
+            when(logService.unblock(player, targetUuid)).thenReturn(TradeLogService.SettingsWrite.BUSY);
+
+            command.unblockPlayer(player, "Target");
+
+            verify(player).sendMessage(rendered(catalogue, "settings_busy"));
+            verify(player, times(1)).sendMessage(anyString());
+        }
+
+        @ParameterizedTest(name = "lang/{0}.yml")
+        @ValueSource(strings = {"en", "zh"})
+        @DisplayName("/trade unblock that the storage refused answers with settings_not_saved only (UltiTrade#54)")
+        void unblockNotSaved(String code) throws Exception {
+            YamlConfiguration catalogue = answerI18nFrom(code);
+            when(server.getPlayerExact("Target")).thenReturn(target);
+            when(logService.isBlocked(playerUuid, targetUuid)).thenReturn(true);
+            when(logService.unblock(player, targetUuid)).thenReturn(TradeLogService.SettingsWrite.FAILED);
+
+            command.unblockPlayer(player, "Target");
+
+            verify(player).sendMessage(rendered(catalogue, "settings_not_saved"));
             verify(player, times(1)).sendMessage(anyString());
         }
 
@@ -173,11 +239,42 @@ class TradeCommandTest {
             YamlConfiguration catalogue = answerI18nFrom(code);
             when(server.getPlayerExact("Target")).thenReturn(target);
             when(logService.isBlocked(playerUuid, targetUuid)).thenReturn(false);
+            when(logService.block(player, targetUuid)).thenReturn(TradeLogService.SettingsWrite.WRITTEN);
 
             command.blockPlayer(player, "Target");
 
-            verify(logService).blockPlayer(player, targetUuid);
+            verify(logService).block(player, targetUuid);
             verify(player).sendMessage(rendered(catalogue, "block_success", "Target"));
+        }
+
+        @ParameterizedTest(name = "lang/{0}.yml")
+        @ValueSource(strings = {"en", "zh"})
+        @DisplayName("/trade block whose row another server kept changing answers with settings_busy, not block_success (UltiTrade#54)")
+        void blockBusy(String code) throws Exception {
+            YamlConfiguration catalogue = answerI18nFrom(code);
+            when(server.getPlayerExact("Target")).thenReturn(target);
+            when(logService.isBlocked(playerUuid, targetUuid)).thenReturn(false);
+            when(logService.block(player, targetUuid)).thenReturn(TradeLogService.SettingsWrite.BUSY);
+
+            command.blockPlayer(player, "Target");
+
+            verify(player).sendMessage(rendered(catalogue, "settings_busy"));
+            verify(player, times(1)).sendMessage(anyString());
+        }
+
+        @ParameterizedTest(name = "lang/{0}.yml")
+        @ValueSource(strings = {"en", "zh"})
+        @DisplayName("/trade block that the storage refused answers with settings_not_saved, not block_success (UltiTrade#54)")
+        void blockNotSaved(String code) throws Exception {
+            YamlConfiguration catalogue = answerI18nFrom(code);
+            when(server.getPlayerExact("Target")).thenReturn(target);
+            when(logService.isBlocked(playerUuid, targetUuid)).thenReturn(false);
+            when(logService.block(player, targetUuid)).thenReturn(TradeLogService.SettingsWrite.FAILED);
+
+            command.blockPlayer(player, "Target");
+
+            verify(player).sendMessage(rendered(catalogue, "settings_not_saved"));
+            verify(player, times(1)).sendMessage(anyString());
         }
 
         @ParameterizedTest(name = "lang/{0}.yml")
@@ -192,7 +289,7 @@ class TradeCommandTest {
 
             verify(player).sendMessage(rendered(catalogue, "already_blocked", "Target"));
             verify(player, times(1)).sendMessage(anyString());
-            verify(logService, never()).blockPlayer(any(), any());
+            verify(logService, never()).block(any(), any());
         }
 
         @ParameterizedTest(name = "lang/{0}.yml")
@@ -202,10 +299,11 @@ class TradeCommandTest {
             YamlConfiguration catalogue = answerI18nFrom(code);
             when(server.getPlayerExact("Target")).thenReturn(target);
             when(logService.isBlocked(playerUuid, targetUuid)).thenReturn(true);
+            when(logService.unblock(player, targetUuid)).thenReturn(TradeLogService.SettingsWrite.WRITTEN);
 
             command.unblockPlayer(player, "Target");
 
-            verify(logService).unblockPlayer(player, targetUuid);
+            verify(logService).unblock(player, targetUuid);
             verify(player).sendMessage(rendered(catalogue, "unblock_success", "Target"));
             verify(player, times(1)).sendMessage(anyString());
         }
@@ -222,7 +320,7 @@ class TradeCommandTest {
 
             verify(player).sendMessage(rendered(catalogue, "not_blocked", "Target"));
             verify(player, times(1)).sendMessage(anyString());
-            verify(logService, never()).unblockPlayer(any(), any());
+            verify(logService, never()).unblock(any(), any());
         }
 
         @Test
@@ -360,22 +458,22 @@ class TradeCommandTest {
         @Test
         @DisplayName("Should toggle trade on")
         void toggleOn() {
-            when(logService.toggleTrade(player)).thenReturn(true);
+            when(logService.toggle(player)).thenReturn(written(true));
 
             command.toggle(player);
 
-            verify(logService).toggleTrade(player);
+            verify(logService).toggle(player);
             verify(player).sendMessage(ChatColor.GREEN + "Trade enabled!");
         }
 
         @Test
         @DisplayName("Should toggle trade off")
         void toggleOff() {
-            when(logService.toggleTrade(player)).thenReturn(false);
+            when(logService.toggle(player)).thenReturn(written(false));
 
             command.toggle(player);
 
-            verify(logService).toggleTrade(player);
+            verify(logService).toggle(player);
             verify(player).sendMessage(ChatColor.YELLOW + "Trade disabled!");
         }
     }
@@ -389,10 +487,11 @@ class TradeCommandTest {
         void blockOnline() {
             when(logService.isBlocked(playerUuid, targetUuid)).thenReturn(false);
             when(server.getPlayerExact("Target")).thenReturn(target);
+            when(logService.block(player, targetUuid)).thenReturn(TradeLogService.SettingsWrite.WRITTEN);
 
             command.blockPlayer(player, "Target");
 
-            verify(logService).blockPlayer(player, targetUuid);
+            verify(logService).block(player, targetUuid);
             verify(player).sendMessage(ChatColor.GREEN + "Added Target to your trade blacklist!");
         }
 
@@ -404,7 +503,7 @@ class TradeCommandTest {
             command.blockPlayer(player, "Offline");
 
             verify(player).sendMessage(contains("is not online"));
-            verify(logService, never()).blockPlayer(any(), any());
+            verify(logService, never()).block(any(), any());
         }
 
         @Test
@@ -416,7 +515,7 @@ class TradeCommandTest {
             command.blockPlayer(player, "Player1");
 
             verify(player).sendMessage(contains("cannot add yourself to the blacklist"));
-            verify(logService, never()).blockPlayer(any(), any());
+            verify(logService, never()).block(any(), any());
         }
 
         @Test
@@ -428,7 +527,7 @@ class TradeCommandTest {
             command.blockPlayer(player, "Target");
 
             verify(player).sendMessage(ChatColor.RED + "Target is already in your blacklist!");
-            verify(logService, never()).blockPlayer(any(), any());
+            verify(logService, never()).block(any(), any());
         }
     }
 
@@ -440,11 +539,12 @@ class TradeCommandTest {
         @DisplayName("Should unblock online player")
         void unblockOnline() {
             when(logService.isBlocked(playerUuid, targetUuid)).thenReturn(true);
+            when(logService.unblock(player, targetUuid)).thenReturn(TradeLogService.SettingsWrite.WRITTEN);
             when(server.getPlayerExact("Target")).thenReturn(target);
 
             command.unblockPlayer(player, "Target");
 
-            verify(logService).unblockPlayer(player, targetUuid);
+            verify(logService).unblock(player, targetUuid);
             verify(player).sendMessage(ChatColor.GREEN + "Removed Target from your trade blacklist!");
         }
 
@@ -456,7 +556,7 @@ class TradeCommandTest {
             command.unblockPlayer(player, "Offline");
 
             verify(player).sendMessage(contains("is not online"));
-            verify(logService, never()).unblockPlayer(any(), any());
+            verify(logService, never()).unblock(any(), any());
         }
 
         @Test
@@ -468,7 +568,7 @@ class TradeCommandTest {
             command.unblockPlayer(player, "Target");
 
             verify(player).sendMessage(ChatColor.RED + "Target is not in your blacklist!");
-            verify(logService, never()).unblockPlayer(any(), any());
+            verify(logService, never()).unblock(any(), any());
         }
     }
 

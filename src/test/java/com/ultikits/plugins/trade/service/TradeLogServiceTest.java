@@ -58,6 +58,63 @@ class TradeLogServiceTest {
         UltiTradeTestHelper.tearDown();
     }
 
+    /** The stored rows behind {@link #storeHolds}: reads return copies, writes land here. */
+    private final List<PlayerTradeSettings> store = new ArrayList<>();
+
+    /**
+     * Back {@code settingsOperator} with an in-memory table holding {@code rows}: every read returns
+     * fresh copies (as a database read does), an insert adds a copy, and {@code updateIf} replaces the row
+     * with the same id. A change can then be checked in the store, never in an object the test still holds
+     * (UltiKits/UltiTrade#54: the service re-reads and writes conditionally; decision 2026-10-06 00:04).
+     */
+    private void storeHolds(PlayerTradeSettings... rows) {
+        store.clear();
+        for (PlayerTradeSettings row : rows) {
+            store.add(copy(row));
+        }
+        lenient().when(settingsOperator.query()).thenReturn(queryBuilder);
+        lenient().when(queryBuilder.where(anyString())).thenReturn(queryBuilder);
+        lenient().when(queryBuilder.eq(any())).thenReturn(queryBuilder);
+        lenient().when(queryBuilder.list()).thenAnswer(inv -> {
+            List<PlayerTradeSettings> copies = new ArrayList<>();
+            for (PlayerTradeSettings row : store) {
+                copies.add(copy(row));
+            }
+            return copies;
+        });
+        lenient().doAnswer(inv -> {
+            store.add(copy(inv.getArgument(0)));
+            return null;
+        }).when(settingsOperator).insert(any(PlayerTradeSettings.class));
+        lenient().when(settingsOperator.updateIf(any(), any(com.ultikits.ultitools.entities.WhereCondition[].class)))
+                .thenAnswer(inv -> {
+                    PlayerTradeSettings written = inv.getArgument(0);
+                    store.removeIf(row -> Objects.equals(row.getId(), written.getId()));
+                    store.add(copy(written));
+                    return true;
+                });
+    }
+
+    private static PlayerTradeSettings copy(PlayerTradeSettings row) {
+        PlayerTradeSettings copy = new PlayerTradeSettings();
+        copy.setId(row.getId());
+        copy.setPlayerUuid(row.getPlayerUuid());
+        copy.setPlayerName(row.getPlayerName());
+        copy.setTradeEnabled(row.isTradeEnabled());
+        copy.setBlockedPlayersJson(row.getBlockedPlayersJson());
+        copy.setTotalTrades(row.getTotalTrades());
+        copy.setTotalMoneyTraded(row.getTotalMoneyTraded());
+        copy.setTotalExpTraded(row.getTotalExpTraded());
+        copy.setLastTradeTime(row.getLastTradeTime());
+        return copy;
+    }
+
+    /** The one row the store holds for the test player. */
+    private PlayerTradeSettings storedRow() {
+        assertThat(store).hasSize(1);
+        return store.get(0);
+    }
+
     /**
      * The stored row is gone and cannot be re-created either: no row for the player turns up, and the
      * re-creating insert reaches no row (the JSON backend ignores an insert whose id it already holds), so
@@ -112,11 +169,7 @@ class TradeLogServiceTest {
         @Test
         @DisplayName("getOrCreateSettings should create new settings if not found")
         void createNewSettings() {
-            when(settingsOperator.query()).thenReturn(queryBuilder);
-        when(queryBuilder.where(anyString())).thenReturn(queryBuilder);
-        when(queryBuilder.eq(any())).thenReturn(queryBuilder);
-        when(queryBuilder.list())
-                    .thenReturn(Collections.emptyList());
+            storeHolds(); // an empty table that keeps what is inserted: the new row is read back (Codex run 1 on PR #66)
 
             PlayerTradeSettings result = service.getOrCreateSettings(playerUuid, "TestPlayer");
 
@@ -137,22 +190,20 @@ class TradeLogServiceTest {
             PlayerTradeSettings result = service.getOrCreateSettings(playerUuid, "TestPlayer");
 
             assertThat(result).isSameAs(cached);
-            verify(settingsOperator, never()).getAll(any());
+            verify(settingsOperator, never()).query();
         }
 
         @Test
         @DisplayName("getOrCreateSettings should update name if changed")
         void updateNameIfChanged() {
             PlayerTradeSettings existing = new PlayerTradeSettings(playerUuid, "OldName");
-            when(settingsOperator.query()).thenReturn(queryBuilder);
-        when(queryBuilder.where(anyString())).thenReturn(queryBuilder);
-        when(queryBuilder.eq(any())).thenReturn(queryBuilder);
-        when(queryBuilder.list())
-                    .thenReturn(Collections.singletonList(existing));
+            existing.setId(playerUuid.toString());
+            storeHolds(existing);
 
             PlayerTradeSettings result = service.getOrCreateSettings(playerUuid, "NewName");
 
             assertThat(result.getPlayerName()).isEqualTo("NewName");
+            assertThat(storedRow().getPlayerName()).as("the new name is written, not only returned").isEqualTo("NewName");
         }
 
         @Test
@@ -167,18 +218,23 @@ class TradeLogServiceTest {
 
             service.getOrCreateSettings(playerUuid, "TestPlayer");
 
-            // saveSettings would call runTaskAsynchronously, and name shouldn't change
+            // The name is the same, so nothing is written
             assertThat(existing.getPlayerName()).isEqualTo("TestPlayer");
+            verify(settingsOperator, never()).updateIf(any(), any(com.ultikits.ultitools.entities.WhereCondition[].class));
         }
 
         @Test
         @DisplayName("getOrCreateSettings should handle null result from getAll")
         void handleNullResult() {
-            when(settingsOperator.query()).thenReturn(queryBuilder);
-        when(queryBuilder.where(anyString())).thenReturn(queryBuilder);
-        when(queryBuilder.eq(any())).thenReturn(queryBuilder);
-        when(queryBuilder.list())
-                    .thenReturn(null);
+            storeHolds();
+            // The first read answers null; later reads see the table, so the inserted row is read back (Codex run 1)
+            lenient().when(queryBuilder.list()).thenReturn(null).thenAnswer(inv -> {
+                List<PlayerTradeSettings> copies = new ArrayList<>();
+                for (PlayerTradeSettings row : store) {
+                    copies.add(copy(row));
+                }
+                return copies;
+            });
 
             PlayerTradeSettings result = service.getOrCreateSettings(playerUuid, "TestPlayer");
 
@@ -243,12 +299,13 @@ class TradeLogServiceTest {
             PlayerTradeSettings result = service.getSettings(playerUuid);
 
             assertThat(result).isSameAs(cached);
-            verify(settingsOperator, never()).getAll(any());
+            verify(settingsOperator, never()).query();
         }
 
         @Test
-        @DisplayName("getSettings should cache results from DB")
+        @DisplayName("getSettings should cache results from DB for a player online on this server (UltiTrade#54: the cache is scoped to the player's time here)")
         void getSettingsCachesResult() throws Exception {
+            org.mockito.Mockito.doReturn(player).when(org.bukkit.Bukkit.getServer()).getPlayer(playerUuid);
             PlayerTradeSettings existing = new PlayerTradeSettings(playerUuid, "TestPlayer");
             when(settingsOperator.query()).thenReturn(queryBuilder);
         when(queryBuilder.where(anyString())).thenReturn(queryBuilder);
@@ -314,31 +371,26 @@ class TradeLogServiceTest {
         @Test
         @DisplayName("toggleTrade should toggle and return new state")
         void toggleTrade() {
-            when(settingsOperator.query()).thenReturn(queryBuilder);
-        when(queryBuilder.where(anyString())).thenReturn(queryBuilder);
-        when(queryBuilder.eq(any())).thenReturn(queryBuilder);
-        when(queryBuilder.list())
-                    .thenReturn(Collections.emptyList());
+            storeHolds();
 
             boolean result = service.toggleTrade(player);
 
             assertThat(result).isFalse(); // Was true, now false
+            assertThat(storedRow().isTradeEnabled()).isFalse();
         }
 
         @Test
         @DisplayName("toggleTrade should toggle back to true")
         void toggleTradeBack() {
             PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, "TestPlayer");
+            settings.setId(playerUuid.toString());
             settings.setTradeEnabled(false);
-            when(settingsOperator.query()).thenReturn(queryBuilder);
-        when(queryBuilder.where(anyString())).thenReturn(queryBuilder);
-        when(queryBuilder.eq(any())).thenReturn(queryBuilder);
-        when(queryBuilder.list())
-                    .thenReturn(Collections.singletonList(settings));
+            storeHolds(settings);
 
             boolean result = service.toggleTrade(player);
 
             assertThat(result).isTrue(); // Was false, now true
+            assertThat(storedRow().isTradeEnabled()).isTrue();
         }
     }
 
@@ -382,15 +434,12 @@ class TradeLogServiceTest {
         @DisplayName("blockPlayer should add to blocked list")
         void blockPlayer() {
             UUID targetUuid = UUID.randomUUID();
-            when(settingsOperator.query()).thenReturn(queryBuilder);
-        when(queryBuilder.where(anyString())).thenReturn(queryBuilder);
-        when(queryBuilder.eq(any())).thenReturn(queryBuilder);
-        when(queryBuilder.list())
-                    .thenReturn(Collections.emptyList());
+            storeHolds();
 
             boolean result = service.blockPlayer(player, targetUuid);
 
             assertThat(result).isTrue();
+            assertThat(storedRow().isBlocked(targetUuid.toString())).isTrue();
         }
 
         @Test
@@ -418,14 +467,14 @@ class TradeLogServiceTest {
             UUID targetUuid = UUID.randomUUID();
             PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, "TestPlayer");
             settings.blockPlayer(targetUuid.toString());
+            settings.setId(playerUuid.toString());
+            storeHolds(settings);
 
-            Map<UUID, PlayerTradeSettings> cache = UltiTradeTestHelper.getField(service, "settingsCache");
-            cache.put(playerUuid, settings);
+            assertThat(service.block(player, targetUuid)).isEqualTo(TradeLogService.SettingsWrite.UNCHANGED);
 
-            service.blockPlayer(player, targetUuid);
-
-            // saveSettings is not called for duplicates
-            // (the blockPlayer method returns false and doesn't call saveSettings)
+            // the stored list already holds the target: nothing is written
+            verify(settingsOperator, never()).updateIf(any(), any(com.ultikits.ultitools.entities.WhereCondition[].class));
+            verify(settingsOperator, never()).insert(any(PlayerTradeSettings.class));
         }
 
         @Test
@@ -434,17 +483,13 @@ class TradeLogServiceTest {
             UUID targetUuid = UUID.randomUUID();
             PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, "TestPlayer");
             settings.blockPlayer(targetUuid.toString());
-            when(settingsOperator.query()).thenReturn(queryBuilder);
-        when(queryBuilder.where(anyString())).thenReturn(queryBuilder);
-        when(queryBuilder.eq(any())).thenReturn(queryBuilder);
-        when(queryBuilder.list())
-                    .thenReturn(Collections.singletonList(settings));
+            settings.setId(playerUuid.toString());
+            storeHolds(settings);
 
-            Map<UUID, PlayerTradeSettings> cache = UltiTradeTestHelper.getField(service, "settingsCache");
-            cache.put(playerUuid, settings);
             boolean result = service.unblockPlayer(player, targetUuid);
 
             assertThat(result).isTrue();
+            assertThat(storedRow().isBlocked(targetUuid.toString())).isFalse();
         }
 
         @Test
@@ -623,45 +668,26 @@ class TradeLogServiceTest {
         }
 
         @Test
-        @DisplayName("shutdown should save cached settings")
-        void saveCachedSettings() throws Exception {
+        @DisplayName("shutdown writes no cached settings: every change was written when made, and a cached copy would revert another server's change (UltiKits/UltiTrade#54, decision 2026-10-06 00:04)")
+        void shutdownWritesNoCachedSettings() throws Exception {
             Map<UUID, PlayerTradeSettings> cache = UltiTradeTestHelper.getField(service, "settingsCache");
             PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, "TestPlayer");
+            settings.setTradeEnabled(false);
             cache.put(playerUuid, settings);
+            PlayerTradeSettings gone = new PlayerTradeSettings(UUID.randomUUID(), "Other");
+            gone.setId("row-deleted-while-running");
+            cache.put(UUID.fromString(gone.getPlayerUuid()), gone);
 
             service.shutdown();
 
-            verify(settingsOperator).updateCounted(settings);
-            verify(settingsOperator, never()).update(any(PlayerTradeSettings.class));
+            verifyNoInteractions(settingsOperator);
             verify(UltiTradeTestHelper.getMockLogger(), never()).warn(anyString());
             verify(UltiTradeTestHelper.getMockLogger(), never()).warn(any(Throwable.class), anyString());
+            assertThat(cache).isEmpty();
         }
 
         @Test
-        @DisplayName("a cached settings object whose stored row is gone and cannot be re-created is logged as not saved at shutdown, naming the player (UltiKits/UltiTrade#52)")
-        void shutdownSaveOfAMissingRowIsLoggedAsFailed() throws Exception {
-            Map<UUID, PlayerTradeSettings> cache = UltiTradeTestHelper.getField(service, "settingsCache");
-            PlayerTradeSettings gone = new PlayerTradeSettings(playerUuid, "TestPlayer");
-            gone.setId("row-deleted-while-running");
-            cache.put(playerUuid, gone);
-            UUID otherUuid = UUID.randomUUID();
-            PlayerTradeSettings kept = new PlayerTradeSettings(otherUuid, "Other");
-            cache.put(otherUuid, kept);
-            when(settingsOperator.updateCounted(gone)).thenReturn(0);
-            noRowCanBeRecreated();
-
-            service.shutdown();
-
-            verify(UltiTradeTestHelper.getMockLogger()).warn(
-                    zhLine("log_settings_save_failed").replace("{PLAYER}", playerUuid.toString()));
-            verify(UltiTradeTestHelper.getMockLogger(), never()).warn(
-                    zhLine("log_settings_save_failed").replace("{PLAYER}", otherUuid.toString()));
-            verify(settingsOperator).updateCounted(kept);
-            assertThat(cache).as("the cache is cleared whatever the writes returned").isEmpty();
-        }
-
-        @Test
-        @DisplayName("shutdown should clear cache after saving")
+        @DisplayName("shutdown should clear the cache")
         void clearCacheAfterSaving() throws Exception {
             Map<UUID, PlayerTradeSettings> cache = UltiTradeTestHelper.getField(service, "settingsCache");
             cache.put(playerUuid, new PlayerTradeSettings(playerUuid, "TestPlayer"));
@@ -669,24 +695,6 @@ class TradeLogServiceTest {
             service.shutdown();
 
             assertThat(cache).isEmpty();
-        }
-
-        @Test
-        @DisplayName("shutdown should handle update failure gracefully")
-        void handleUpdateFailure() throws Exception {
-            Map<UUID, PlayerTradeSettings> cache = UltiTradeTestHelper.getField(service, "settingsCache");
-            PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, "TestPlayer");
-            cache.put(playerUuid, settings);
-
-            RuntimeException failure = new RuntimeException("DB error");
-            doThrow(failure).when(settingsOperator).updateCounted(settings);
-
-            // Should not throw
-            service.shutdown();
-
-            assertThat(cache).isEmpty();
-            verify(UltiTradeTestHelper.getMockLogger()).warn(failure,
-                    zhLine("log_settings_save_failed").replace("{PLAYER}", playerUuid.toString()));
         }
 
         @Test
@@ -876,99 +884,58 @@ class TradeLogServiceTest {
     }
 
     @Nested
-    @DisplayName("Save Settings")
+    @DisplayName("Settings writes: a write that reaches no row is reported, never passed as saved (UltiKits/UltiTrade#52, through #54's conditional write)")
     class SaveSettings {
 
-        @Test
-        @DisplayName("saveSettings should schedule async update")
-        void saveSettingsAsync() throws Exception {
-            UltiTradeTestHelper.setField(service, "bukkitPlugin", org.bukkit.Bukkit.getPluginManager().getPlugin("UltiTools"));
-
-            PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, "TestPlayer");
-            service.saveSettings(settings);
-
-            verify(org.bukkit.Bukkit.getServer().getScheduler())
-                    .runTaskAsynchronously(any(), any(Runnable.class));
-        }
+        // The whole-object saveSettings these tests exercised was removed with UltiKits/UltiTrade#54
+        // (decision 2026-10-06 00:04): every change now re-reads the row and writes conditionally. #52's
+        // claim is unchanged and is pinned here on the new path.
 
         @Test
-        @DisplayName("saveSettings should handle exception in async task")
-        void saveSettingsException() throws Exception {
-            UltiTradeTestHelper.setField(service, "bukkitPlugin", org.bukkit.Bukkit.getPluginManager().getPlugin("UltiTools"));
-
-            PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, "TestPlayer");
-
-            org.bukkit.scheduler.BukkitScheduler scheduler = org.bukkit.Bukkit.getServer().getScheduler();
-            org.mockito.ArgumentCaptor<Runnable> captor = org.mockito.ArgumentCaptor.forClass(Runnable.class);
-
-            RuntimeException failure = new RuntimeException("DB error");
-            doThrow(failure).when(settingsOperator).updateCounted(any());
-
-            service.saveSettings(settings);
-
-            verify(scheduler).runTaskAsynchronously(any(), captor.capture());
-
-            // Should not throw
-            captor.getValue().run();
-            verify(UltiTradeTestHelper.getMockLogger()).warn(failure, zhLine("log_settings_write_failed"));
-        }
-
-        @Test
-        @DisplayName("a settings save whose stored row is gone and cannot be re-created is logged as not saved, on the inline path (UltiKits/UltiTrade#52)")
-        void saveOfAMissingRowIsLoggedAsFailedInline() throws Exception {
-            // No enabled plugin to schedule through, so the write runs on the calling thread.
-            PlayerTradeSettings gone = new PlayerTradeSettings(playerUuid, "TestPlayer");
-            gone.setId("row-deleted-while-running");
-            when(settingsOperator.updateCounted(gone)).thenReturn(0);
+        @DisplayName("a toggle whose stored row is gone and cannot be re-created is logged as not saved, naming the player, and reported FAILED")
+        void toggleOfAMissingRowIsLoggedAsFailed() throws Exception {
             noRowCanBeRecreated();
 
-            service.saveSettings(gone);
+            TradeLogService.SettingsChangeResult result = service.toggle(player);
 
-            verify(settingsOperator, org.mockito.Mockito.atLeastOnce()).updateCounted(gone);
+            assertThat(result.getWrite()).isEqualTo(TradeLogService.SettingsWrite.FAILED);
+            verify(UltiTradeTestHelper.getMockLogger()).warn(any(Throwable.class),
+                    eq(zhLine("log_settings_save_failed").replace("{PLAYER}", "TestPlayer")));
             verify(settingsOperator, never()).update(any(PlayerTradeSettings.class));
-            verify(UltiTradeTestHelper.getMockLogger()).warn(zhLine("log_settings_write_failed"));
         }
 
         @Test
-        @DisplayName("a settings save whose stored row is gone and cannot be re-created is logged as not saved, on the asynchronous path (UltiKits/UltiTrade#52)")
-        void saveOfAMissingRowIsLoggedAsFailedAsync() throws Exception {
-            UltiTradeTestHelper.setField(service, "bukkitPlugin", org.bukkit.Bukkit.getPluginManager().getPlugin("UltiTools"));
-            PlayerTradeSettings gone = new PlayerTradeSettings(playerUuid, "TestPlayer");
-            when(settingsOperator.updateCounted(gone)).thenReturn(0);
+        @DisplayName("a post-trade statistics update whose stored row is gone and cannot be re-created is logged as not saved, on the inline path")
+        void statsOfAMissingRowIsLoggedAsFailedInline() throws Exception {
+            // No enabled plugin to schedule through, so the write runs on the calling thread.
             noRowCanBeRecreated();
-            org.mockito.ArgumentCaptor<Runnable> captor = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+            Player partner = UltiTradeTestHelper.createMockPlayer("Partner", UUID.randomUUID());
+            com.ultikits.plugins.trade.entity.TradeSession session =
+                    new com.ultikits.plugins.trade.entity.TradeSession(player, partner);
 
-            service.saveSettings(gone);
-            verify(org.bukkit.Bukkit.getServer().getScheduler()).runTaskAsynchronously(any(), captor.capture());
-            captor.getValue().run();
+            service.logCompletedTrade(session, player, partner, 0.0, 0);
 
-            verify(UltiTradeTestHelper.getMockLogger()).warn(zhLine("log_settings_write_failed"));
+            verify(UltiTradeTestHelper.getMockLogger()).warn(any(Throwable.class),
+                    eq(zhLine("log_settings_save_failed").replace("{PLAYER}", "TestPlayer")));
         }
 
         @Test
-        @DisplayName("control: a settings save that wrote its row logs nothing (UltiKits/UltiTrade#52)")
-        void saveThatWroteItsRowLogsNothing() throws Exception {
-            PlayerTradeSettings settings = new PlayerTradeSettings(playerUuid, "TestPlayer");
+        @DisplayName("control: a toggle that wrote its row logs nothing")
+        void toggleThatWroteItsRowLogsNothing() throws Exception {
+            PlayerTradeSettings stored = new PlayerTradeSettings(playerUuid, "TestPlayer");
+            stored.setId(playerUuid.toString());
+            lenient().when(settingsOperator.query()).thenReturn(queryBuilder);
+            lenient().when(queryBuilder.where(anyString())).thenReturn(queryBuilder);
+            lenient().when(queryBuilder.eq(any())).thenReturn(queryBuilder);
+            lenient().when(queryBuilder.list()).thenReturn(Collections.singletonList(stored));
+            when(settingsOperator.updateIf(any(), any(com.ultikits.ultitools.entities.WhereCondition[].class))).thenReturn(true);
 
-            service.saveSettings(settings);
+            TradeLogService.SettingsChangeResult result = service.toggle(player);
 
-            verify(settingsOperator).updateCounted(settings);
+            assertThat(result.getWrite()).isEqualTo(TradeLogService.SettingsWrite.WRITTEN);
+            assertThat(result.getSettings().isTradeEnabled()).isFalse();
             verify(UltiTradeTestHelper.getMockLogger(), never()).warn(anyString());
             verify(UltiTradeTestHelper.getMockLogger(), never()).warn(any(Throwable.class), anyString());
-        }
-
-        @Test
-        @DisplayName("a toggle whose stored row is gone and cannot be re-created is logged as not saved (UltiKits/UltiTrade#52)")
-        void toggleOfAMissingRowIsLoggedAsFailed() throws Exception {
-            Map<UUID, PlayerTradeSettings> cache = UltiTradeTestHelper.getField(service, "settingsCache");
-            PlayerTradeSettings gone = new PlayerTradeSettings(playerUuid, "TestPlayer");
-            cache.put(playerUuid, gone);
-            when(settingsOperator.updateCounted(gone)).thenReturn(0);
-            noRowCanBeRecreated();
-
-            service.toggleTrade(player);
-
-            verify(UltiTradeTestHelper.getMockLogger()).warn(zhLine("log_settings_write_failed"));
         }
     }
 
