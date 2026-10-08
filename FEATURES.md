@@ -315,7 +315,8 @@ appears outside one.
   deposit: the payer is refunded and the payee keeps the payment) or destroyed (a withdrawal: never
   refunded). Reading the balance again cannot tell, because other writers may change it too. The SEVERE
   line of `ultitrade.money.outcome-unknown-log` names whose balance to check and for how much
-  (`UltiKits/UltiTrade#60`). The claim of a saved stake (`trade_pending_returns`) already reads its row
+  (`UltiKits/UltiTrade#60`); accepted limitation (maintainer 2026-10-08), unit-pinned by
+  `TradeMoneySettlementTest`. The claim of a saved stake (`trade_pending_returns`) already reads its row
   again after a throw and logs the outcome when the row changed (`UltiKits/UltiTrade#56`).
 - **On Paper a failed player-data save is not reported to the module.** `Player#saveData()` logs
   vanilla's own `Failed to save player data for <name>` and returns normally, so the module's "player
