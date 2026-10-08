@@ -237,7 +237,8 @@ private String guiTitle = "&6与 {PLAYER} 交易";
   the payer is refunded and the payee keeps the payment) or destroyed (a withdrawal: never refunded).
   The console logs a SEVERE line beginning `Outcome unknown:` that names the player and the exact amount;
   check that player's balance for that amount and correct it by hand (UltiKits/UltiTrade#60). Reading the
-  balance again cannot settle it, because other plugins or servers may change it too.
+  balance again cannot settle it, because other plugins or servers may change it too. This is an
+  accepted limitation (maintainer 2026-10-08), unit-pinned by `TradeMoneySettlementTest`.
 - **Edit `trade_player_settings` by hand only with the values the module writes.** Every settings change is written
   only if the stored row still holds what was read (UltiKits/UltiTrade#54). On SQLite a hand-written value in another
   form — `trade_enabled = 'false'` instead of `0`, `total_money_traded = '1.50'` instead of `1.5` — never compares
@@ -262,7 +263,7 @@ private String guiTitle = "&6与 {PLAYER} 交易";
 - **已在经济插件中生效、随后才报错的交易付款按未付款处理。** 若经济插件的扣款或付款在其存储已经生效后才抛出错误（应答返回前连接中断），
   交易会按未转移处理：此时可能凭空产生金币（付款：付款方被退款而收款方保留了这笔钱）或使金币消失（扣款：永远不会退还）。
   控制台会记录一条以 `结果未知：` 开头的 SEVERE 日志，写明玩家与精确金额；请检查该玩家的余额是否有这笔金额的变动并手动更正（UltiKits/UltiTrade#60）。
-  重新读取余额无法判断，因为其他插件或服务器也可能修改余额。
+  重新读取余额无法判断，因为其他插件或服务器也可能修改余额。此为已接受的限制（维护者 2026-10-08），由 `TradeMoneySettlementTest` 单元测试固定。
 - **手动编辑 `trade_player_settings` 时只写入本模块会写入的取值形式。** 每次设置修改仅在存储行仍为读取时的值时才写入（UltiKits/UltiTrade#54）。在 SQLite 上，
   以其他形式手写的值（如用 `trade_enabled = 'false'` 代替 `0`，用 `total_money_traded = '1.50'` 代替 `1.5`）永远不会比较相等，该玩家之后的每次修改都会提示
   「你的交易设置正在保存中，请稍后重试」，其交易统计也不会被计入，直到该单元格改写为 `0`/`1` 或普通数字为止。MySQL 按数值比较数字，不受影响。
