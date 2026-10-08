@@ -1,6 +1,6 @@
 # UltiTrade
 
-[![UltiTools-API](https://img.shields.io/badge/UltiTools--API-6.x-blue)](https://github.com/UltiKits/UltiTools-Reborn)
+[![UltiTools-API](https://img.shields.io/badge/UltiTools--API-6.3.0%2B-blue)](https://github.com/UltiKits/UltiTools-Reborn)
 [![Paper](https://img.shields.io/badge/Paper-1.21%2B-green)](https://papermc.io/)
 [![Java](https://img.shields.io/badge/Java-21%2B-orange)](https://adoptium.net/)
 
@@ -33,13 +33,13 @@ UltiTrade 是一个功能完整的 Minecraft 玩家间交易系统插件，基�
 ## 📦 安装
 
 1. 安装前置插件：
-   - [UltiTools-API](https://github.com/UltiKits/UltiTools-Reborn) (必需)
+   - [UltiTools-API](https://github.com/UltiKits/UltiTools-Reborn) 6.3.0 或更高版本 (必需)。本模块声明 `api-version: 630`，更早的框架会拒绝加载它
    - [Vault](https://www.spigotmc.org/resources/vault.34315/) (金币交易)
    - [PlaceholderAPI](https://www.spigotmc.org/resources/placeholderapi.6245/) (可选)
 
 2. 将 `UltiTrade.jar` 放入 `plugins/UltiTools/plugins/` 目录
 
-3. 重启服务器或使用 `/ultitools reload`
+3. 重启服务器（`/ul reload` 只重载配置，不会加载新的模块 JAR）
 
 ## 🎮 命令
 
@@ -142,7 +142,7 @@ enableClickableButtons: true # 启用聊天可点击按钮
 
 ## 🔧 技术架构
 
-- **框架**: UltiTools-API 6.2.1+
+- **框架**: UltiTools-API 6.3.0+
 - **注解驱动**: `@Service`, `@Autowired`, `@CmdMapping`, `@Table`, `@Scheduled`
 - **数据持久化**: Query DSL + DataOperator ORM
 - **依赖注入**: UltiTools IoC 容器

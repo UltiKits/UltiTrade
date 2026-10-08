@@ -29,6 +29,30 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- This version requires UltiTools 6.3.0 or later and declares `api-version: 630` in `plugin.yml`
+  (it was `621`; the last release, 1.0.0, declared `620`). Every earlier framework checks this value
+  and refuses the module with a warning that the UltiTools version is outdated, naming it `UltiTrade`;
+  the module's own start-up (`registerSelf`) does not run. Frameworks 6.2.1 to 6.2.5 accepted the old
+  `621`. An error about a class those versions do not have (this module uses `ReloadReport`, added in
+  6.3.0) may be logged first, and on 6.2.1–6.2.4, which check only after building the module's
+  components, it may take the warning's place. The README's framework minimum and badge now say
+  UltiTools 6.3.0+, and its install step says a server restart is needed to load the module
+  (`/ul reload` does not load a new module jar) (UltiKits/UltiTools-Reborn#544).
+- 本版本需要 UltiTools 6.3.0 或更高版本，并在 `plugin.yml` 中声明 `api-version: 630`（原为 `621`；上一个发布版本 1.0.0
+  声明的是 `620`）。所有更早的框架都会检查该值并拒绝加载本模块，给出点名 `UltiTrade` 的"UltiTools 版本过旧"警告；
+  本模块自身的启动逻辑（`registerSelf`）不会运行。6.2.1 至 6.2.5 此前接受旧的 `621`。在这些版本上可能先记录一条
+  缺少类的错误（本模块使用 6.3.0 新增的 `ReloadReport`）；6.2.1–6.2.4 在构建模块组件之后才检查，该错误可能取代警告。
+  README 中的框架最低版本与徽章已改为 UltiTools 6.3.0+，安装步骤改为需要重启服务器（`/ul reload` 不会加载新的模块 JAR）
+  （UltiKits/UltiTools-Reborn#544）。
+
+- `plugin.yml` now declares `identify-string: ultitrade`, the key of this module's entry in the
+  UltiCloud catalogue. The framework's update check and `/upm update` skip a module that does not
+  declare it, so this module now takes part in both: a later published version carrying the same key
+  is reported at startup and can be installed with `/upm update` (UltiKits/UltiTools-Reborn#474).
+- `plugin.yml` 现在声明 `identify-string: ultitrade`，即本模块在 UltiCloud 模块目录中的条目键。框架的更新检查和
+  `/upm update` 会跳过未声明该键的模块，因此本模块现在会参与两者：带有同一键的更高发布版本会在启动时提示，
+  并可用 `/upm update` 安装（UltiKits/UltiTools-Reborn#474）。
+
 - Message and title settings in `config/trade.yml` — the trade-window title (`gui-title`) and the seven
   messages (`messages.request-sent`, `request-received`, `request-timeout`, `trade-complete`,
   `trade-cancelled`, `trade-disabled`, `player-blocked`) — are written in the server's language when the
