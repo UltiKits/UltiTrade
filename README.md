@@ -272,6 +272,10 @@ private String guiTitle = "&6与 {PLAYER} 交易";
 - **经验超过约 411,616 点（约 320 级）时，Paper 自身的经验计算存在偏差。** 交易后发送方剩余的经验通过 `Player#giveExp` 重建，
   在这一数量级上 Paper 实际保存的数值可能比给予的多或少数点至约 100 点；服务器自带的 `/xp` 命令也是如此。本模块读取玩家经验总量是精确的（UltiKits/UltiTrade#65）。
 
+UltiTrade requires Minecraft 1.21 or later (Paper 1.21+), even though the UltiTools-API 6.3.0 framework itself runs on Paper 1.19.2 build 163 or later. On Paper 1.19.2–1.20.6, the module can load, but the trade GUI fails with `IncompatibleClassChangeError`: `InventoryView` became an interface in Minecraft 1.21, and framework-loaded modules do not receive Paper's bytecode rewriting. Older servers also lack APIs used by this module: `OfflinePlayer.getLocation()` on 1.19.4 and below, and `InventoryView.setTitle()` on 1.19.2 and below. Run this module on Paper 1.21 or later. Backward compatibility is tracked in [UltiKits/UltiTools-Reborn#655](https://github.com/UltiKits/UltiTools-Reborn/issues/655).
+
+UltiTrade 需要 Minecraft 1.21 或更高版本（Paper 1.21+），即使 UltiTools-API 6.3.0 框架本身可运行于 Paper 1.19.2 build 163 或更高版本。在 Paper 1.19.2–1.20.6 上，模块可能成功加载，但交易界面会出现 `IncompatibleClassChangeError`：`InventoryView` 在 Minecraft 1.21 中由类变为接口，而由框架加载的模块不会经过 Paper 的字节码改写。更早的服务器还缺少本模块使用的 API：1.19.4 及以下没有 `OfflinePlayer.getLocation()`，1.19.2 及以下没有 `InventoryView.setTitle()`。请在 Paper 1.21 或更高版本上运行本模块。向下兼容工作由 [UltiKits/UltiTools-Reborn#655](https://github.com/UltiKits/UltiTools-Reborn/issues/655) 跟踪。
+
 ## 📜 许可证
 
 本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
