@@ -56,6 +56,12 @@ for real-machine verification, not user-facing documentation.
 - **Item-safety is this module's own hazard class:** every negative row that could lose
   or duplicate an item states the EXACT item state on both sides afterward, not merely "the trade
   is cancelled".
+- **Console lines carry the module-logger prefix.** Every line this module logs reaches the console as
+  `[UltiTools] [UltiTrade] <text>`: Paper adds `[UltiTools] `, and the framework's module logger (`PluginLogger`)
+  adds `[UltiTrade] ` (this module's `plugin.yml` `name`). A console line quoted below is the `<text>` after both
+  prefixes, character for character, unless the row quotes a prefix itself; a row that counts or excludes this
+  module's console lines means lines carrying `[UltiTrade]`. A line the framework logs is quoted after Paper's
+  prefix, with its own `[UltiTools-API] ` where the row shows it.
 
 ## Trade Requests
 
