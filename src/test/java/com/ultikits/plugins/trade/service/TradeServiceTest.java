@@ -467,6 +467,13 @@ class TradeServiceTest {
     @DisplayName("Send Request Validation")
     class SendRequestValidation {
 
+        @BeforeEach
+        void playersInSameWorld() {
+            // Cross-world cases override this ordinary request fixture explicitly.
+            doReturn(player1.getWorld()).when(player2).getWorld();
+            doReturn(player1.getLocation().clone()).when(player2).getLocation();
+        }
+
         @Test
         @DisplayName("sendRequest should fail if sender trade disabled")
         void senderTradeDisabled() {
@@ -551,6 +558,56 @@ class TradeServiceTest {
         }
 
         @Test
+        @DisplayName("sendRequest refuses cross-world trading even without a distance limit")
+        void crossWorldRefusedWithoutDistanceLimit() throws Exception {
+            when(config.getMaxDistance()).thenReturn(0);
+            when(config.isAllowCrossWorld()).thenReturn(false);
+            when(player1.getWorld()).thenReturn(mock(World.class));
+            when(player2.getWorld()).thenReturn(mock(World.class));
+
+            boolean result = service.sendRequest(player1, player2);
+
+            assertThat(result).isFalse();
+            verify(player1).sendMessage(contains("不能跨世界交易！"));
+            Map<UUID, TradeRequest> pendingRequests = UltiTradeTestHelper.getField(service, "pendingRequests");
+            assertThat(pendingRequests).doesNotContainKey(uuid2);
+        }
+
+        @Test
+        @DisplayName("sendRequest allows cross-world trading with max-distance 0 when configured")
+        void crossWorldAllowedWithoutDistanceLimit() throws Exception {
+            when(config.getMaxDistance()).thenReturn(0);
+            when(config.isAllowCrossWorld()).thenReturn(true);
+            World otherWorld = mock(World.class);
+            when(player2.getWorld()).thenReturn(otherWorld);
+            when(player2.getLocation()).thenReturn(new Location(otherWorld, 10000, 64, 0));
+
+            boolean result = service.sendRequest(player1, player2);
+
+            assertThat(result).isTrue();
+            Map<UUID, TradeRequest> pendingRequests = UltiTradeTestHelper.getField(service, "pendingRequests");
+            assertThat(pendingRequests).containsKey(uuid2);
+            assertThat(pendingRequests.get(uuid2).getSender()).isEqualTo(uuid1);
+        }
+
+        @Test
+        @DisplayName("sendRequest allows cross-world trading with max-distance 50 when configured")
+        void crossWorldAllowedWithDistanceLimit() throws Exception {
+            when(config.getMaxDistance()).thenReturn(50);
+            when(config.isAllowCrossWorld()).thenReturn(true);
+            World otherWorld = mock(World.class);
+            when(player2.getWorld()).thenReturn(otherWorld);
+            when(player2.getLocation()).thenReturn(new Location(otherWorld, 10000, 64, 0));
+
+            boolean result = service.sendRequest(player1, player2);
+
+            assertThat(result).isTrue();
+            Map<UUID, TradeRequest> pendingRequests = UltiTradeTestHelper.getField(service, "pendingRequests");
+            assertThat(pendingRequests).containsKey(uuid2);
+            assertThat(pendingRequests.get(uuid2).getSender()).isEqualTo(uuid1);
+        }
+
+        @Test
         @DisplayName("sendRequest should fail if distance too far")
         void distanceTooFar() {
             when(config.getMaxDistance()).thenReturn(10);
@@ -573,6 +630,8 @@ class TradeServiceTest {
         @DisplayName("sendRequest should skip distance check when maxDistance is 0")
         void noDistanceLimit() {
             when(config.getMaxDistance()).thenReturn(0);
+            World world = player1.getWorld();
+            when(player2.getLocation()).thenReturn(new Location(world, 10000, 64, 0));
 
             boolean result = service.sendRequest(player1, player2);
 
@@ -694,6 +753,151 @@ class TradeServiceTest {
 
             assertThat(result).isFalse();
             verify(player1).sendMessage(contains("对方已离线"));
+        }
+    }
+
+    @Nested
+    @DisplayName("Accept Request - Current Location Policy")
+    class AcceptRequestLocationPolicy {
+
+        @BeforeEach
+        void prepareRequestPlayers() {
+            doReturn(player1.getWorld()).when(player2).getWorld();
+            doReturn(player1.getLocation().clone()).when(player2).getLocation();
+            when(config.isEnableBossbar()).thenReturn(false);
+            when(config.isEnableSounds()).thenReturn(false);
+            when(org.bukkit.Bukkit.getServer().getPlayer(uuid1)).thenReturn(player1);
+            when(org.bukkit.Bukkit.getServer().getPlayer(uuid2)).thenReturn(player2);
+        }
+
+        @Test
+        @DisplayName("accept refuses a world change even without a distance limit and consumes the request")
+        void acceptRefusesWorldChangeWithoutDistanceLimit() throws Exception {
+            when(config.getMaxDistance()).thenReturn(0);
+            assertThat(service.sendRequest(player1, player2)).isTrue();
+            moveRequesterToAnotherWorld();
+
+            assertAcceptanceRefused("不能跨世界交易！");
+        }
+
+        @Test
+        @DisplayName("accept refuses a world change with a positive distance limit")
+        void acceptRefusesWorldChangeWithDistanceLimit() throws Exception {
+            assertThat(service.sendRequest(player1, player2)).isTrue();
+            moveRequesterToAnotherWorld();
+
+            assertAcceptanceRefused("不能跨世界交易！");
+        }
+
+        @Test
+        @DisplayName("accept refuses when the players moved beyond the distance limit")
+        void acceptRefusesDistanceGrowth() throws Exception {
+            assertThat(service.sendRequest(player1, player2)).isTrue();
+            moveRequesterBeyondDistanceLimit();
+
+            assertAcceptanceRefused("距离太远，无法交易！");
+        }
+
+        @org.junit.jupiter.params.ParameterizedTest
+        @org.junit.jupiter.params.provider.ValueSource(ints = {0, 50})
+        @DisplayName("accept allows configured cross-world trading without comparing worlds' coordinates")
+        void acceptAllowsWorldChangeWhenConfigured(int maxDistance) throws Exception {
+            when(config.getMaxDistance()).thenReturn(maxDistance);
+            when(config.isAllowCrossWorld()).thenReturn(true);
+            assertThat(service.sendRequest(player1, player2)).isTrue();
+            moveRequesterToAnotherWorld();
+
+            assertThat(service.acceptRequest(player2)).isTrue();
+            assertTradeStartedAndRequestConsumed();
+        }
+
+        @Test
+        @DisplayName("accept still starts a same-world trade within the current distance limit")
+        void acceptAllowsSameWorldWithinDistance() throws Exception {
+            assertThat(service.sendRequest(player1, player2)).isTrue();
+            Location nearby = player2.getLocation().clone().add(5, 0, 0);
+            when(player1.getLocation()).thenReturn(nearby);
+
+            assertThat(service.acceptRequest(player2)).isTrue();
+            assertTradeStartedAndRequestConsumed();
+        }
+
+        @Test
+        @DisplayName("accept uses the cross-world policy in force at acceptance, not at request creation")
+        void acceptUsesCurrentCrossWorldPolicy() throws Exception {
+            when(config.isAllowCrossWorld()).thenReturn(true);
+            moveRequesterToAnotherWorld();
+            assertThat(service.sendRequest(player1, player2)).isTrue();
+            when(config.isAllowCrossWorld()).thenReturn(false);
+
+            assertAcceptanceRefused("不能跨世界交易！");
+        }
+
+        @Test
+        @DisplayName("accept uses the distance limit in force at acceptance")
+        void acceptUsesCurrentDistanceLimit() throws Exception {
+            assertThat(service.sendRequest(player1, player2)).isTrue();
+            when(config.getMaxDistance()).thenReturn(5);
+            Location nearby = player2.getLocation().clone().add(10, 0, 0);
+            when(player1.getLocation()).thenReturn(nearby);
+
+            assertAcceptanceRefused("距离太远，无法交易！");
+        }
+
+        @Test
+        @DisplayName("reverse-request auto-accept refuses a world change and consumes the old request")
+        void reverseRequestRefusesWorldChange() throws Exception {
+            when(config.getMaxDistance()).thenReturn(0);
+            assertThat(service.sendRequest(player1, player2)).isTrue();
+            moveRequesterToAnotherWorld();
+
+            assertThat(service.sendRequest(player2, player1)).isFalse();
+            assertRefusedState("不能跨世界交易！");
+        }
+
+        @Test
+        @DisplayName("reverse-request auto-accept refuses distance growth and consumes the old request")
+        void reverseRequestRefusesDistanceGrowth() throws Exception {
+            assertThat(service.sendRequest(player1, player2)).isTrue();
+            moveRequesterBeyondDistanceLimit();
+
+            assertThat(service.sendRequest(player2, player1)).isFalse();
+            assertRefusedState("距离太远，无法交易！");
+        }
+
+        private void moveRequesterToAnotherWorld() {
+            World otherWorld = mock(World.class);
+            when(player1.getWorld()).thenReturn(otherWorld);
+            when(player1.getLocation()).thenReturn(new Location(otherWorld, 10000, 64, 0));
+        }
+
+        private void moveRequesterBeyondDistanceLimit() {
+            Location farAway = player2.getLocation().clone().add(100, 0, 0);
+            when(player1.getLocation()).thenReturn(farAway);
+        }
+
+        private void assertAcceptanceRefused(String message) throws Exception {
+            assertThat(service.acceptRequest(player2)).isFalse();
+            assertRefusedState(message);
+        }
+
+        private void assertRefusedState(String message) throws Exception {
+            verify(player2).sendMessage(contains(message));
+            Map<UUID, TradeRequest> requests = UltiTradeTestHelper.getField(service, "pendingRequests");
+            assertThat(requests).doesNotContainKeys(uuid1, uuid2);
+            assertThat(service.isTrading(uuid1)).isFalse();
+            assertThat(service.isTrading(uuid2)).isFalse();
+            verify(player1, never()).openInventory(any(org.bukkit.inventory.Inventory.class));
+            verify(player2, never()).openInventory(any(org.bukkit.inventory.Inventory.class));
+        }
+
+        private void assertTradeStartedAndRequestConsumed() throws Exception {
+            Map<UUID, TradeRequest> requests = UltiTradeTestHelper.getField(service, "pendingRequests");
+            assertThat(requests).doesNotContainKey(uuid2);
+            assertThat(service.isTrading(uuid1)).isTrue();
+            assertThat(service.isTrading(uuid2)).isTrue();
+            verify(player1).openInventory(any(org.bukkit.inventory.Inventory.class));
+            verify(player2).openInventory(any(org.bukkit.inventory.Inventory.class));
         }
     }
 
@@ -2161,6 +2365,13 @@ class TradeServiceTest {
     @DisplayName("Request BossBar Countdown")
     class RequestBossBarCountdown {
 
+        @BeforeEach
+        void playersInSameWorld() {
+            // Cross-world cases override this ordinary request fixture explicitly.
+            doReturn(player1.getWorld()).when(player2).getWorld();
+            doReturn(player1.getLocation().clone()).when(player2).getLocation();
+        }
+
         @Test
         @DisplayName("countdown turns the bar pink between six and ten seconds remaining")
         void countdownTurnsPinkNearExpiry() throws Exception {
@@ -2252,6 +2463,8 @@ class TradeServiceTest {
         @Test
         @DisplayName("acceptRequest should start the trade when the requester is online")
         void acceptRequestStartsTrade() throws Exception {
+            doReturn(player1.getWorld()).when(player2).getWorld();
+            doReturn(player1.getLocation().clone()).when(player2).getLocation();
             Map<UUID, TradeRequest> pendingRequests = UltiTradeTestHelper.getField(service, "pendingRequests");
             TradeRequest request = new TradeRequest(uuid2, uuid1);
             pendingRequests.put(uuid1, request);

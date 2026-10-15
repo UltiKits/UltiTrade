@@ -100,6 +100,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Re-check the shared cross-world and distance policy at acceptance using current player locations
+  and configuration, including clickable acceptance and reverse-request auto-accept. Refusal consumes
+  the request and its BossBar and starts no trade; a policy reload applies at acceptance without
+  invalidating requests during reload (maintainer-approved extension of UltiKits/UltiTrade#79).
+- 接受请求时按双方当前位置和当前配置复查跨世界及距离策略，包括聊天按钮和反向请求自动接受；拒绝时清除请求及
+  BossBar，不开始交易。重载后的策略在接受时生效，无须在重载时清空请求（维护者决定在 UltiKits/UltiTrade#79 内修复）。
+
+- `allow-cross-world: false` now refuses trade requests between worlds even with `max-distance: 0`.
+  The world policy is checked independently of the distance limit; zero removes only the same-world
+  distance limit. Explicitly allowed cross-world requests remain allowed at both zero and positive
+  limits (UltiKits/UltiTrade#78).
+- 即使 `max-distance: 0`，`allow-cross-world: false` 现在也会拒绝不同世界之间的交易请求。
+  世界限制与距离限制独立检查；`0` 只取消同世界的距离限制。显式允许的跨世界请求在距离限制为零或正数时
+  仍然允许（UltiKits/UltiTrade#78）。
+
 - A trade's money now moves only when the economy confirms it. The trade checked each payer's balance, then withdrew and
   paid without reading whether the withdrawal succeeded, so a withdrawal refused after the check (the balance changed,
   for example on another server sharing the economy's database) still paid the other player, and the items still moved.

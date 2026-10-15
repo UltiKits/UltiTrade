@@ -528,6 +528,11 @@ class TradeConfigTextTest {
             set(service, "logService", logService);
             Player alice = player("Alice");
             Player bob = player("Bob");
+            org.bukkit.World world = mock(org.bukkit.World.class);
+            when(alice.getWorld()).thenReturn(world);
+            when(bob.getWorld()).thenReturn(world);
+            when(alice.getLocation()).thenReturn(new org.bukkit.Location(world, 0, 64, 0));
+            when(bob.getLocation()).thenReturn(new org.bukkit.Location(world, 1, 64, 0));
 
             when(logService.isTradeEnabled(alice.getUniqueId())).thenReturn(true);
             when(logService.isTradeEnabled(bob.getUniqueId())).thenReturn(false);
