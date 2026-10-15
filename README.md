@@ -55,34 +55,36 @@ UltiTrade 是一个功能完整的 Minecraft 玩家间交易系统插件，基�
 
 ## ⚙️ 配置
 
+配置文件位于 `plugins/UltiTools/pluginConfig/UltiTrade/config/trade.yml`：
+
 ```yaml
 # 基础设置
-requestTimeout: 30           # 交易请求超时时间（秒）
-maxDistance: 50              # 最大交易距离（-1 无限制）
-allowCrossWorld: false       # 是否允许跨世界交易
+request-timeout: 30           # 交易请求超时时间（秒，5-600）
+max-distance: 50              # 最大交易距离（格，0 无限制，最大 1000）
+allow-cross-world: false      # 是否允许跨世界交易
 
 # 交易功能
-enableMoneyTrade: true       # 启用金币交易
-enableExpTrade: true         # 启用经验交易
-enableShiftClick: true       # 启用 Shift+右键发起交易
+enable-money-trade: true      # 启用金币交易
+enable-exp-trade: true        # 启用经验交易
+enable-shift-click: true      # 启用 Shift+右键发起交易
 
 # 税收设置
-tradeTax: 0.0                # 金币交易税率（0-1）
-expTaxRate: 0.0              # 经验交易税率（0-1）
+trade-tax: 0.0                # 金币交易税率（0-1）
+exp-tax-rate: 0.0             # 经验交易税率（0-1）
 
 # 大额交易确认
-confirmThreshold: 10000      # 确认阈值（金币或经验）
+confirm-threshold: 10000      # 确认阈值（金币或经验）
 
 # 日志设置
-enableTradeLog: true         # 启用交易日志
-logRetentionDays: 30         # 日志保留天数
-cleanupIntervalHours: 24     # 清理间隔（小时）
+enable-trade-log: true        # 启用交易日志
+log-retention-days: 30        # 日志保留天数（1-365）
+cleanup-interval-hours: 24    # 清理间隔（小时，1-168）
 
 # 效果设置
-enableSounds: true           # 启用音效
-enableParticles: true        # 启用粒子效果
-enableBossbar: true          # 启用 BossBar 倒计时
-enableClickableButtons: true # 启用聊天可点击按钮
+enable-sounds: true           # 启用音效
+enable-particles: true        # 启用粒子效果
+enable-bossbar: true          # 启用 BossBar 倒计时
+enable-clickable-buttons: true # 启用聊天可点击按钮
 ```
 
 ## 📊 PlaceholderAPI 变量
