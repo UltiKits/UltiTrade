@@ -467,6 +467,13 @@ class TradeServiceTest {
     @DisplayName("Send Request Validation")
     class SendRequestValidation {
 
+        @BeforeEach
+        void playersInSameWorld() {
+            // Cross-world cases override this ordinary request fixture explicitly.
+            doReturn(player1.getWorld()).when(player2).getWorld();
+            doReturn(player1.getLocation().clone()).when(player2).getLocation();
+        }
+
         @Test
         @DisplayName("sendRequest should fail if sender trade disabled")
         void senderTradeDisabled() {
@@ -2176,6 +2183,13 @@ class TradeServiceTest {
     @Nested
     @DisplayName("Request BossBar Countdown")
     class RequestBossBarCountdown {
+
+        @BeforeEach
+        void playersInSameWorld() {
+            // Cross-world cases override this ordinary request fixture explicitly.
+            doReturn(player1.getWorld()).when(player2).getWorld();
+            doReturn(player1.getLocation().clone()).when(player2).getLocation();
+        }
 
         @Test
         @DisplayName("countdown turns the bar pink between six and ten seconds remaining")

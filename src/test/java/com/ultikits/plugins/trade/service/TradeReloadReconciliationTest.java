@@ -282,6 +282,8 @@ class TradeReloadReconciliationTest {
             UltiTradeTestHelper.setField(tradeService, "logService", requestLog);
             sender = UltiTradeTestHelper.createMockPlayer("Sender", UUID.randomUUID());
             receiver = UltiTradeTestHelper.createMockPlayer("Receiver", UUID.randomUUID());
+            doReturn(sender.getWorld()).when(receiver).getWorld();
+            doReturn(sender.getLocation().clone()).when(receiver).getLocation();
             UUID senderId = sender.getUniqueId();
             UUID receiverId = receiver.getUniqueId();
             doReturn(sender).when(server).getPlayer(senderId);
