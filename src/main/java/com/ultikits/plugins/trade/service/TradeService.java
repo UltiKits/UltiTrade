@@ -465,14 +465,15 @@ public class TradeService {
             return false;
         }
         
-        // Check distance
+        // Cross-world policy applies independently of the distance limit.
+        if (!config.isAllowCrossWorld() && !sender.getWorld().equals(target.getWorld())) {
+            sender.sendMessage(text(i18n("cross_world_disabled")));
+            return false;
+        }
+
+        // Distances are comparable only within the same world.
         if (config.getMaxDistance() > 0) {
-            if (!config.isAllowCrossWorld() && !sender.getWorld().equals(target.getWorld())) {
-                sender.sendMessage(text(i18n("cross_world_disabled")));
-                return false;
-            }
-            
-            if (sender.getWorld().equals(target.getWorld()) && 
+            if (sender.getWorld().equals(target.getWorld()) &&
                 sender.getLocation().distance(target.getLocation()) > config.getMaxDistance()) {
                 sender.sendMessage(text(i18n("too_far_away")));
                 return false;
