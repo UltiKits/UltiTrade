@@ -62,9 +62,20 @@ including `max-distance: 0`. Zero removes only the same-world distance limit; it
 cross-world trading. With `allow-cross-world: true`, requests between worlds are allowed and no
 cross-world distance comparison is made.
 
+The same policy is checked again when a pending request is accepted, using both players' current
+locations and the settings then in force. This includes `/trade accept`, its clickable chat button,
+and reverse-request auto-accept. A refused acceptance tells the accepting player "Cross-world trading
+is disabled!" or "Too far away to trade!", removes the pending request and its BossBar, and starts no
+trade. Reload does not invalidate pending requests immediately: they are judged against the reloaded
+policy when accepted, while their original request timeout remains unchanged. This is not continuous
+world/distance enforcement after a trade has already started.
+
 `allow-cross-world: false` 始终拒绝不同世界之间的交易请求，即使 `max-distance: 0` 也一样。
 `0` 只取消同世界的距离限制，不会开启跨世界交易；只有 `allow-cross-world: true` 才允许跨世界请求，
 此时不计算不同世界之间的距离。
+接受待处理请求时，会按双方当时的位置和当前生效的配置再次检查同一策略，包括命令、聊天接受按钮和反向请求自动接受。
+拒绝时会告知接受者原因，移除请求及其 BossBar，且不开始交易。重载不会立即清空待处理请求；接受时按重载后的策略判断，
+原请求的超时时间不变。交易开始后不会持续检查世界或距离。
 
 ```yaml
 # 基础设置
