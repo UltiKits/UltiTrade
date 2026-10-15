@@ -465,19 +465,14 @@ public class TradeService {
             return false;
         }
         
-        // Cross-world policy applies independently of the distance limit.
-        if (!config.isAllowCrossWorld() && !sender.getWorld().equals(target.getWorld())) {
-            sender.sendMessage(text(i18n("cross_world_disabled")));
-            return false;
-        }
-
-        // Distances are comparable only within the same world.
-        if (config.getMaxDistance() > 0) {
-            if (sender.getWorld().equals(target.getWorld()) &&
-                sender.getLocation().distance(target.getLocation()) > config.getMaxDistance()) {
-                sender.sendMessage(text(i18n("too_far_away")));
-                return false;
+        // A reverse request is an acceptance attempt, so a policy refusal consumes it too.
+        TradeRequest reverseRequest = pendingRequests.get(sender.getUniqueId());
+        if (!checkLocationPolicy(sender, target)) {
+            if (reverseRequest != null && reverseRequest.getSender().equals(target.getUniqueId())) {
+                removeBossBar(sender.getUniqueId());
+                pendingRequests.remove(sender.getUniqueId());
             }
+            return false;
         }
         
         // Check if there's already a pending request from sender
@@ -488,7 +483,6 @@ public class TradeService {
         }
         
         // Check if target has sent a request to sender (auto-accept)
-        TradeRequest reverseRequest = pendingRequests.get(sender.getUniqueId());
         if (reverseRequest != null && reverseRequest.getSender().equals(target.getUniqueId())) {
             removeBossBar(sender.getUniqueId());
             pendingRequests.remove(sender.getUniqueId());
@@ -517,6 +511,28 @@ public class TradeService {
         return true;
     }
     
+    /**
+     * Apply the current world and distance settings, notifying the player making the attempt on
+     * refusal. Both request creation (including reverse-request acceptance) and ordinary acceptance
+     * use this check; pending requests do not retain the location policy from their creation time.
+     */
+    private boolean checkLocationPolicy(Player player, Player other) {
+        boolean sameWorld = player.getWorld().equals(other.getWorld());
+        if (!config.isAllowCrossWorld() && !sameWorld) {
+            player.sendMessage(text(i18n("cross_world_disabled")));
+            return false;
+        }
+
+        // Distances are comparable only within the same world.
+        int maxDistance = config.getMaxDistance();
+        if (sameWorld && maxDistance > 0
+                && player.getLocation().distance(other.getLocation()) > maxDistance) {
+            player.sendMessage(text(i18n("too_far_away")));
+            return false;
+        }
+        return true;
+    }
+
     /**
      * Notify player of trade request with clickable buttons.
      */
@@ -633,6 +649,10 @@ public class TradeService {
             return false;
         }
         
+        if (!checkLocationPolicy(player, sender)) {
+            return false;
+        }
+
         startTrade(sender, player);
         return true;
     }
