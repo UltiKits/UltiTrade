@@ -574,6 +574,40 @@ class TradeServiceTest {
         }
 
         @Test
+        @DisplayName("sendRequest allows cross-world trading with max-distance 0 when configured")
+        void crossWorldAllowedWithoutDistanceLimit() throws Exception {
+            when(config.getMaxDistance()).thenReturn(0);
+            when(config.isAllowCrossWorld()).thenReturn(true);
+            World otherWorld = mock(World.class);
+            when(player2.getWorld()).thenReturn(otherWorld);
+            when(player2.getLocation()).thenReturn(new Location(otherWorld, 10000, 64, 0));
+
+            boolean result = service.sendRequest(player1, player2);
+
+            assertThat(result).isTrue();
+            Map<UUID, TradeRequest> pendingRequests = UltiTradeTestHelper.getField(service, "pendingRequests");
+            assertThat(pendingRequests).containsKey(uuid2);
+            assertThat(pendingRequests.get(uuid2).getSender()).isEqualTo(uuid1);
+        }
+
+        @Test
+        @DisplayName("sendRequest allows cross-world trading with max-distance 50 when configured")
+        void crossWorldAllowedWithDistanceLimit() throws Exception {
+            when(config.getMaxDistance()).thenReturn(50);
+            when(config.isAllowCrossWorld()).thenReturn(true);
+            World otherWorld = mock(World.class);
+            when(player2.getWorld()).thenReturn(otherWorld);
+            when(player2.getLocation()).thenReturn(new Location(otherWorld, 10000, 64, 0));
+
+            boolean result = service.sendRequest(player1, player2);
+
+            assertThat(result).isTrue();
+            Map<UUID, TradeRequest> pendingRequests = UltiTradeTestHelper.getField(service, "pendingRequests");
+            assertThat(pendingRequests).containsKey(uuid2);
+            assertThat(pendingRequests.get(uuid2).getSender()).isEqualTo(uuid1);
+        }
+
+        @Test
         @DisplayName("sendRequest should fail if distance too far")
         void distanceTooFar() {
             when(config.getMaxDistance()).thenReturn(10);
@@ -596,6 +630,8 @@ class TradeServiceTest {
         @DisplayName("sendRequest should skip distance check when maxDistance is 0")
         void noDistanceLimit() {
             when(config.getMaxDistance()).thenReturn(0);
+            World world = player1.getWorld();
+            when(player2.getLocation()).thenReturn(new Location(world, 10000, 64, 0));
 
             boolean result = service.sendRequest(player1, player2);
 

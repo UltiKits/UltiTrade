@@ -57,6 +57,15 @@ UltiTrade 是一个功能完整的 Minecraft 玩家间交易系统插件，基�
 
 配置文件位于 `plugins/UltiTools/pluginConfig/UltiTrade/config/trade.yml`：
 
+`allow-cross-world: false` refuses trade requests between different worlds whatever `max-distance` is,
+including `max-distance: 0`. Zero removes only the same-world distance limit; it does not enable
+cross-world trading. With `allow-cross-world: true`, requests between worlds are allowed and no
+cross-world distance comparison is made.
+
+`allow-cross-world: false` 始终拒绝不同世界之间的交易请求，即使 `max-distance: 0` 也一样。
+`0` 只取消同世界的距离限制，不会开启跨世界交易；只有 `allow-cross-world: true` 才允许跨世界请求，
+此时不计算不同世界之间的距离。
+
 ```yaml
 # 基础设置
 request-timeout: 30           # 交易请求超时时间（秒，5-600）
