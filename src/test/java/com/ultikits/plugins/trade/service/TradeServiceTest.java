@@ -551,6 +551,22 @@ class TradeServiceTest {
         }
 
         @Test
+        @DisplayName("sendRequest refuses cross-world trading even without a distance limit")
+        void crossWorldRefusedWithoutDistanceLimit() throws Exception {
+            when(config.getMaxDistance()).thenReturn(0);
+            when(config.isAllowCrossWorld()).thenReturn(false);
+            when(player1.getWorld()).thenReturn(mock(World.class));
+            when(player2.getWorld()).thenReturn(mock(World.class));
+
+            boolean result = service.sendRequest(player1, player2);
+
+            assertThat(result).isFalse();
+            verify(player1).sendMessage(contains("不能跨世界交易！"));
+            Map<UUID, TradeRequest> pendingRequests = UltiTradeTestHelper.getField(service, "pendingRequests");
+            assertThat(pendingRequests).doesNotContainKey(uuid2);
+        }
+
+        @Test
         @DisplayName("sendRequest should fail if distance too far")
         void distanceTooFar() {
             when(config.getMaxDistance()).thenReturn(10);
