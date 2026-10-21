@@ -443,9 +443,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   started, so turning money trading on, and any change to the cleanup task, took effect only after a
   restart. A trade request that is already pending keeps the timeout it was sent with; a changed
   `request-timeout` applies to requests sent after the reload (UltiKits/UltiTrade#26).
-- A trade in which either player offered money is now cancelled if money trading is not available at
-  the moment the trade completes, for example after `/ul reload UltiTrade` turned `enable-money-trade`
-  off while the trade was open, or after a reload found no Vault economy provider. No money moves, each
+- A trade in which either player still has money offered is now cancelled if money trading is not
+  available at the moment the trade completes. This completion guard applies only if an unavailable
+  money offer is still present; a reload withdraws such offers instead (see below). No money moves, each
   player gets back the items they offered, and both players are told that money trading is currently
   unavailable, instead of the items and experience being exchanged without the offered money. While
   money trading is unavailable, the chat amount prompt also refuses a money amount instead of accepting
@@ -453,12 +453,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `/ul reload UltiTrade` now voids the confirmations of every open trade that had one and tells both
   players to confirm again, so a trade no longer completes on terms such as `trade-tax`, `exp-tax-rate`
   or `confirm-threshold` that the reload changed after a player confirmed. A trade in which either
-  player offered experience is likewise cancelled if `enable-exp-trade` is off when it completes,
+  player still has experience offered is likewise cancelled if `enable-exp-trade` is off when it completes,
   instead of the items being exchanged without the experience, and the chat amount prompt refuses an
   experience amount while `enable-exp-trade` is off (UltiKits/UltiTrade#26).
 - `/ul reload UltiTrade` now redraws every open trade window from the reloaded configuration, so its
-  title, money and experience availability and taxes match what the trade will charge. Every offer is
-  kept as it was. An open large-trade confirmation page is replaced with a trade window and the trade
+  title, money and experience availability and taxes match what the trade will charge. Money and
+  experience offers made unavailable by the reload are withdrawn and both confirmations are cleared;
+  all other offers are kept, and the trade continues for both players to confirm again. An open
+  large-trade confirmation page is replaced with a trade window and the trade
   keeps running; the player confirms again from that window (UltiKits/UltiTrade#27).
 - Players can no longer take the display item out of the money slot of the trade window while money
   trading is off, out of the experience slot while experience trading is off, or the glass pane out of
@@ -516,16 +518,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   清理任务，使关闭 `enable-trade-log` 后该任务停止、开启后启动一个任务、修改间隔后以新间隔替换。此前经济
   提供者查找与清理任务只在模块启动时设置，因此开启金币交易以及对清理任务的任何修改都要重启后才生效。已发出的
   待处理交易请求保持其发出时的超时时间；修改后的 `request-timeout` 只对重载之后发出的请求生效（UltiKits/UltiTrade#26）。
-- 若交易中任一方出价了金币，而在交易完成的那一刻金币交易不可用（例如交易进行中执行 `/ul reload UltiTrade`
-  关闭了 `enable-money-trade`，或重载时未找到 Vault 经济提供者），该交易现在会被取消：不转移任何金币，双方各自
+- 若交易中任一方仍有金币出价，而在交易完成的那一刻金币交易不可用，该交易现在会被取消。这一完成阶段的保护
+  只适用于届时仍有不可用金币出价的情况；重载会改为撤回此类出价（见下文）。不转移任何金币，双方各自
   取回自己放入的物品，并被告知金币交易当前不可用，而不是在不支付所出金币的情况下交换物品与经验。金币交易
   不可用时，聊天输入金额提示也会拒绝金币数额，而不是接受它（UltiKits/UltiTrade#26）。
 - `/ul reload UltiTrade` 现在会清除所有已有确认的进行中交易的确认状态，并提示双方重新确认，因此交易不会再按
-  玩家确认后被重载修改的条款（如 `trade-tax`、`exp-tax-rate`、`confirm-threshold`）完成。同样，若任一方出价了
-  经验，而交易完成时 `enable-exp-trade` 已关闭，该交易会被取消，而不是在不转移经验的情况下交换物品；
+  玩家确认后被重载修改的条款（如 `trade-tax`、`exp-tax-rate`、`confirm-threshold`）完成。同样，若任一方仍有
+  经验出价，而交易完成时 `enable-exp-trade` 已关闭，该交易会被取消，而不是在不转移经验的情况下交换物品；
   `enable-exp-trade` 关闭时，聊天输入提示也会拒绝经验数额（UltiKits/UltiTrade#26）。
 - `/ul reload UltiTrade` 现在会按重载后的配置重绘所有已打开的交易界面，使其标题、金币与经验交易的可用状态和税率
-  与交易实际收取的一致；所有出价保持不变。已打开的大额交易确认页会被替换为交易界面，交易继续进行，
+  与交易实际收取的一致。重载使之不可用的金币与经验出价会被撤回，双方的确认被清除；其余出价保留，交易继续，
+  双方需重新确认。已打开的大额交易确认页会被替换为交易界面，交易继续进行，
   玩家需在该界面重新确认（UltiKits/UltiTrade#27）。
 - 玩家不再能通过点击，在金币交易关闭时从交易界面的金币栏、在经验交易关闭时从经验栏取走展示物品，或从空物品栏
   取走玻璃板。交易界面中的每次点击现在都会先被取消，再执行对应操作（UltiKits/UltiTrade#25）。
@@ -572,12 +575,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   声明为 `net.milkbowl.vault.economy.Economy`，而本模块的 `plugin.yml` 从未把 Vault 声明为依赖（甚至连软依赖都没有），
   因此没有任何机制保证缺少 Vault 时的行为——与 #48 崩溃形状相同，只是软依赖不同，由针对同一缺陷类的普查发现
   （UltiKits/UltiTrade#49）。
-- Dying while viewing the large-trade confirmation page now cancels the trade, the same as closing
-  it any other way. Paper closes the page with `InventoryCloseEvent.Reason.DEATH`, which used to be
+- Dying while viewing the large-trade confirmation page now cancels the trade, as do other terminal
+  closes described below. Pressing Esc or clicking the page's Cancel (back) button only returns to the
+  trade window, keeping the trade and staked items. Paper closes the page on death with
+  `InventoryCloseEvent.Reason.DEATH`, which used to be
   treated the same as the module's own close (reload, completion, cancellation) and silently left
   the trade running with no window for either player, holding both stakes until someone ran the
   cancel command by hand.
-- 现在在查看大额交易确认页面时死亡也会取消交易，与其他方式关闭该页面一致。此前 Paper 以 `InventoryCloseEvent.Reason.DEATH`
+- 现在在查看大额交易确认页面时死亡会取消交易，下文所述的其他终止性关闭也一样。按 Esc 或点击页面的取消（返回）按钮
+  只会回到交易窗口，交易和押入物品均保留。此前 Paper 以 `InventoryCloseEvent.Reason.DEATH`
   关闭该页面时，会被当作模块自身的关闭（重载、完成、取消）处理，交易会悄悄保持进行、双方都没有窗口，两方的出价也一直
   被占用，直到有人手动运行取消命令。
 - Every other reason the server, not this module, can close the large-trade confirmation page for now
