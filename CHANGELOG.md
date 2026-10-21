@@ -5,7 +5,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 本文件记录本项目的所有重要更改，格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)。
 
-## [Unreleased]
+## [2.0.0] - 2026-10-21
 
 ### Added
 
@@ -29,21 +29,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- This version requires UltiTools 6.3.0 or later and declares `api-version: 630` in `plugin.yml`
-  (it was `621`; the last release, 1.0.0, declared `620`). Every earlier framework checks this value
-  and refuses the module with a warning that the UltiTools version is outdated, naming it `UltiTrade`;
-  the module's own start-up (`registerSelf`) does not run. Frameworks 6.2.1 to 6.2.5 accepted the old
-  `621`. An error about a class those versions do not have (this module uses `ReloadReport`, added in
-  6.3.0) may be logged first, and on 6.2.1–6.2.4, which check only after building the module's
-  components, it may take the warning's place. The README's framework minimum and badge now say
-  UltiTools 6.3.0+, and its install step says a server restart is needed to load the module
-  (`/ul reload` does not load a new module jar) (UltiKits/UltiTools-Reborn#544).
-- 本版本需要 UltiTools 6.3.0 或更高版本，并在 `plugin.yml` 中声明 `api-version: 630`（原为 `621`；上一个发布版本 1.0.0
-  声明的是 `620`）。所有更早的框架都会检查该值并拒绝加载本模块，给出点名 `UltiTrade` 的"UltiTools 版本过旧"警告；
-  本模块自身的启动逻辑（`registerSelf`）不会运行。6.2.1 至 6.2.5 此前接受旧的 `621`。在这些版本上可能先记录一条
-  缺少类的错误（本模块使用 6.3.0 新增的 `ReloadReport`）；6.2.1–6.2.4 在构建模块组件之后才检查，该错误可能取代警告。
-  README 中的框架最低版本与徽章已改为 UltiTools 6.3.0+，安装步骤改为需要重启服务器（`/ul reload` 不会加载新的模块 JAR）
-  （UltiKits/UltiTools-Reborn#544）。
+- This version requires UltiTools 6.3.0 or later and declares `api-version: 630` in `plugin.yml`,
+  up from `620` in the last released version, 1.0.0. Earlier frameworks cannot load this version;
+  update the framework before installing it. Restart the server to load the module
+  (`/ul reload` does not load a new module JAR) (UltiKits/UltiTools-Reborn#544).
+- 本版本需要 UltiTools 6.3.0 或更高版本，并在 `plugin.yml` 中声明 `api-version: 630`，上一个发布版本 1.0.0
+  声明的是 `620`。更早的框架无法加载本版本；请先升级框架再安装。加载本模块需要重启服务器
+  （`/ul reload` 不会加载新的模块 JAR）（UltiKits/UltiTools-Reborn#544）。
 
 - `plugin.yml` now declares `identify-string: ultitrade`, the key of this module's entry in the
   UltiCloud catalogue. The framework's update check and `/upm update` skip a module that does not
@@ -590,19 +582,19 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   被占用，直到有人手动运行取消命令。
 - Every other reason the server, not this module, can close the large-trade confirmation page for now
   cancels the trade the same way `DEATH` already did: disconnecting, a teleport (on a server old enough
-  to still send it — deprecated since Paper 1.21.10, which no longer fires it for a normal teleport, but
-  this module's `plugin.yml` still declares `api-version: '1.19'`), the chunk unloading, the server
+  to still send it — deprecated since Paper 1.21.10, which no longer fires it for a normal teleport),
+  the chunk unloading, the server
   otherwise revoking access, or an unrecognised reason. Before this, only `DEATH` cancelled the trade;
   every one of these left it running with both stakes locked and no window for either participant, until
   someone ran the cancel command by hand. A close this module or a reload causes itself (`PLUGIN`,
   `OPEN_NEW`) is unchanged — it never cancels the trade, since the code that caused it already owns the
-  session's next state.
+  session's next state (an unmarked close from another plugin cancels the trade, as described above).
 - 现在服务器（而非本模块）出于其他任何原因关闭大额交易确认页面时，都会像 `DEATH` 一样取消交易：断线、传送（仅限仍会
-  发送该原因的旧版本服务端——Paper 自 1.21.10 起已弃用该原因，普通传送不再触发关闭，但本模块 `plugin.yml` 仍声明
-  `api-version: '1.19'`）、所在区块被卸载、服务器出于其他原因收回了访问权限，或是一个未识别的原因。此前只有
+  发送该原因的旧版本服务端——Paper 自 1.21.10 起已弃用该原因，普通传送不再触发关闭）、所在区块被卸载、
+  服务器出于其他原因收回了访问权限，或是一个未识别的原因。此前只有
   `DEATH` 会取消交易；以上任何一种都会让交易悄悄保持进行、双方都没有窗口、两方出价被一直占用，直到有人手动运行
   取消命令。本模块自身或重载引发的关闭（`PLUGIN`、`OPEN_NEW`）行为不变——它们从不取消交易，因为引发关闭的代码
-  本身已经掌管了会话的下一个状态。
+  本身已经掌管了会话的下一个状态（其他插件引发的未标记关闭则会取消交易，见上文）。
 - Every other place this module opens a trade window now recovers the same way the large-trade
   confirmation page already did: a refused `InventoryOpenEvent` returns `null` from
   `HumanEntity#openInventory` rather than throwing, and none of the six other call sites checked for
@@ -620,18 +612,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   玩家看到一个对方从未真正加入的交易窗口；超时后的重新打开、回答金额提示后的重新打开，以及会话转移后双方窗口的
   重绘，若被拒绝也都会同样地取消该笔交易（UltiKits/UltiTrade#47 复查）。
 
-- `plugin.yml` now truthfully declares `softdepend: [ PlaceholderAPI, Vault ]` -- both are real, optional
-  integrations this module already handles the absence of at runtime (`UltiKits/UltiTrade#48`, `#49`),
-  but neither was ever declared. The framework is changing how it logs a module failing to load because
-  a plugin it declares as optional is missing (debug instead of SEVERE, maintainer decision of
-  2026-09-29); this module's PlaceholderAPI expansion would otherwise still trigger a misleadingly loud
-  SEVERE line under that change, for a dependency this module's own `plugin.yml` never admitted to
-  wanting in the first place.
-- `plugin.yml` 现在如实声明 `softdepend: [ PlaceholderAPI, Vault ]`——两者都是本模块已经在运行时妥善处理其缺失的真实、
-  可选集成（`UltiKits/UltiTrade#48`、`#49`），但此前都从未在文件中声明过。框架即将改变对「模块因其在 `plugin.yml`
-  中声明为可选依赖的插件缺失而加载失败」这一情形的日志方式（改为调试级而非 SEVERE，维护者 2026-09-29 的决定）；
-  若不声明，本模块的 PlaceholderAPI 扩展在该改动后仍会触发一条误导性的高调 SEVERE 日志——而这本是本模块自己的
-  `plugin.yml` 从未承认需要的依赖。
+- `plugin.yml` now declares `softdepend: [ PlaceholderAPI, Vault ]`. Both integrations remain optional;
+  the module loads without either installed (`UltiKits/UltiTrade#48`, `#49`).
+- `plugin.yml` 现在声明 `softdepend: [ PlaceholderAPI, Vault ]`。两项集成仍为可选；未安装其中任一插件时，
+  本模块仍可加载（`UltiKits/UltiTrade#48`、`#49`）。
 
 ### Removed
 
