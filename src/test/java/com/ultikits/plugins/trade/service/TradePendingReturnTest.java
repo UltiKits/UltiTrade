@@ -110,6 +110,9 @@ class TradePendingReturnTest {
         // A real player object that is NOT on the server: Bukkit#getPlayer cannot resolve it.
         away = new PlayerMock(server, "Away", UUID.randomUUID());
         away.setLocation(world.getSpawnLocation());
+        // Legacy owner-return tests have a real known offline position. Unknown-position tests
+        // explicitly replace the lookup, so they exercise the new routing rather than this control.
+        server.getPlayerList().addOfflinePlayer(away);
     }
 
     @AfterEach
@@ -334,6 +337,209 @@ class TradePendingReturnTest {
         assertThat(service.getSession(present.getUniqueId()))
                 .as("the session is closed, so no later cancel reaches the same stake").isNull();
         assertThat(store.rowsOf(away.getUniqueId())).hasSize(1);
+    }
+
+    // ==================== Unknown offline locations (UltiTools-Reborn#655) ====================
+
+    private org.bukkit.OfflinePlayer unavailableLocation(String kind) {
+        org.bukkit.OfflinePlayer offline = mock(org.bukkit.OfflinePlayer.class);
+        lenient().when(offline.getName()).thenReturn(away.getName());
+        if ("null-world".equals(kind)) {
+            lenient().when(offline.getLocation()).thenReturn(new org.bukkit.Location(null, 1, 2, 3));
+        } else if ("runtime".equals(kind)) {
+            lenient().when(offline.getLocation()).thenThrow(new IllegalStateException("position unavailable"));
+        } else if ("linkage".equals(kind)) {
+            lenient().when(offline.getLocation()).thenThrow(new NoSuchMethodError("OfflinePlayer.getLocation"));
+        }
+        return offline;
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"null", "null-world", "runtime", "linkage"})
+    void unknownOfflineLocationReturnsToTheOnlineInitiator(String kind) throws Exception {
+        TradeSession session = sessionWithStakes();
+        present.teleport(new org.bukkit.Location(world, 500, 70, -300));
+        org.bukkit.OfflinePlayer offline = unavailableLocation(kind);
+        try (org.mockito.MockedStatic<org.bukkit.Bukkit> bukkit = org.mockito.Mockito.mockStatic(
+                org.bukkit.Bukkit.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            bukkit.when(() -> org.bukkit.Bukkit.getOfflinePlayer(away.getUniqueId())).thenReturn(offline);
+            service.completeTrade(session); // the store works: routing is not only a failed-save fallback
+        }
+        assertThat(count(present, Material.EMERALD)).isEqualTo(4);
+        assertThat(count(present, Material.DIAMOND)).isEqualTo(10);
+        assertThat(present.getInventory().getItem(present.getInventory().first(Material.DIAMOND_SWORD)))
+                .isEqualTo(namedSword());
+        assertThat(store.rows).as("the old owner cannot claim a redirected copy later").isEmpty();
+        assertThat(world.getEntitiesByClass(Item.class)).isEmpty();
+    }
+
+    @Test
+    void redirectedOverflowStillDropsOnlyAtTheInitiatorsActualLocation() throws Exception {
+        TradeSession session = sessionWithStakes();
+        org.bukkit.Location feet = new org.bukkit.Location(world, 500, 70, -300);
+        present.teleport(feet);
+        fillAllBut(present, 5);
+        present.getInventory().setItem(5, new ItemStack(Material.DIAMOND, 60));
+        org.bukkit.OfflinePlayer offline = unavailableLocation("null");
+        try (org.mockito.MockedStatic<org.bukkit.Bukkit> bukkit = org.mockito.Mockito.mockStatic(
+                org.bukkit.Bukkit.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            bukkit.when(() -> org.bukkit.Bukkit.getOfflinePlayer(away.getUniqueId())).thenReturn(offline);
+            service.cancelTrade(session, "test");
+        }
+        assertThat(count(present, Material.DIAMOND)).isEqualTo(64);
+        assertThat(droppedInWorld(Material.DIAMOND)).isEqualTo(6);
+        assertThat(droppedInWorld(Material.DIAMOND_SWORD)).isEqualTo(1);
+        assertThat(world.getEntitiesByClass(Item.class)).allSatisfy(item ->
+                assertThat(item.getLocation().distance(feet)).isLessThan(2));
+        assertThat(session.getPlayerItems(away.getUniqueId()).get(0).getAmount()).isEqualTo(10);
+        assertThat(store.rows).isEmpty();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"en,sqlite", "zh,sqlite", "en,json", "zh,json"})
+    void bothOfflineReturnsSurviveARealFileReopenAndJoinExactlyOnce(String language, String backend,
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+        com.ultikits.plugins.trade.testsupport.SharedSqliteDatabase database =
+                com.ultikits.plugins.trade.testsupport.SharedSqliteDatabase.in(dir);
+        java.util.function.Supplier<DataOperator<PendingStakeReturn>> open = "sqlite".equals(backend)
+                ? () -> database.openAs(PendingStakeReturn.class)
+                : () -> new com.ultikits.ultitools.interfaces.impl.data.json.SimpleJsonDataOperator<>(
+                        dir.resolve("returns").toString(), PendingStakeReturn.class);
+        DataOperator<PendingStakeReturn> writer = open.get();
+        UltiTrade plugin = UltiTradeTestHelper.getField(service, "plugin");
+        lenient().when(plugin.i18n(anyString())).thenAnswer(CatalogueText.answer(language));
+        UltiTradeTestHelper.setField(service, "pendingReturns", writer);
+        TradeSession session = sessionWithStakes();
+        present.disconnect();
+        org.bukkit.OfflinePlayer offline = unavailableLocation("linkage");
+        try (org.mockito.MockedStatic<org.bukkit.Bukkit> bukkit = org.mockito.Mockito.mockStatic(
+                org.bukkit.Bukkit.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            bukkit.when(() -> org.bukkit.Bukkit.getOfflinePlayer(away.getUniqueId())).thenReturn(offline);
+            service.cancelTrade(session, "test");
+        }
+        // A normal stop flushes cached backends. The new operator reads real files, never old rows.
+        if (writer instanceof com.ultikits.ultitools.interfaces.Cached) {
+            ((com.ultikits.ultitools.interfaces.Cached) writer).flush();
+        }
+        TradeService restarted = new TradeService();
+        for (String field : new String[] {"plugin", "config", "logService", "economy"}) {
+            UltiTradeTestHelper.setField(restarted, field, UltiTradeTestHelper.getField(service, field));
+        }
+        UltiTradeTestHelper.setField(service, "pendingReturns", null);
+        DataOperator<PendingStakeReturn> reopened = open.get();
+        UltiTradeTestHelper.setField(restarted, "pendingReturns", reopened);
+        assertThat(reopened.getAll()).hasSize(2).allSatisfy(row ->
+                assertThat(row.getOwnerUuid()).isEqualTo(present.getUniqueId().toString()));
+        assertThat(reopened.getAll()).flatExtracting(row -> TradeService.deserializeStacks(row.getItems()))
+                .containsExactlyInAnyOrder(new ItemStack(Material.EMERALD, 4),
+                        new ItemStack(Material.DIAMOND, 10), namedSword());
+        PlayerMock joined = saving(new PlayerMock(server, "Present", present.getUniqueId()));
+        TradeListener listener = new TradeListener();
+        UltiTradeTestHelper.setField(listener, "tradeService", restarted);
+        listener.onPlayerJoin(new PlayerJoinEvent(joined, "joined"));
+        assertThat(count(joined, Material.EMERALD)).isEqualTo(4);
+        assertThat(count(joined, Material.DIAMOND)).isEqualTo(10);
+        assertThat(joined.getInventory().getItem(joined.getInventory().first(Material.DIAMOND_SWORD)))
+                .isEqualTo(namedSword());
+        assertThat(joined.nextMessage()).isEqualTo(org.bukkit.ChatColor.GREEN + ("en".equals(language)
+                ? "Items kept for you from a cancelled trade have been returned to you."
+                : "已取消交易中为你保留的物品已发还给你。"));
+        listener.onPlayerJoin(new PlayerJoinEvent(joined, "joined again"));
+        listener.onPlayerJoin(new PlayerJoinEvent(saving(away), "partner joined"));
+        assertThat(count(joined, Material.DIAMOND)).isEqualTo(10);
+        assertThat(count(away, Material.DIAMOND)).isZero();
+        assertThat(joined.nextMessage()).isNull();
+        if (reopened instanceof com.ultikits.ultitools.interfaces.Cached) {
+            ((com.ultikits.ultitools.interfaces.Cached) reopened).flush();
+        }
+        assertThat(open.get().getAll()).isEmpty();
+        assertThat(world.getEntitiesByClass(Item.class)).isEmpty();
+    }
+
+    @Test
+    void aCommittedInitialSaveThatThrowsIsNotAlsoDroppedOrSavedTwice() throws Exception {
+        store.failAfterCommit = true;
+        TradeSession session = new TradeSession(present, away);
+        session.setItem(away.getUniqueId(), 0, namedSword());
+        service.cancelTrade(session, "test");
+        service.cancelTrade(session, "same source retried");
+        assertThat(store.rowsOf(away.getUniqueId())).hasSize(1);
+        assertThat(savedStacksOf(away)).containsExactly(namedSword());
+        assertThat(world.getEntitiesByClass(Item.class)).isEmpty();
+        assertThat(present.getInventory().all(Material.DIAMOND_SWORD)).isEmpty();
+    }
+
+    @Test
+    void unreadableCommittedOutcomeNeverHandsOutASecondCopy() throws Exception {
+        store.failAfterCommit = true;
+        store.unreadableAfterCommit = true;
+        TradeSession session = new TradeSession(present, away);
+        session.setItem(away.getUniqueId(), 0, namedSword());
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.cancelTrade(session, "test"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("outcome is unknown");
+        assertThat(store.rows).hasSize(1);
+        assertThat(world.getEntitiesByClass(Item.class)).isEmpty();
+        assertThat(present.getInventory().all(Material.DIAMOND_SWORD)).isEmpty();
+    }
+
+    @Test
+    void conflictingStoredOutcomeIsNotASecondHandOut() throws Exception {
+        TradeSession session = new TradeSession(present, away);
+        session.setItem(away.getUniqueId(), 0, namedSword());
+        service.cancelTrade(session, "test");
+        store.rows.get(0).setOwnerUuid(UUID.randomUUID().toString());
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.cancelTrade(session, "retry"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("outcome conflicts");
+        assertThat(store.rows).hasSize(1);
+        assertThat(world.getEntitiesByClass(Item.class)).isEmpty();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "en,The other trader is offline and their location is unavailable; their staked items have been returned to you.",
+            "zh,对方离线且无法取得其位置；其押入的物品已返还给你。"})
+    void immediateRedirectUsesTheLiteralLanguageMessage(String language, String expected) throws Exception {
+        UltiTrade plugin = UltiTradeTestHelper.getField(service, "plugin");
+        lenient().when(plugin.i18n(anyString())).thenAnswer(CatalogueText.answer(language));
+        org.bukkit.OfflinePlayer offline = unavailableLocation("null");
+        try (org.mockito.MockedStatic<org.bukkit.Bukkit> bukkit = org.mockito.Mockito.mockStatic(
+                org.bukkit.Bukkit.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            bukkit.when(() -> org.bukkit.Bukkit.getOfflinePlayer(away.getUniqueId())).thenReturn(offline);
+            service.cancelTrade(sessionWithStakes(), "test");
+        }
+        List<String> messages = new ArrayList<>();
+        String message;
+        while ((message = present.nextMessage()) != null) {
+            messages.add(message);
+        }
+        assertThat(messages).contains(org.bukkit.ChatColor.YELLOW + expected);
+    }
+
+    @Test
+    void sourceContainsNoSyntheticSpawnFallback() throws Exception {
+        java.nio.file.Path root = java.nio.file.Paths.get("src/main/java");
+        try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(root)) {
+            for (java.nio.file.Path file : (Iterable<java.nio.file.Path>) files
+                    .filter(path -> path.toString().endsWith(".java"))::iterator) {
+                assertThat(new String(java.nio.file.Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8))
+                        .as(file.toString()).doesNotContain("getSpawnLocation(");
+            }
+        }
+        // Behavioral overflow tests above are the positive control: actual player-location drops remain.
+    }
+
+    @Test
+    void unavailableLocationAndFailedStoreNeverUseASyntheticSpawn() throws Exception {
+        store.failInsert = true;
+        org.bukkit.OfflinePlayer offline = unavailableLocation("linkage");
+        try (org.mockito.MockedStatic<org.bukkit.Bukkit> bukkit = org.mockito.Mockito.mockStatic(
+                org.bukkit.Bukkit.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            bukkit.when(() -> org.bukkit.Bukkit.getOfflinePlayer(away.getUniqueId())).thenReturn(offline);
+            bukkit.when(org.bukkit.Bukkit::getWorlds).thenThrow(new AssertionError("no first world is needed"));
+            service.cancelTrade(sessionWithStakes(), "test");
+        }
+        assertThat(count(present, Material.DIAMOND)).isEqualTo(10);
+        assertThat(world.getEntitiesByClass(Item.class)).isEmpty();
     }
 
     // ==================== The join-time hand-over (maintainer answers 2026-09-24, amended 2026-09-25) ====================
@@ -768,6 +974,9 @@ class TradePendingReturnTest {
     static final class InMemoryPendingReturns implements DataOperator<PendingStakeReturn> {
         final List<PendingStakeReturn> rows = new ArrayList<>();
         boolean failInsert;
+        boolean failAfterCommit;
+        boolean unreadableAfterCommit;
+        boolean unreadable;
         boolean failDelete;
         boolean failUpdate;
         Runnable beforeUpdate = () -> { };
@@ -803,7 +1012,12 @@ class TradePendingReturnTest {
             if (failInsert) {
                 throw new IllegalStateException("simulated storage failure");
             }
-            entity.setId(String.valueOf(nextId++));
+            if (entity.getId() == null) {
+                entity.setId(String.valueOf(nextId++));
+            }
+            if (getById(entity.getId()) != null) {
+                throw new IllegalStateException("duplicate primary key");
+            }
             rows.add(copyOf(entity));
         }
 
@@ -840,14 +1054,20 @@ class TradePendingReturnTest {
                 snapshot.add(copyOf(row));
             }
             int idBefore = nextId;
+            R result;
             try {
-                return action.call();
+                result = action.call();
             } catch (Throwable t) {
                 rows.clear();
                 rows.addAll(snapshot);
                 nextId = idBefore;
                 throw t;
             }
+            if (failAfterCommit) {
+                unreadable = unreadableAfterCommit;
+                throw new IllegalStateException("committed, then connection lost");
+            }
+            return result;
         }
 
         @Override
@@ -941,6 +1161,9 @@ class TradePendingReturnTest {
 
         @Override
         public PendingStakeReturn getById(Object id) {
+            if (unreadable) {
+                throw new IllegalStateException("readback unavailable");
+            }
             for (PendingStakeReturn row : rows) {
                 if (row.getId().equals(id)) {
                     return copyOf(row);

@@ -9,12 +9,12 @@ import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 
 /**
- * Items a player staked in a trade that was cancelled while the server could not find them.
+ * Items kept for a player from a cancelled trade while the server could not find them.
  * <p>
- * A cancelled trade hands each side's staked items back to that side. When one side cannot be
- * resolved at that moment there is no inventory to hand them to, so they are saved here and handed
- * over when that player next joins (UltiKits/UltiTrade#32; maintainer decision of 2026-09-24).
- * One row holds one player's stake from one cancelled trade.
+ * Normally a cancelled trade keeps each side's stake for that side. When an offline partner's last
+ * position is unavailable, their stake goes to the original initiator instead, saved here if that
+ * initiator is also offline (UltiTools-Reborn#655). One row holds one source participant's stake;
+ * ownerUuid identifies its recipient, who need not be the original staker.
  * <p>
  * The stacks are stored with Bukkit's own item serialization, the form a {@code YamlConfiguration}
  * writes for an {@code ItemStack} and reads back into one. The trade log's {@code SerializedItemStack}
@@ -28,7 +28,7 @@ import lombok.NoArgsConstructor;
 @Table("trade_pending_returns")
 public class PendingStakeReturn extends BaseDataEntity<String> {
 
-    /** The UUID of the player the items belong to. */
+    /** The UUID of the recipient for whom these items are kept. */
     @Column("owner_uuid")
     private String ownerUuid;
 
