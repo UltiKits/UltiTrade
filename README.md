@@ -238,34 +238,50 @@ private String guiTitle = "&6与 {PLAYER} 交易";
 
 ## Cancelled-trade item returns / 取消交易后的物品返还
 
-Normally, cancelling returns each participant's own stake. An online recipient receives the items in
-inventory; anything that does not fit drops at that recipient's actual feet. If the partner is offline
-and their real last location is unavailable (including when the server has no offline-location API),
-the partner's stake goes to the **original trade initiator** instead. If that initiator is online, the
-same inventory/feet-overflow rule applies and they are told: "The other trader is offline and their
-location is unavailable; their staked items have been returned to you." The initiator's own stake
-still belongs to them. The offline partner cannot later claim items already redirected to the initiator.
+Cancelling returns each participant's own stake. An online owner receives items in inventory; overflow
+drops at their actual feet. If the server cannot resolve an owner, **first save the stake for that owner**
+in `trade_pending_returns`, even when their offline location is unavailable. A successful save keeps
+the items assigned to the original owner for their next join; a missing location alone never transfers ownership.
 
-If the initiator is offline too, the redirected items are stored under the initiator's UUID in
-`trade_pending_returns`, using full Bukkit item YAML (including item metadata). Initial storage uses
-an explicit ORM transaction, and the saved return survives a normal stop/start before collection.
-At the recipient's next join, only what fits is delivered; the remainder stays saved for a later join,
-**not** dropped. If the offline owner's real last location is known, their stake is still saved for
-that owner; if that initial save fails, the existing fallback drops it at that real position. No world
-spawn is invented as a fallback. These guarantees cover normal operation and normal restarts, not
-automatic exactly-once recovery from a hard crash; held CLAIMED entries still need operator review below.
+Only after that save fails does fallback apply: drop at the original owner's real last position if
+available; otherwise return the stake to the **original trade initiator**. An online initiator receives
+items through the same inventory/actual-feet overflow path and is told: "The other trader's staked items
+could not be saved for them and their location is unavailable; the items have been returned to you."
+An offline initiator has the items saved under their UUID for their next join. Every redirect writes an
+operator WARNING naming the original owner, recipient and item types/counts. A redirected stake is no
+longer claimable by the original owner; the initiator's own stake always remains theirs.
 
-通常取消交易后，各方取回自己的押物。在线收件人先收进背包，放不下的掉在其真实脚下。若另一方离线且无法取得真实离线位置
-（包括服务器没有离线位置 API），其押物改返还给**最初发起交易的人**：发起人在线时也按背包优先、真实脚下掉落余量处理，
-并收到「对方离线且无法取得其位置；其押入的物品已返还给你。」发起人自己的押物仍归本人；已重定向的押物不会再给原离线方领取。
+Saved items retain complete Bukkit item YAML and metadata. Initial storage uses an explicit ORM
+transaction and readback of uncertain outcomes, and survives a normal stop/start before collection.
+At the recipient's next join only what fits is delivered; the remainder stays saved for a later join,
+**not** dropped. No world spawn is invented as fallback. If neither storage nor a valid fallback can
+retain the items, an error names the owner, recipient and items for operator reconciliation. These
+guarantees cover normal operation and normal restarts, not automatic exactly-once hard-crash recovery;
+held CLAIMED entries still need operator review below.
 
-发起人也离线时，物品按发起人的 UUID 存入 `trade_pending_returns`，保留完整 Bukkit 物品 YAML 与元数据。
-初始保存使用显式 ORM 事务，领取前正常停服再启动不会丢掉待领取记录。收件人下次进服时只发背包装得下的部分，余量继续保存，
-腾出空间后重新进服领取，**不会掉在地上**。若能取得原离线物主的真实位置，则仍为原物主保存；初始保存失败时沿用在该真实位置掉落的处理。
-任何分支都不拿世界出生点冒充离线位置。以上保证适用于正常操作与正常停启，不承诺硬崩溃后自动恰好一次恢复；CLAIMED 暂扣条目仍按下文人工核对。
+取消交易后，各方取回自己的押物。在线物主先收进背包，余量掉在其真实脚下。服务器无法解析物主时，
+**先在 `trade_pending_returns` 中为原物主保存押物**，即使无法取得其离线位置也一样。保存成功后由原物主下次进服领取；
+仅仅缺少位置绝不会改变物品归属。
+
+只有保存失败后才降级：若原物主真实位置可用，沿用在该位置掉落的处理；否则改交**最初发起交易的人**。
+发起人在线时按背包优先、真实脚下掉落余量处理，并收到「无法为对方保存押物且无法取得其位置；其押入的物品已返还给你。」
+发起人离线时按其 UUID 保存，供下次进服领取。每次重定向都记录 WARNING 日志，包含原物主、收件人、物品类型与数量。
+已重定向的押物不会再由原物主领取；发起人自己的押物始终归本人。
+
+待领取记录保留完整 Bukkit 物品 YAML 与元数据；初始保存使用显式 ORM 事务，不确定的结果先读回确认，正常停服再启动后仍可领取。
+进服时只发背包装得下的部分，余量继续保存，腾出空间后重新进服领取，**不会掉在地上**。任何分支都不拿世界出生点冒充离线位置。
+若保存及合法降级都无法保留物品，错误会写明原物主、收件人和物品，供服主核对。以上保证适用于正常操作与正常停启，
+不承诺硬崩溃后自动恰好一次恢复；CLAIMED 暂扣条目仍按下文人工核对。
 
 ## ⚠️ Known limitations / 已知限制
 
+- **A complete storage outage with no real owner location and an offline initiator can interrupt cancellation.**
+  Nothing is dropped at spawn; the error names the original owner, recipient and items. Cancellation
+  is not a crash-recovery transaction: inspect that error and the actual inventories/pending rows
+  before retrying or shutting down; do not assume the remaining stakes were already returned.
+- **保存完全不可用、原物主位置未知且发起人也离线时，取消交易可能中断。** 不会改为在出生点掉落；
+  错误会写明原物主、收件人和物品。取消过程不是崩溃恢复事务；重试或停服前请核对该错误、真实背包与待领取记录，
+  不要假定其他押物都已返还。
 - **A hard crash after the CLAIMED commit but before the player file is written leaves the return parked for review.**
   Saved returns in `trade_pending_returns` belong to the recipient described above (the original owner,
   or the initiator after redirection) and are delivered at that recipient's next join. The table records each hand-over's state:
@@ -302,7 +318,7 @@ automatic exactly-once recovery from a hard crash; held CLAIMED entries still ne
   hand-over's player save failed (UltiKits/UltiTrade#60). A normal return is not proof that the player
   file reached disk. Check disk health and the server log first, then reconcile the player's actual
   items and any held entries before redelivering; an unreported failure may leave no held entry.
-- **On 1.19.2–1.19.3, an already-open window's title does not refresh immediately.** Its contents
+- **On older servers without in-place title updates, an already-open window's title does not refresh immediately.** Its contents
   still refresh; close it and open a new trade window to see the changed title. This is an accepted
   title-only degradation, not a promise that this module change fixes every older-server API gap.
 - **Above about 411,616 experience points (about level 320), Paper's own experience arithmetic drifts.** After a
@@ -328,7 +344,7 @@ automatic exactly-once recovery from a hard crash; held CLAIMED entries still ne
 - **在 Paper 上，玩家数据保存失败不会通知本模块。** Paper 的 `Player#saveData()` 只记录其自身的 `Failed to save player data for <name>` 并正常返回，
   因此本模块无法得知押入物品发还时的玩家数据保存失败（UltiKits/UltiTrade#60）。方法正常返回不等于玩家文件已落盘的证明。
   请先检查磁盘和服务端日志，再核对玩家现有物品与暂扣条目，确认后才重发；吞掉写入错误时也可能没有暂扣条目。
-- **1.19.2–1.19.3 上已打开窗口的标题不会即时刷新。** 窗口内容仍会刷新；关闭并重新开启交易窗口后才显示新标题。
+- **不支持原地更新标题的旧服务器上，已打开窗口的标题不会即时刷新。** 窗口内容仍会刷新；关闭并重新开启交易窗口后才显示新标题。
   这是已接受的标题降级，不代表本次模块修改独自修复了旧服务器的所有 API 兼容问题。
 - **经验超过约 411,616 点（约 320 级）时，Paper 自身的经验计算存在偏差。** 交易后发送方剩余的经验通过 `Player#giveExp` 重建，
   在这一数量级上 Paper 实际保存的数值可能比给予的多或少数点至约 100 点；服务器自带的 `/xp` 命令也是如此。本模块读取玩家经验总量是精确的（UltiKits/UltiTrade#65）。
