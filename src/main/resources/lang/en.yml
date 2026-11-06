@@ -1,6 +1,8 @@
 # UltiTrade Language File (English)
 trade_enabled: "UltiTrade enabled!"
 trade_disabled: "UltiTrade disabled!"
+startup_framework_too_old: "UltiTrade needs UltiTools 6.4.0 or later on Minecraft versions below 1.21 (server: {SERVER}, UltiTools: {FRAMEWORK}). Please update UltiTools."
+startup_version_unknown: "UltiTrade could not parse the running versions (server: {SERVER}, UltiTools: {FRAMEWORK}); continuing without the compatibility check."
 
 # Trade Request
 request_timeout: "&cTrading request has timed out!"
