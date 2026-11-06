@@ -238,6 +238,20 @@ private String guiTitle = "&6与 {PLAYER} 交易";
 
 ## ⚠️ Known limitations / 已知限制
 
+- **The settings lock budget is not a database timeout.** A `/trade block`, `/trade unblock` or trade request
+  (including shift+right-click) shares about 50 ms across its settings-lock attempts, rather than waiting 50 ms
+  again at each check. A free lock can still be acquired after that budget expires. Database calls themselves
+  are not timed out by this budget; a slow database can still delay the server thread.
+- **Completed-trade statistics can be skipped silently in a disabled-core fallback.** Normal completed-trade
+  logging runs in the background and waits for the player's settings write. If the UltiTools core is no longer
+  enabled, logging runs inline instead; if that is on the server thread while an earlier same-player write is
+  still holding the lock beyond its allowance, that statistics increment is skipped without a warning.
+  Do not initiate trades while disabling the core; finish active trades before stopping or unloading it.
+- **Another plugin must not interrupt the server thread.** While its interrupt flag is set, settings-lock
+  attempts immediately fail: settings commands may answer the busy reply, joins skip caching, and uncached
+  reads do not fill the cache. UltiTrade preserves that flag instead of clearing another plugin's signal.
+  Remove or repair the plugin causing the interrupt and restart the server; retrying the command alone does
+  not clear the flag.
 - **A crash while a saved stake is being returned holds that return for the operator.** When a trade
   is cancelled while one participant cannot be found, their staked items are kept in
   `trade_pending_returns` and handed back at their next join. The table records each hand-over's state:
@@ -261,7 +275,7 @@ private String guiTitle = "&6与 {PLAYER} 交易";
   check that player's balance for that amount and correct it by hand (UltiKits/UltiTrade#60). Reading the
   balance again cannot settle it, because other plugins or servers may change it too. This is an
   accepted limitation (maintainer 2026-10-08), unit-pinned by `TradeMoneySettlementTest`.
-- **Edit `trade_player_settings` by hand only with the values the module writes.** Every settings change is written
+- **Edit `trade_player_settings` by hand only with all sharing servers stopped and with the values the module writes.** Every settings change is written
   only if the stored row still holds what was read (UltiKits/UltiTrade#54). On SQLite a hand-written value in another
   form — `trade_enabled = 'false'` instead of `0`, `total_money_traded = '1.50'` instead of `1.5` — never compares
   equal, so every later change for that player answers "Your trade settings are being saved right now; please try again in a moment." and their
@@ -286,7 +300,7 @@ private String guiTitle = "&6与 {PLAYER} 交易";
   交易会按未转移处理：此时可能凭空产生金币（付款：付款方被退款而收款方保留了这笔钱）或使金币消失（扣款：永远不会退还）。
   控制台会记录一条以 `结果未知：` 开头的 SEVERE 日志，写明玩家与精确金额；请检查该玩家的余额是否有这笔金额的变动并手动更正（UltiKits/UltiTrade#60）。
   重新读取余额无法判断，因为其他插件或服务器也可能修改余额。此为已接受的限制（维护者 2026-10-08），由 `TradeMoneySettlementTest` 单元测试固定。
-- **手动编辑 `trade_player_settings` 时只写入本模块会写入的取值形式。** 每次设置修改仅在存储行仍为读取时的值时才写入（UltiKits/UltiTrade#54）。在 SQLite 上，
+- **手动编辑 `trade_player_settings` 时先停止所有共享数据库的服务器，且只写入本模块会写入的取值形式。** 每次设置修改仅在存储行仍为读取时的值时才写入（UltiKits/UltiTrade#54）。在 SQLite 上，
   以其他形式手写的值（如用 `trade_enabled = 'false'` 代替 `0`，用 `total_money_traded = '1.50'` 代替 `1.5`）永远不会比较相等，该玩家之后的每次修改都会提示
   「你的交易设置正在保存中，请稍后重试」，其交易统计也不会被计入，直到该单元格改写为 `0`/`1` 或普通数字为止。MySQL 按数值比较数字，不受影响。
 - **在 Paper 上，玩家数据保存失败不会通知本模块。** Paper 的 `Player#saveData()` 只记录其自身的 `Failed to save player data for <name>` 并正常返回，
