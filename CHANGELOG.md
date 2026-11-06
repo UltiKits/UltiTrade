@@ -5,6 +5,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 本文件记录本项目的所有重要更改，格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)。
 
+## [Unreleased]
+
+### Fixed
+
+- Failed cleanup of an empty pending-return row now says it lists no items and removal will be retried
+  at a later join, rather than incorrectly sending operators to the held-return list. Confirmation
+  failures still report a held row. New claim labels include the server folder name before the bind
+  address and port, helping distinguish backends that use the same socket; the label is not a unique
+  server ID and falls back to the address alone if the folder cannot be resolved (UltiKits/UltiTrade#62).
+- 空的待返还条目删除失败时，现在会提示其不含物品、将在玩家下次进服时重试删除，不再误报暂扣。确认失败仍会提示暂扣。
+  新占用标签会在绑定地址与端口前附上服务器目录名，以帮助区分使用相同地址的后端；此标签不保证唯一，无法解析目录时仅保留地址（UltiKits/UltiTrade#62）。
+
+### Documentation
+
+- Clarified the coordinated-upgrade requirement: a pre-#55 server beside an upgraded one erases a held
+  return's recovery record, not redelivers it. Documented why operators must interrupt hand-overs and
+  check the claiming server's saved player data before resolving held rows, and kept the accepted JSON
+  flush crash window explicit in the README (UltiKits/UltiTrade#62).
+- 明确混用旧版与升级版会抹去暂扣恢复记录，而非重复发还；说明处理暂扣前应停止发还并核对占用服务器上保存的玩家数据，
+  同时在 README 中明确已有的 JSON 写盘崩溃窗口限制（UltiKits/UltiTrade#62）。
+
 ## [2.0.0] - 2026-10-21
 
 ### Added

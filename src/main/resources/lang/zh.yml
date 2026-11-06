@@ -197,6 +197,7 @@ log_pending_return_save_failed: "无法保存 {PLAYER} 在已取消交易中押�
 log_pending_return_lookup_failed: "无法读取 {PLAYER} 已保存的交易押金；未发还任何物品，将在其下次进服时重新查找"
 log_pending_return_unreadable: "{PLAYER} 已保存的一笔交易押金（条目 {ID}）无法读取；已保留在列表中，未发还其中任何物品"
 log_pending_return_remove_failed: "{PLAYER} 已收到保存的交易物品 {ID}，其数据已保存，但条目未能确认；该条目保持暂扣，可用 /trade pending list 查看"
+log_pending_return_empty_remove_failed: "{PLAYER} 保存的交易物品条目 {ID} 已不含物品，但空条目未能删除；将在其下次进服时重试删除"
 log_pending_return_delivered: "已将已取消交易中押入的 {COUNT} 个物品归还给 {PLAYER}"
 log_pending_return_player_save_failed: "已将 {COUNT} 个物品交给 {PLAYER}，但保存其玩家数据失败；该条目保持暂扣，可用 /trade pending list 查看"
 log_pending_return_mark_failed: "无法占用 {PLAYER} 保存的交易物品 {ID}，本次未发还其中任何物品；若占用实际已写入数据库，该条目会保持暂扣并由 /trade pending list 列出，否则将在其下次进服时重试"
