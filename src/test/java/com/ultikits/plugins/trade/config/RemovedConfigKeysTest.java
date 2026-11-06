@@ -103,19 +103,19 @@ class RemovedConfigKeysTest {
     }
 
     @Test
-    @DisplayName("under language: en the trade-timeout warning reads exactly as before the language sweep")
-    void englishWarningIsByteIdentical(@TempDir File dir) throws IOException {
+    @DisplayName("the ignored legacy key warns explicitly about the new opt-in window-timeout setting")
+    void englishWarningExplainsOptIn(@TempDir File dir) throws IOException {
         File file = write(dir, "trade-timeout: 120\n");
         List<String> warnings = new ArrayList<>();
 
         TradeSeams.warnAboutLeftovers(file, warnings::add, ENGLISH);
 
         assertThat(warnings).containsExactly(file.getPath() + " still contains 'trade-timeout', which this version of"
-                + " UltiTrade no longer reads. It never took effect: an open trade window has no time limit, and"
-                + " nothing replaces the setting. A pending trade request still expires after 'request-timeout',"
-                + " which is unchanged. A time limit for an open trade window is feature request"
-                + " UltiKits/UltiTrade#41 (UltiKits/UltiTrade#18). Delete the key from the file to silence this"
-                + " warning.");
+                + " UltiTrade no longer reads. It never took effect and is still ignored. To opt into a fixed"
+                + " open-window time limit, set 'window-timeout' (seconds, 0-600; default 0 means unlimited);"
+                + " existing values of 'trade-timeout' are not copied. A pending trade request still expires after"
+                + " 'request-timeout', which is unchanged (UltiKits/UltiTrade#41, #18). Delete the key from the file"
+                + " to silence this warning.");
     }
 
     @Test
@@ -167,7 +167,7 @@ class RemovedConfigKeysTest {
         if (key.startsWith("messages.")) {
             assertThat(warnings.get(0)).contains("lang/").contains("UltiKits/UltiTrade#17");
         } else {
-            assertThat(warnings.get(0)).contains("request-timeout").contains("UltiKits/UltiTrade#18");
+            assertThat(warnings.get(0)).contains("request-timeout").contains("window-timeout").contains("#18");
         }
     }
 
