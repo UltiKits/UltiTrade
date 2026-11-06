@@ -296,7 +296,9 @@ private String guiTitle = "&6与 {PLAYER} 交易";
 
 ## 📜 许可证
 
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
+This project is licensed under the [MIT License](https://opensource.org/license/mit).
+
+本项目采用 MIT 许可证，许可条款详见上述链接。
 
 ## 🤝 贡献
 
