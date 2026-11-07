@@ -7,6 +7,7 @@ import com.ultikits.plugins.trade.entity.TradeSession;
 import com.ultikits.plugins.trade.gui.TradeConfirmPage;
 import com.ultikits.plugins.trade.gui.TradeGUI;
 import com.ultikits.plugins.trade.util.Placeholders;
+import com.ultikits.plugins.trade.util.SettingsWaitBudget;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.Autowired;
 import com.ultikits.ultitools.annotations.Scheduled;
@@ -427,6 +428,13 @@ public class TradeService {
      * @return true if request sent
      */
     public boolean sendRequest(Player sender, Player target) {
+        // Both command and shift-click entry points share one allowance across all four settings checks.
+        try (SettingsWaitBudget budget = SettingsWaitBudget.open()) {
+            return sendRequestInBudget(sender, target);
+        }
+    }
+
+    private boolean sendRequestInBudget(Player sender, Player target) {
         // Check if sender has trade enabled
         if (!logService.isTradeEnabled(sender.getUniqueId())) {
             sender.sendMessage(text(i18n("sender_trade_disabled")));
