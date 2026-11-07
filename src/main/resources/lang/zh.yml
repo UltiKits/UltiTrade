@@ -13,6 +13,12 @@ message_player_blocked: "&c对方已将你加入黑名单！"
 
 request_denied: "&c{PLAYER} 拒绝了你的交易请求！"
 
+# 已打开窗口的时限（与待处理请求分别计时）
+window_timeout_started: "&e本次交易将在 {SECONDS} 秒后关闭，修改出价不会重置计时。"
+window_timeout_warning: "&e本次交易将在 {SECONDS} 秒后关闭，请在到期前确认或取消。"
+cancel_reason_window_timeout: "交易窗口已达到时限；未转移任何东西"
+log_window_timeout_failed: "检查或取消超时交易失败；继续处理其余交易。"
+
 # 交易状态
 trade_complete: "&a交易完成！"
 trade_cancelled: "&c交易已取消！"
@@ -239,13 +245,14 @@ log_logs_cleaned: "已清理 {COUNT} 条过期交易日志（早于 {DAYS} 天�
 log_logs_cleanup_failed: "清理旧日志失败"
 log_player_logs_failed: "获取玩家日志失败"
 removed_key_warning: "{FILE} 仍包含 '{KEY}'，此版本的 UltiTrade 已不再读取它。{REASON} 从文件中删除该键即可消除此警告。"
-removed_key_reason_trade_timeout: "它从未生效：已打开的交易窗口没有时间限制，也没有其他设置取代它。待处理的交易请求仍会在 'request-timeout' 之后过期，该设置未变。为已打开的交易窗口设置时间限制是功能请求 UltiKits/UltiTrade#41（UltiKits/UltiTrade#18）。"
+removed_key_reason_trade_timeout: "它从未生效，现在仍被忽略。如需为已打开的窗口启用固定时限，请设置 'window-timeout'（秒，0-600；默认0为不限时）；不会复制 'trade-timeout' 的旧值。待处理的交易请求仍会在 'request-timeout' 之后过期，该设置未变（UltiKits/UltiTrade#41、#18）。"
 removed_key_reason_moved: "它的值从未显示给玩家。它描述的回复现在来自本模块语言文件（lang/<语言>.yml，与 config/trade.yml 位于同一模块文件夹）中的 '{ENTRY}' 条目，因此会跟随服务器的语言设置；要自定义它，请把该文件复制为以其语言代码加连字符开头的文件（例如 lang/zh-myserver.yml），在副本中修改 '{ENTRY}'，并在 plugins/UltiTools/config.yml 中设置 language: zh-myserver；直接修改官方文件的改动会在下次启动或模块重载时被恢复（UltiKits/UltiTrade#17）。"
 
 log_config_default_save_failed: "按服务器语言写入 {FILE} 中的标题与消息后保存失败；本次运行已使用新的文本，下次启动时会再次写入该文件。"
 
 # config/trade.yml 的注释：按服务器语言写在每个设置上方（UltiKits/UltiTrade#51）
 config_comment_request_timeout: "交易请求超时时间（秒）"
+config_comment_window_timeout: "交易窗口固定时限（秒，0-600；0为不限时）；重载只影响新交易"
 config_comment_max_distance: "交易最大距离（格），0为无限制"
 config_comment_allow_cross_world: "允许跨世界交易"
 config_comment_enable_money_trade: "启用金币交易（需要Vault）"

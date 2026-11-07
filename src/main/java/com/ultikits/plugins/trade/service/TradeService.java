@@ -694,7 +694,7 @@ public class TradeService {
      * Start a trade between two players.
      */
     public void startTrade(Player player1, Player player2) {
-        TradeSession session = new TradeSession(player1, player2);
+        TradeSession session = new TradeSession(player1, player2, config.getWindowTimeout());
         
         activeSessions.put(session.getSessionId(), session);
         playerSessionMap.put(player1.getUniqueId(), session.getSessionId());
@@ -713,6 +713,10 @@ public class TradeService {
         }
         if (!openOrCancel(player2, session, gui2.getInventory())) {
             return;
+        }
+
+        if (session.getWindowTimeoutSeconds() > 0) {
+            notifyWindowLifetime(session, i18n("window_timeout_started"), session.getWindowTimeoutSeconds());
         }
 
         // Play sound
@@ -748,6 +752,10 @@ public class TradeService {
             return;
         }
         
+        if (cancelIfWindowExpired(session, System.nanoTime())) {
+            return;
+        }
+
         // Check if large trade confirmation is needed
         double threshold = config.getConfirmThreshold();
         double totalMoney = session.getPlayerMoney(player.getUniqueId()) + 
@@ -832,6 +840,9 @@ public class TradeService {
         if (!isCurrentSession(uuid, session)) {
             return;
         }
+        if (cancelIfWindowExpired(session, System.nanoTime())) {
+            return;
+        }
         if (session.getRevision() != shownRevision) {
             player.sendMessage(text(i18n("confirm_page_offer_changed")));
             reopenTradeWindow(session, player);
@@ -910,6 +921,9 @@ public class TradeService {
      * Complete the trade.
      */
     public void completeTrade(TradeSession session) {
+        if (cancelIfWindowExpired(session, System.nanoTime())) {
+            return;
+        }
         Player player1 = Bukkit.getPlayer(session.getPlayer1());
         Player player2 = Bukkit.getPlayer(session.getPlayer2());
         
@@ -2109,6 +2123,56 @@ public class TradeService {
         }
     }
     
+    /**
+     * Enforce captured window lifetimes on the main thread. The framework owns this task and cancels
+     * it on module unload; no per-session timer survives completion, cancellation or shutdown. A slow
+     * server checks real elapsed time at its next opportunity, never touches inventories asynchronously.
+     */
+    @Scheduled(period = 20, async = false)
+    public void cleanupExpiredTradeWindows() {
+        cleanupExpiredTradeWindows(System.nanoTime());
+    }
+
+    // Explicit time makes boundary tests deterministic without sleeping or altering the server clock.
+    void cleanupExpiredTradeWindows(long nowNanos) {
+        for (TradeSession session : activeSessions.values()) {
+            if (session.getState() != TradeSession.TradeState.TRADING) {
+                continue;
+            }
+            try {
+                if (cancelIfWindowExpired(session, nowNanos)) {
+                    continue;
+                }
+                int remaining = session.getWindowSecondsRemaining(nowNanos);
+                if (remaining > 0 && remaining <= 10 && session.markWindowTimeoutWarning()) {
+                    notifyWindowLifetime(session, i18n("window_timeout_warning"), remaining);
+                }
+            } catch (RuntimeException e) {
+                // In particular, a cancelled-trade log can fail after the stakes were safely returned.
+                // That must not prevent the remaining sessions' deadlines from being enforced.
+                logQuietly(() -> plugin.getLogger().warn(e, i18n("log_window_timeout_failed")));
+            }
+        }
+    }
+
+    private boolean cancelIfWindowExpired(TradeSession session, long nowNanos) {
+        if (session.getWindowSecondsRemaining(nowNanos) != 0) {
+            return false;
+        }
+        cancelTrade(session, i18n("cancel_reason_window_timeout"));
+        return true;
+    }
+
+    private void notifyWindowLifetime(TradeSession session, String template, int seconds) {
+        String message = text(template.replace("{SECONDS}", String.valueOf(seconds)));
+        for (UUID participant : new UUID[] {session.getPlayer1(), session.getPlayer2()}) {
+            Player player = Bukkit.getPlayer(participant);
+            if (player != null) {
+                player.sendMessage(message);
+            }
+        }
+    }
+
     // ==================== Sound and Particle Effects ====================
     
     /**

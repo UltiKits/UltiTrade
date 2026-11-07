@@ -77,9 +77,37 @@ world/distance enforcement after a trade has already started.
 拒绝时会告知接受者原因，移除请求及其 BossBar，且不开始交易。重载不会立即清空待处理请求；接受时按重载后的策略判断，
 原请求的超时时间不变。交易开始后不会持续检查世界或距离。
 
+### Optional open-window time limit / 可选交易窗口时限
+
+Set `window-timeout: 120` to close an open trade after two minutes. The shipped value is `0`
+(unlimited), and valid values are `0` through `600` seconds. This is separate from `request-timeout`:
+the window clock starts when the trade opens, not when its request is sent. Changing an offer,
+confirming, opening a large-trade confirmation page or answering a money/experience prompt does not
+restart it. Both players receive the duration in chat when the windows open, then one warning in the
+last ten seconds. At expiry both see the configured cancellation message with the reason
+"trade window time limit reached; nothing was transferred" under `language: en`.
+
+Expiry uses the same return path as `/trade cancel`: each player gets their own items back, overflow
+drops at the owner's feet, and an unavailable player's items are kept in the existing pending-return
+system. Money and experience have not been taken, so neither changes. A confirmation after the
+deadline cannot complete the trade while waiting for the next timer check. The check runs on the
+server thread every 20 ticks; a lagging server acts on the next available check, not on an async
+inventory thread. A trade whose settlement started before the deadline is allowed to finish.
+
+After editing the setting, run `ul reload UltiTrade` from the console. Only newly opened trades use
+the new duration; existing trades keep the duration announced at opening, including unlimited ones.
+The legacy `trade-timeout` key is still ignored and warned about, never copied or automatically
+removed: explicitly set `window-timeout` to opt in. `enable-bossbar` still controls request bars only.
+
+设置 `window-timeout: 120` 可让已打开的交易在两分钟后取消，默认 `0` 不限时，有效范围为 0-600 秒。
+它与请求超时分别计时；修改物品、金币、经验或确认都不会重置。双方开窗时获知总时长，最后十秒收到一次提醒，
+到期经原取消流程各自退回物品、放不下则掉落在原主脚下，离线物品沿用待返还机制，金币和经验不变。
+重载只影响之后打开的新交易，旧交易保留原时限；旧键 `trade-timeout` 仍无效，必须明确设置新键来启用。
+
 ```yaml
 # 基础设置
 request-timeout: 30           # 交易请求超时时间（秒，5-600）
+window-timeout: 0             # 交易窗口固定时限（秒，0-600；0为不限时；重载只影响新交易）
 max-distance: 50              # 最大交易距离（格，0 无限制，最大 1000）
 allow-cross-world: false      # 是否允许跨世界交易
 
@@ -143,6 +171,7 @@ enable-clickable-buttons: true # 启用聊天可点击按钮
 
 ### 未发布 / Unreleased
 
+- Added an opt-in fixed trade-window lifetime (`window-timeout`), with localized notices and safe stake return on expiry (#41).
 - 需要 UltiTools-API 6.3.0 或更高版本（`api-version: 630`）
 
 ### v1.0.0 (2026-02-18)

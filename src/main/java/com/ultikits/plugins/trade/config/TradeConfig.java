@@ -37,6 +37,10 @@ public class TradeConfig extends AbstractConfigEntity {
     @ConfigEntry(path = "request-timeout", comment = "{config_comment_request_timeout}")
     private int requestTimeout = 30;
 
+    @Range(min = 0, max = 600)
+    @ConfigEntry(path = "window-timeout", comment = "{config_comment_window_timeout}")
+    private int windowTimeout = 0;
+
     @Range(min = 0, max = 1000)
     @ConfigEntry(path = "max-distance", comment = "{config_comment_max_distance}")
     private int maxDistance = 50;

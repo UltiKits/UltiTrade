@@ -39,7 +39,7 @@ import static org.mockito.Mockito.when;
 class TradeConfigCommentsTest {
 
     /** The settings whose comments were Chinese: the adoption's scope, counted at master 17e5a6e. */
-    private static final int TOKEN_COMMENTS = 24;
+    private static final int TOKEN_COMMENTS = 25;
 
     @TempDir
     Path tempDir;
@@ -121,8 +121,8 @@ class TradeConfigCommentsTest {
     }
 
     @Test
-    @DisplayName("control: the entity declares twenty-four token comments, and none of its comments is Chinese")
-    void twentyFourTokensAndNoChineseComment() {
+    @DisplayName("control: the entity declares twenty-five token comments, and none of its comments is Chinese")
+    void twentyFiveTokensAndNoChineseComment() {
         Map<String, String> comments = declaredComments();
         int tokens = 0;
         for (Map.Entry<String, String> e : comments.entrySet()) {
@@ -136,7 +136,7 @@ class TradeConfigCommentsTest {
     }
 
     @Test
-    @DisplayName("a fresh install under language: en writes every one of the twenty-four comments in English")
+    @DisplayName("a fresh install under language: en writes every one of the twenty-five comments in English")
     void freshInstallWritesEnglishComments() throws Exception {
         load(plugin("en"));
 
@@ -150,11 +150,48 @@ class TradeConfigCommentsTest {
     }
 
     @Test
-    @DisplayName("a fresh install under language: zh writes every one of the twenty-four comments in Chinese")
+    @DisplayName("a fresh install under language: zh writes every one of the twenty-five comments in Chinese")
     void freshInstallWritesChineseComments() throws Exception {
         load(plugin("zh"));
 
         assertCommentsIn("zh");
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {0, 1, 120, 600})
+    @DisplayName("The window limit accepts its boundaries and never overwrites an operator's value or legacy key")
+    void windowLifetimeKeepsOperatorValues(int seconds) throws Exception {
+        UltiTrade plugin = plugin("en");
+        load(plugin);
+        String original = new String(Files.readAllBytes(file().toPath()), StandardCharsets.UTF_8);
+        assertThat(original).contains("window-timeout: 0");
+        byte[] edited = (original.replace("window-timeout: 0", "window-timeout: " + seconds)
+                + "trade-timeout: 77\n").getBytes(StandardCharsets.UTF_8);
+        Files.write(file().toPath(), edited);
+
+        TradeConfig config = load(plugin);
+        config.save();
+
+        assertThat(config.getWindowTimeout()).isEqualTo(seconds);
+        assertThat(Files.readAllBytes(file().toPath())).isEqualTo(edited);
+        assertThat(fileOnDisk().getInt("trade-timeout")).isEqualTo(77);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {-1, 601})
+    @DisplayName("An out-of-range window lifetime is refused without repairing the operator's file")
+    void invalidWindowLifetimeDoesNotRewriteFile(int seconds) throws Exception {
+        UltiTrade plugin = plugin("en");
+        load(plugin);
+        String original = new String(Files.readAllBytes(file().toPath()), StandardCharsets.UTF_8);
+        byte[] edited = original.replace("window-timeout: 0", "window-timeout: " + seconds)
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file().toPath(), edited);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> load(plugin))
+                .isInstanceOf(com.ultikits.ultitools.exceptions.ConfigurationException.class)
+                .hasMessageContaining("windowTimeout");
+        assertThat(Files.readAllBytes(file().toPath())).isEqualTo(edited);
     }
 
     @Test
