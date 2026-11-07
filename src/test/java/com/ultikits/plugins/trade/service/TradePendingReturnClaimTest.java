@@ -123,6 +123,7 @@ class TradePendingReturnClaimTest {
         PlayerMock present = server.addPlayer("Present");
         PlayerMock away = new PlayerMock(server, "Away", awayId);
         away.setLocation(world.getSpawnLocation());
+        server.getPlayerList().addOfflinePlayer(away); // known-position control, not initiator redirection
         TradeSession session = new TradeSession(present, away);
         session.setItem(awayId, 0, new ItemStack(Material.DIAMOND, 10));
         session.setItem(awayId, 1, new ItemStack(Material.EMERALD, 1));

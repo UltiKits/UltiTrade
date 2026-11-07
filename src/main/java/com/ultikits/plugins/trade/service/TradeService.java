@@ -1256,7 +1256,7 @@ public class TradeService {
         } else {
             // No inventory to hand the stake to: keep it for the owner's next join, before the
             // session that is its only record is discarded (UltiKits/UltiTrade#32).
-            holdStakeForReturn(session.getPlayer1(), session.getPlayerItems(session.getPlayer1()).values());
+            holdStakeForReturn(session, session.getPlayer1(), session.getPlayerItems(session.getPlayer1()).values());
         }
         
         if (player2 != null) {
@@ -1275,7 +1275,7 @@ public class TradeService {
             player2.sendMessage(ChatColor.translateAlternateColorCodes('&', msg));
             playFailEffects(player2);
         } else {
-            holdStakeForReturn(session.getPlayer2(), session.getPlayerItems(session.getPlayer2()).values());
+            holdStakeForReturn(session, session.getPlayer2(), session.getPlayerItems(session.getPlayer2()).values());
         }
         
         session.setState(TradeSession.TradeState.CANCELLED);
@@ -1333,23 +1333,16 @@ public class TradeService {
     // ==================== Stakes of an owner the server could not find (UltiKits/UltiTrade#32) ====================
 
     /**
-     * Keep the stake of a trade participant the server cannot resolve, so it can be handed back when
-     * they next join.
-     * <p>
-     * A cancelled trade returns each side's stake into that side's inventory; a participant
-     * {@code Bukkit#getPlayer} cannot resolve has none, and the session is the stake's only record.
-     * The maintainer's decision of 2026-09-24: save it in a pending-returns list and hand it back at
-     * the owner's next join through {@link #giveOrDrop}; if the list cannot be saved, drop the items
-     * at the owner's last known location and log an error naming the player and the items.
-     * <p>
-     * Every cancel path reaches this through {@link #cancelTrade(TradeSession, String)}: the
-     * completion offline guard, {@link #shutdown()}, and a quit or {@code /trade cancel} whose other
-     * side is gone.
+     * First save an offline participant's stake for its original owner, regardless of location.
+     * Only a definitively failed save may fall back to the owner's real last position, or, without
+     * one, to the original initiator: giveOrDrop when online, otherwise the existing join claim list.
+     * The initiator's own stake always remains theirs (UltiTools-Reborn#655).
      *
-     * @param owner the participant whose stake this is
-     * @param stake the stacks they staked; {@code null} and empty stacks are ignored
+     * @param session the source trade; player1 is its original initiator
+     * @param owner the participant whose stake this was
+     * @param stake the stacks they staked; null and empty stacks are ignored
      */
-    private void holdStakeForReturn(UUID owner, Collection<ItemStack> stake) {
+    private void holdStakeForReturn(TradeSession session, UUID owner, Collection<ItemStack> stake) {
         List<ItemStack> stacks = new ArrayList<>();
         for (ItemStack item : stake) {
             if (item != null && !item.getType().isAir()) {
@@ -1359,45 +1352,113 @@ public class TradeService {
         if (stacks.isEmpty()) {
             return;
         }
-        String ownerLabel = describeOwner(owner);
         String summary = summarize(stacks);
-        RuntimeException saveFailure = null;
-        // Only building and inserting the row may lead to the drop below. What runs after a successful
-        // insert (the log line) stays outside this block: a failure there must not drop a stake the
-        // list already holds, or it would be handed out twice.
+        PendingStakeReturn entry = new PendingStakeReturn();
+        // Source identity, not recipient identity: a retry cannot create a second row after a commit
+        // whose response was lost. This uses the existing ID, not a new receipt or claim state.
+        entry.setId(session.getSessionId() + ":" + owner);
+        entry.setOwnerUuid(owner.toString());
+        entry.setItems(serializeStacks(stacks));
+        entry.setStackCount(stacks.size());
+        entry.setCreatedAt(System.currentTimeMillis());
+        Exception saveFailure = savePendingReturn(entry, owner, summary);
+        if (saveFailure == null) {
+            logSavedReturn(entry, summary);
+            return;
+        }
+
+        Location where = lastKnownLocation(owner);
+        if (where != null) {
+            for (ItemStack item : stacks) {
+                where.getWorld().dropItemNaturally(where, item);
+            }
+            String ownerLabel = describeOwner(owner);
+            logQuietly(() -> plugin.getLogger().error(saveFailure,
+                    Placeholders.fill(i18n("log_pending_return_save_failed"),
+                            "{PLAYER}", ownerLabel, "{COUNT}", String.valueOf(stacks.size()),
+                            "{LOCATION}", where.getWorld().getName() + " "
+                                    + where.getBlockX() + " " + where.getBlockY() + " " + where.getBlockZ(),
+                            "{ITEMS}", summary)));
+            return;
+        }
+
+        UUID recipient = session.getPlayer1();
+        if (owner.equals(recipient)) {
+            throw pendingReturnFailure("could not persist pending return", entry, owner, summary, saveFailure);
+        }
+        logQuietly(() -> plugin.getLogger().warn(Placeholders.fill(i18n("log_pending_return_redirected"),
+                "{OWNER}", describeOwner(owner), "{RECIPIENT}", describeOwner(recipient), "{ITEMS}", summary)));
+        Player initiator = Bukkit.getPlayer(recipient);
+        if (initiator != null) {
+            for (ItemStack item : stacks) {
+                giveOrDrop(initiator, item);
+            }
+            logQuietly(() -> initiator.sendMessage(text(i18n("message_pending_return_redirected"))));
+            return;
+        }
+        entry.setOwnerUuid(recipient.toString());
+        Exception recipientFailure = savePendingReturn(entry, owner, summary);
+        if (recipientFailure != null) {
+            throw pendingReturnFailure("could not persist pending return", entry, owner, summary, recipientFailure);
+        }
+        logSavedReturn(entry, summary);
+    }
+
+    /** Return a failure only after readback proves the return was not saved; uncertain outcomes throw. */
+    private Exception savePendingReturn(PendingStakeReturn entry, UUID originalOwner, String summary) {
         try {
             if (pendingReturns == null) {
                 throw new IllegalStateException("the pending-returns list is not available");
             }
-            PendingStakeReturn entry = new PendingStakeReturn();
-            entry.setOwnerUuid(owner.toString());
-            entry.setItems(serializeStacks(stacks));
-            entry.setStackCount(stacks.size());
-            entry.setCreatedAt(System.currentTimeMillis());
-            pendingReturns.insert(entry);
-        } catch (RuntimeException e) {
-            saveFailure = e;
-        }
-        if (saveFailure == null) {
-            logQuietly(() -> plugin.getLogger().warn(i18n("log_pending_return_saved")
-                    .replace("{PLAYER}", ownerLabel)
-                    .replace("{COUNT}", String.valueOf(stacks.size()))
-                    .replace("{ITEMS}", summary)));
-        } else {
-            RuntimeException e = saveFailure;
-            Location where = lastKnownLocation(owner);
-            for (ItemStack item : stacks) {
-                where.getWorld().dropItemNaturally(where, item);
+            pendingReturns.transaction(() -> {
+                PendingStakeReturn existing = pendingReturns.getById(entry.getId());
+                if (existing == null) {
+                    pendingReturns.insert(entry);
+                } else if (!sameReturn(existing, entry)) {
+                    throw new IllegalStateException("a different return already uses " + entry.getId());
+                }
+                return null;
+            });
+        } catch (Exception e) {
+            // Read back a possibly committed insert before any alternate delivery. An unreadable or
+            // conflicting outcome is NOT evidence that it is safe to hand out another copy.
+            PendingStakeReturn stored;
+            try {
+                stored = pendingReturns == null ? null : pendingReturns.getById(entry.getId());
+            } catch (RuntimeException unreadable) {
+                throw pendingReturnFailure("pending-return outcome is unknown", entry, originalOwner, summary, e);
             }
-            // One pass: a world name is inserted exactly as it is, even when it contains a placeholder
-            // token (the class of UltiKits/UltiMail#37).
-            logQuietly(() -> plugin.getLogger().error(e, Placeholders.fill(i18n("log_pending_return_save_failed"),
-                    "{PLAYER}", ownerLabel,
-                    "{COUNT}", String.valueOf(stacks.size()),
-                    "{LOCATION}", where.getWorld().getName() + " "
-                            + where.getBlockX() + " " + where.getBlockY() + " " + where.getBlockZ(),
-                    "{ITEMS}", summary)));
+            if (stored != null && !sameReturn(stored, entry)) {
+                throw pendingReturnFailure("pending-return outcome conflicts", entry, originalOwner, summary, e);
+            }
+            if (stored == null) {
+                return e;
+            }
         }
+        return null;
+    }
+
+    private void logSavedReturn(PendingStakeReturn entry, String summary) {
+        logQuietly(() -> plugin.getLogger().warn(Placeholders.fill(i18n("log_pending_return_saved"),
+                "{PLAYER}", describeOwner(UUID.fromString(entry.getOwnerUuid())),
+                "{COUNT}", String.valueOf(entry.getStackCount()), "{ITEMS}", summary)));
+    }
+
+    private IllegalStateException pendingReturnFailure(String reason, PendingStakeReturn entry,
+            UUID originalOwner, String summary, Exception cause) {
+        String details = reason + ": " + entry.getId() + "; original owner " + originalOwner
+                + "; recipient " + entry.getOwnerUuid() + "; items " + summary;
+        logQuietly(() -> plugin.getLogger().error(cause,
+                Placeholders.fill(i18n("log_pending_return_storage_failed"),
+                        "{OWNER}", describeOwner(originalOwner), "{RECIPIENT}", entry.getOwnerUuid(),
+                        "{ID}", entry.getId(), "{ITEMS}", summary)));
+        return new IllegalStateException(details, cause);
+    }
+
+    private static boolean sameReturn(PendingStakeReturn stored, PendingStakeReturn expected) {
+        return expected.getOwnerUuid().equals(stored.getOwnerUuid())
+                && expected.getItems().equals(stored.getItems())
+                && stored.getDeliveryToken() == null;
     }
 
     /**
@@ -2020,7 +2081,7 @@ public class TradeService {
         }
     }
 
-    /** Where to drop a stake that could not be saved: the owner's last position, else the first world's spawn. */
+    /** The owner's real last position, or null when this server cannot supply one. */
     private static Location lastKnownLocation(UUID owner) {
         try {
             Location last = Bukkit.getOfflinePlayer(owner).getLocation();
@@ -2028,9 +2089,9 @@ public class TradeService {
                 return last;
             }
         } catch (RuntimeException | LinkageError ignored) {
-            // A platform without a stored last position for offline players: use the spawn below.
+            // Older APIs lack this method; newer servers may have no usable saved position either.
         }
-        return Bukkit.getWorlds().get(0).getSpawnLocation();
+        return null;
     }
 
     /** The owner's last known name and UUID, for an operator reading the log. */
