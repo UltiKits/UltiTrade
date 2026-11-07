@@ -121,6 +121,8 @@ public final class UltiTradeTestHelper {
         Plugin ultiToolsPlugin = mock(Plugin.class);
         lenient().when(ultiToolsPlugin.getName()).thenReturn("UltiTools");
         lenient().when(ultiToolsPlugin.isEnabled()).thenReturn(true);
+        lenient().when(ultiToolsPlugin.getDescription()).thenReturn(
+                new org.bukkit.plugin.PluginDescriptionFile("UltiTools", "6.3.0", "unused"));
         lenient().when(pluginManager.getPlugin("UltiTools")).thenReturn(ultiToolsPlugin);
 
         ServicesManager servicesManager = mock(ServicesManagerMock.class);

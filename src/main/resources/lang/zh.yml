@@ -1,6 +1,8 @@
 # UltiTrade 语言文件 (简体中文)
 trade_enabled: "UltiTrade 已启用！"
 trade_disabled: "UltiTrade 已禁用！"
+startup_framework_too_old: "在 Minecraft 1.21 以下版本上，UltiTrade 需要 UltiTools 6.4.0 或更高版本（服务器：{SERVER}，UltiTools：{FRAMEWORK}）。请更新 UltiTools。"
+startup_version_unknown: "UltiTrade 无法解析当前版本（服务器：{SERVER}，UltiTools：{FRAMEWORK}）；将跳过兼容性检查并继续启动。"
 
 # 交易请求
 request_timeout: "&c交易请求已超时！"
