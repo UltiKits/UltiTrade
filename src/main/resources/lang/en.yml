@@ -197,6 +197,7 @@ log_pending_return_save_failed: "Could not save the staked items of {PLAYER} fro
 log_pending_return_lookup_failed: "Could not read the saved trade stakes of {PLAYER}; nothing was handed over, and they will be looked up again at their next join"
 log_pending_return_unreadable: "A saved trade stake of {PLAYER} (entry {ID}) cannot be read; it was left in the list and nothing from it was handed over"
 log_pending_return_remove_failed: "{PLAYER} received saved trade stake {ID} and their data was saved, but the entry could not be confirmed; it stays held and is listed by /trade pending list"
+log_pending_return_empty_remove_failed: "{PLAYER}'s saved trade stake {ID} lists no items, but its empty entry could not be removed; removal will be retried at a later join"
 log_pending_return_delivered: "Returned {COUNT} staked item(s) from cancelled trades to {PLAYER}"
 log_pending_return_player_save_failed: "Handed {COUNT} item(s) to {PLAYER} but saving their player data failed; the entry stays held and is listed by /trade pending list"
 log_pending_return_mark_failed: "Could not claim {PLAYER}'s saved trade stake {ID}, so nothing from it was handed over this time; if the claim reached the database anyway, the entry is held and listed by /trade pending list, otherwise it is tried again at their next join"
