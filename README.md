@@ -77,9 +77,37 @@ world/distance enforcement after a trade has already started.
 拒绝时会告知接受者原因，移除请求及其 BossBar，且不开始交易。重载不会立即清空待处理请求；接受时按重载后的策略判断，
 原请求的超时时间不变。交易开始后不会持续检查世界或距离。
 
+### Optional open-window time limit / 可选交易窗口时限
+
+Set `window-timeout: 120` to close an open trade after two minutes. The shipped value is `0`
+(unlimited), and valid values are `0` through `600` seconds. This is separate from `request-timeout`:
+the window clock starts when the trade opens, not when its request is sent. Changing an offer,
+confirming, opening a large-trade confirmation page or answering a money/experience prompt does not
+restart it. Both players receive the duration in chat when the windows open, then one warning in the
+last ten seconds. At expiry both see the configured cancellation message with the reason
+"trade window time limit reached; nothing was transferred" under `language: en`.
+
+Expiry uses the same return path as `/trade cancel`: each player gets their own items back, overflow
+drops at the owner's feet, and an unavailable player's items are kept in the existing pending-return
+system. Money and experience have not been taken, so neither changes. A confirmation after the
+deadline cannot complete the trade while waiting for the next timer check. The check runs on the
+server thread every 20 ticks; a lagging server acts on the next available check, not on an async
+inventory thread. A trade whose settlement started before the deadline is allowed to finish.
+
+After editing the setting, run `ul reload UltiTrade` from the console. Only newly opened trades use
+the new duration; existing trades keep the duration announced at opening, including unlimited ones.
+The legacy `trade-timeout` key is still ignored and warned about, never copied or automatically
+removed: explicitly set `window-timeout` to opt in. `enable-bossbar` still controls request bars only.
+
+设置 `window-timeout: 120` 可让已打开的交易在两分钟后取消，默认 `0` 不限时，有效范围为 0-600 秒。
+它与请求超时分别计时；修改物品、金币、经验或确认都不会重置。双方开窗时获知总时长，最后十秒收到一次提醒，
+到期经原取消流程各自退回物品、放不下则掉落在原主脚下，离线物品沿用待返还机制，金币和经验不变。
+重载只影响之后打开的新交易，旧交易保留原时限；旧键 `trade-timeout` 仍无效，必须明确设置新键来启用。
+
 ```yaml
 # 基础设置
 request-timeout: 30           # 交易请求超时时间（秒，5-600）
+window-timeout: 0             # 交易窗口固定时限（秒，0-600；0为不限时；重载只影响新交易）
 max-distance: 50              # 最大交易距离（格，0 无限制，最大 1000）
 allow-cross-world: false      # 是否允许跨世界交易
 
@@ -143,6 +171,7 @@ enable-clickable-buttons: true # 启用聊天可点击按钮
 
 ### 未发布 / Unreleased
 
+- Added an opt-in fixed trade-window lifetime (`window-timeout`), with localized notices and safe stake return on expiry (#41).
 - 需要 UltiTools-API 6.3.0 或更高版本（`api-version: 630`）
 
 ### v1.0.0 (2026-02-18)
@@ -275,6 +304,20 @@ held CLAIMED entries still need operator review below.
 
 ## ⚠️ Known limitations / 已知限制
 
+- **The settings lock budget is not a database timeout.** A `/trade block`, `/trade unblock` or trade request
+  (including shift+right-click) shares about 50 ms across its settings-lock attempts, rather than waiting 50 ms
+  again at each check. A free lock can still be acquired after that budget expires. Database calls themselves
+  are not timed out by this budget; a slow database can still delay the server thread.
+- **Completed-trade statistics can be skipped silently in a disabled-core fallback.** Normal completed-trade
+  logging runs in the background and waits for the player's settings write. If the UltiTools core is no longer
+  enabled, logging runs inline instead; if that is on the server thread while an earlier same-player write is
+  still holding the lock beyond its allowance, that statistics increment is skipped without a warning.
+  Do not initiate trades while disabling the core; finish active trades before stopping or unloading it.
+- **Another plugin must not interrupt the server thread.** While its interrupt flag is set, settings-lock
+  attempts immediately fail: settings commands may answer the busy reply, joins skip caching, and uncached
+  reads do not fill the cache. UltiTrade preserves that flag instead of clearing another plugin's signal.
+  Remove or repair the plugin causing the interrupt and restart the server; retrying the command alone does
+  not clear the flag.
 - **A complete storage outage with no real owner location and an offline initiator can interrupt cancellation.**
   Nothing is dropped at spawn; the error names the original owner, recipient and items. Cancellation
   is not a crash-recovery transaction: inspect that error and the actual inventories/pending rows
@@ -298,7 +341,24 @@ held CLAIMED entries still need operator review below.
   at each join that a return of items is waiting for an administrator's check (with the count).
 - **All servers sharing one database must run the same UltiTrade version.** Stop them all, upgrade, then
   start them: a server still running a build from before UltiKits/UltiTrade#55 does not know the CLAIMED
-  state and can hand over an entry that an upgraded server holds.
+  state. It clears the held entry's marker and saved hand-over items, leaving an empty row; an upgraded
+  server deletes that row at the next join. This erases the recovery record rather than redelivering it.
+- **Resolve only interrupted hand-overs, not ones still running.** Before using `/trade pending redeliver`
+  or `/trade pending void`, stop hand-overs for that player on every server sharing the database (for
+  example, stop those servers, then start only the server used for recovery without letting the player
+  join). Check the claiming server's saved player inventory and ender chest first. A redeliver during a
+  live hand-over can leave the player with the items and queue them again; the warning that an operator
+  resolved the entry meanwhile means you must re-check for a possible duplicate before another join.
+  New claims show `<server folder>@<bind IP>:<port>` (for example `survival@*:25565`); when the folder
+  cannot be resolved they show only the address. This is a diagnostic label, not a globally unique ID:
+  keep distinct server folder names or an external mapping when backends share the same label. Existing
+  claims keep the label recorded when they were created.
+- **JSON storage has a crash window.** Pending-return changes reach disk at the framework's next flush
+  (`datasource.flushRate` seconds, and at shutdown). A crash before that flush can lose a saved return or
+  hand the items over twice, even if the player data was saved. SQLite and MySQL write the row at once.
+- **An empty-row cleanup failure is not a held return.** Its warning says the row lists no items and
+  removal will be retried at a later join; it does not appear in `/trade pending list`. A confirmation
+  failure still leaves a held return for the administrator to check (UltiKits/UltiTrade#62).
 - **A trade payment that committed and then failed counts as not made.** If the economy plugin's
   withdrawal or deposit throws an error after its storage had already applied it (the connection was lost
   before the answer arrived), the trade treats it as not moved: money can then be created (a deposit:
@@ -307,7 +367,7 @@ held CLAIMED entries still need operator review below.
   check that player's balance for that amount and correct it by hand (UltiKits/UltiTrade#60). Reading the
   balance again cannot settle it, because other plugins or servers may change it too. This is an
   accepted limitation (maintainer 2026-10-08), unit-pinned by `TradeMoneySettlementTest`.
-- **Edit `trade_player_settings` by hand only with the values the module writes.** Every settings change is written
+- **Edit `trade_player_settings` by hand only with all sharing servers stopped and with the values the module writes.** Every settings change is written
   only if the stored row still holds what was read (UltiKits/UltiTrade#54). On SQLite a hand-written value in another
   form — `trade_enabled = 'false'` instead of `0`, `total_money_traded = '1.50'` instead of `1.5` — never compares
   equal, so every later change for that player answers "Your trade settings are being saved right now; please try again in a moment." and their
@@ -333,12 +393,20 @@ held CLAIMED entries still need operator review below.
   硬崩溃后应先检查这些暂扣条目，再决定重发或作废；这不是硬崩溃后的自动恰好一次恢复。
   条目被暂扣期间，玩家每次进服都会收到一条提示：有待返还物品正在等待管理员核对（含笔数）。
 - **共享同一数据库的所有服务器必须运行同一版本的 UltiTrade。** 请全部停服、升级后再启动：仍运行 UltiKits/UltiTrade#55 之前版本的服务器不认识「已占用」状态，
-  可能发还已被暂扣的条目。
+  会清除暂扣条目的标记与已交付物品记录，只留下空行；升级后的服务器会在玩家下次进服时删除该行。这会抹去恢复记录，而不是重新发还。
+- **只处理已中断的发还，不要处理仍在进行的发还。** 使用 `/trade pending redeliver` 或 `/trade pending void` 前，先在所有共享数据库的服务器上停止该玩家的发还
+  （例如全部停服，再只启动恢复所用的服务器，期间不让玩家进服），核对占用服务器上保存的玩家背包与末影箱。在发还进行中重新发还，可能让玩家已收到物品又排队再领一次；
+  日志提示服主在发还过程中处理了条目时，应在玩家再次进服前复核是否可能重复。新占用记录显示 `<服务器目录名>@<绑定IP>:<端口>`（如 `survival@*:25565`），
+  无法解析目录时仅显示地址。这只是诊断标签，不保证全局唯一；请使用不同的服务器目录名，或维护同名后端的外部对照。已有记录保留创建时的标签。
+- **JSON 存储存在崩溃窗口。** 待返还记录在框架下次写盘时才落盘（间隔 `datasource.flushRate` 秒，及正常关服时）。此前崩溃可能丢失待返还记录，
+  或在玩家数据已保存后再次发还同样的物品；SQLite 与 MySQL 会立即写入行。
+- **空条目删除失败不代表暂扣。** 此时警告说明该行不含物品，将在玩家下次进服时重试删除；它不会出现在 `/trade pending list`。确认失败仍会保留暂扣条目，
+  需要管理员核对（UltiKits/UltiTrade#62）。
 - **已在经济插件中生效、随后才报错的交易付款按未付款处理。** 若经济插件的扣款或付款在其存储已经生效后才抛出错误（应答返回前连接中断），
   交易会按未转移处理：此时可能凭空产生金币（付款：付款方被退款而收款方保留了这笔钱）或使金币消失（扣款：永远不会退还）。
   控制台会记录一条以 `结果未知：` 开头的 SEVERE 日志，写明玩家与精确金额；请检查该玩家的余额是否有这笔金额的变动并手动更正（UltiKits/UltiTrade#60）。
   重新读取余额无法判断，因为其他插件或服务器也可能修改余额。此为已接受的限制（维护者 2026-10-08），由 `TradeMoneySettlementTest` 单元测试固定。
-- **手动编辑 `trade_player_settings` 时只写入本模块会写入的取值形式。** 每次设置修改仅在存储行仍为读取时的值时才写入（UltiKits/UltiTrade#54）。在 SQLite 上，
+- **手动编辑 `trade_player_settings` 时先停止所有共享数据库的服务器，且只写入本模块会写入的取值形式。** 每次设置修改仅在存储行仍为读取时的值时才写入（UltiKits/UltiTrade#54）。在 SQLite 上，
   以其他形式手写的值（如用 `trade_enabled = 'false'` 代替 `0`，用 `total_money_traded = '1.50'` 代替 `1.5`）永远不会比较相等，该玩家之后的每次修改都会提示
   「你的交易设置正在保存中，请稍后重试」，其交易统计也不会被计入，直到该单元格改写为 `0`/`1` 或普通数字为止。MySQL 按数值比较数字，不受影响。
 - **在 Paper 上，玩家数据保存失败不会通知本模块。** Paper 的 `Player#saveData()` 只记录其自身的 `Failed to save player data for <name>` 并正常返回，

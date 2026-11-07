@@ -30,6 +30,7 @@ import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
+import java.math.BigDecimal;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -558,11 +559,22 @@ public class TradeListener implements Listener {
                 session.setMoney(player.getUniqueId(), value);
                 player.sendMessage(text(tradeService.i18n("money_set").replace("{AMOUNT}", String.valueOf(value))));
             } else {
+                // Validate the typed decimal exactly, before either experience path can change the
+                // offer. A double-to-int cast caps overflow and drops fractions; validating the double
+                // alone also misses fractions that rounded to a whole double (UltiKits/UltiTrade#67).
+                final int expValue;
+                try {
+                    expValue = new BigDecimal(message).intValueExact();
+                } catch (ArithmeticException e) {
+                    player.sendMessage(text(tradeService.i18n("invalid_amount")));
+                    reopenGUI(player, prompt);
+                    return;
+                }
                 // A reload may have turned experience trading off since the prompt opened
                 // (UltiKits/UltiTrade#26). Without it the amount stays unchanged.
                 if (!config.isEnableExpTrade()) {
                     // As for money: 0 withdraws an offer (UltiKits/UltiTrade#28).
-                    if ((int) value == 0) {
+                    if (expValue == 0) {
                         session.setExp(player.getUniqueId(), 0);
                         player.sendMessage(text(tradeService.i18n("exp_set").replace("{AMOUNT}", "0")));
                         reopenGUI(player, prompt);
@@ -573,7 +585,6 @@ public class TradeListener implements Listener {
                     return;
                 }
                 // Check experience
-                int expValue = (int) value;
                 if (expValue > 0 && !TradeService.isExperienceTotalReadable(player)) {
                     player.sendMessage(text(tradeService.i18n("exp_total_unreadable")));
                     reopenGUI(player, prompt);
