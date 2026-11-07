@@ -4,6 +4,7 @@ import com.ultikits.plugins.trade.config.TradeConfig;
 import com.ultikits.plugins.trade.entity.PlayerTradeSettings;
 import com.ultikits.plugins.trade.entity.TradeLogData;
 import com.ultikits.plugins.trade.entity.TradeSession;
+import com.ultikits.plugins.trade.util.SettingsWaitBudget;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.Autowired;
 import com.ultikits.ultitools.annotations.Service;
@@ -57,10 +58,11 @@ public class TradeLogService {
     private final Map<UUID, PlayerLock> writeLocks = new ConcurrentHashMap<>();
 
     /**
-     * How long the main thread waits for a player's lock, about one tick (maintainer decision 2026-10-06, top-up T2).
-     * Background threads wait as long as needed.
+     * Main-thread lock allowance, about one tick (maintainer decision 2026-10-06, top-up T2).
+     * A block/unblock command or trade request shares it across all its settings-lock attempts (#68).
+     * Standalone calls keep this allowance per acquisition; background threads wait as long as needed.
      */
-    static final long MAIN_THREAD_WAIT_MILLIS = 50;
+    static final long MAIN_THREAD_WAIT_MILLIS = SettingsWaitBudget.WAIT_MILLIS;
 
     /** A player's lock and the number of threads holding or waiting for it (changed only inside {@code compute}). */
     private static final class PlayerLock {
@@ -70,7 +72,8 @@ public class TradeLogService {
 
     /**
      * Take {@code playerUuid}'s lock: on the main thread for at most {@link #MAIN_THREAD_WAIT_MILLIS} (re-entrant: a
-     * thread already holding it gets it at once), elsewhere for as long as needed. Returns the entry to pass to
+     * thread already holding it gets it at once), using only the current operation's remaining allowance
+     * when one exists; elsewhere for as long as needed. Returns the entry to pass to
      * {@link #release}, or {@code null} when the main thread could not get the lock in time (nothing is held then).
      */
     private PlayerLock acquire(UUID playerUuid) {
@@ -82,7 +85,7 @@ public class TradeLogService {
         boolean held;
         if (Bukkit.isPrimaryThread()) {
             try {
-                held = entry.lock.tryLock(MAIN_THREAD_WAIT_MILLIS, TimeUnit.MILLISECONDS);
+                held = entry.lock.tryLock(SettingsWaitBudget.remainingNanos(), TimeUnit.NANOSECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 held = false;

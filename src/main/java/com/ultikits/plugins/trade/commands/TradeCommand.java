@@ -2,6 +2,7 @@ package com.ultikits.plugins.trade.commands;
 
 import com.ultikits.plugins.trade.service.TradeLogService;
 import com.ultikits.plugins.trade.service.TradeService;
+import com.ultikits.plugins.trade.util.SettingsWaitBudget;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.abstracts.command.BaseCommandExecutor;
 import com.ultikits.ultitools.annotations.command.*;
@@ -137,6 +138,12 @@ public class TradeCommand extends BaseCommandExecutor {
     @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "block <player>")
     public void blockPlayer(@CmdSender Player player, @CmdParam("player") String targetName) {
+        try (SettingsWaitBudget budget = SettingsWaitBudget.open()) {
+            blockPlayerInBudget(player, targetName);
+        }
+    }
+
+    private void blockPlayerInBudget(Player player, String targetName) {
         Player target = Bukkit.getPlayerExact(targetName);
         if (target == null) {
             // Try to block by name even if offline
@@ -164,6 +171,12 @@ public class TradeCommand extends BaseCommandExecutor {
     @CmdTarget(CmdTarget.CmdTargetType.PLAYER)
     @CmdMapping(format = "unblock <player>")
     public void unblockPlayer(@CmdSender Player player, @CmdParam("player") String targetName) {
+        try (SettingsWaitBudget budget = SettingsWaitBudget.open()) {
+            unblockPlayerInBudget(player, targetName);
+        }
+    }
+
+    private void unblockPlayerInBudget(Player player, String targetName) {
         Player target = Bukkit.getPlayerExact(targetName);
         if (target == null) {
             player.sendMessage(withPlayer(plugin.i18n("unblock_player_offline"), targetName));

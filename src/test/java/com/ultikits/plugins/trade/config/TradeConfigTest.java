@@ -43,15 +43,10 @@ class TradeConfigTest {
     // The two tests below are top-level methods, not @Nested, so that each can be selected on its
     // own by name (-Dtest=TradeConfigTest#method) for its issue's revert proof.
 
-    /**
-     * UltiKits/UltiTrade#18. A pending trade request expires after {@code request-timeout}; an open
-     * trade window has no elapsed-time expiry at all, so {@code trade-timeout} described a feature
-     * that does not exist. The setting is therefore removed (feature request UltiKits/UltiTrade#41).
-     * The only timeout settings left are the request's own.
-     */
+    /** The removed, previously unused trade-timeout stays removed; #41 adds a separate opt-in key. */
     @Test
-    @DisplayName("the only timeout settings declared are the trade request's (UltiKits/UltiTrade#18)")
-    void declaresOnlyTheRequestTimeouts() {
+    @DisplayName("Timeout keys distinguish requests from the optional window lifetime (UltiTrade#41)")
+    void declaresRequestAndWindowTimeouts() {
         List<String> timeoutKeys = new ArrayList<>();
         for (String key : declaredKeys()) {
             if (key.contains("timeout")) {
@@ -59,7 +54,10 @@ class TradeConfigTest {
             }
         }
 
-        assertThat(timeoutKeys).containsExactlyInAnyOrder("request-timeout", "messages.request-timeout");
+        assertThat(timeoutKeys).containsExactlyInAnyOrder("request-timeout", "messages.request-timeout", "window-timeout");
+        assertThat(config.getWindowTimeout()).as("a time limit is opt-in; existing behavior stays unlimited").isZero();
+        config.setWindowTimeout(60);
+        assertThat(config.getWindowTimeout()).isEqualTo(60);
     }
 
     /**

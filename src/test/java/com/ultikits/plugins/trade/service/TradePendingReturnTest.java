@@ -129,7 +129,11 @@ class TradePendingReturnTest {
 
     /** A live session between the present player and the away one, each with a stake. */
     private TradeSession sessionWithStakes() throws Exception {
-        TradeSession session = new TradeSession(present, away);
+        return sessionWithStakes(0);
+    }
+
+    private TradeSession sessionWithStakes(int timeoutSeconds) throws Exception {
+        TradeSession session = new TradeSession(present, away, timeoutSeconds);
         session.setItem(present.getUniqueId(), 0, new ItemStack(Material.EMERALD, 4));
         session.setItem(away.getUniqueId(), 0, new ItemStack(Material.DIAMOND, 10));
         session.setItem(away.getUniqueId(), 1, namedSword());
@@ -159,6 +163,26 @@ class TradePendingReturnTest {
             }
         }
         return n;
+    }
+
+    @Test
+    @DisplayName("Window expiry uses the same pending return for an owner the server cannot resolve (UltiTrade#41)")
+    void timeoutSavesTheAwayStake() throws Exception {
+        TradeSession session = sessionWithStakes(30);
+        long started = UltiTradeTestHelper.getField(session, "windowStartNanos");
+        service.cleanupExpiredTradeWindows(started + java.util.concurrent.TimeUnit.SECONDS.toNanos(30));
+        service.cleanupExpiredTradeWindows(started + java.util.concurrent.TimeUnit.SECONDS.toNanos(60));
+
+        assertThat(session.getState()).isEqualTo(TradeSession.TradeState.CANCELLED);
+        assertThat(count(present, Material.EMERALD)).isEqualTo(4);
+        assertThat(savedStacksOf(away)).containsExactlyInAnyOrder(new ItemStack(Material.DIAMOND, 10), namedSword());
+        assertThat(store.rowsOf(away.getUniqueId())).hasSize(1);
+        verifyNoMoneyMoved();
+    }
+
+    private void verifyNoMoneyMoved() {
+        verify(economy, never()).withdrawPlayer(any(org.bukkit.OfflinePlayer.class), anyDouble());
+        verify(economy, never()).depositPlayer(any(org.bukkit.OfflinePlayer.class), anyDouble());
     }
 
     @Test

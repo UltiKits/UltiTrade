@@ -15,6 +15,12 @@ message_player_blocked: "&cThat player has blocked you!"
 
 request_denied: "&c{PLAYER} denied your trading request!"
 
+# Open-window lifetime (separate from pending requests)
+window_timeout_started: "&eThis trade will close after {SECONDS} seconds. Changing offers does not restart the timer."
+window_timeout_warning: "&eThis trade closes in {SECONDS} seconds. Confirm or cancel before time runs out."
+cancel_reason_window_timeout: "trade window time limit reached; nothing was transferred"
+log_window_timeout_failed: "Could not check or cancel a timed-out trade; continuing with the remaining trades."
+
 # Trade Status
 trade_complete: "&aTrade completed!"
 trade_cancelled: "&cTrade cancelled!"
@@ -199,6 +205,7 @@ log_pending_return_save_failed: "Could not save the staked items of {PLAYER} fro
 log_pending_return_lookup_failed: "Could not read the saved trade stakes of {PLAYER}; nothing was handed over, and they will be looked up again at their next join"
 log_pending_return_unreadable: "A saved trade stake of {PLAYER} (entry {ID}) cannot be read; it was left in the list and nothing from it was handed over"
 log_pending_return_remove_failed: "{PLAYER} received saved trade stake {ID} and their data was saved, but the entry could not be confirmed; it stays held and is listed by /trade pending list"
+log_pending_return_empty_remove_failed: "{PLAYER}'s saved trade stake {ID} lists no items, but its empty entry could not be removed; removal will be retried at a later join"
 log_pending_return_delivered: "Returned {COUNT} staked item(s) from cancelled trades to {PLAYER}"
 log_pending_return_player_save_failed: "Handed {COUNT} item(s) to {PLAYER} but saving their player data failed; the entry stays held and is listed by /trade pending list"
 log_pending_return_mark_failed: "Could not claim {PLAYER}'s saved trade stake {ID}, so nothing from it was handed over this time; if the claim reached the database anyway, the entry is held and listed by /trade pending list, otherwise it is tried again at their next join"
@@ -240,13 +247,14 @@ log_logs_cleaned: "Cleaned up {COUNT} expired trade logs (older than {DAYS} days
 log_logs_cleanup_failed: "Failed to cleanup old logs"
 log_player_logs_failed: "Failed to get player logs"
 removed_key_warning: "{FILE} still contains '{KEY}', which this version of UltiTrade no longer reads. {REASON} Delete the key from the file to silence this warning."
-removed_key_reason_trade_timeout: "It never took effect: an open trade window has no time limit, and nothing replaces the setting. A pending trade request still expires after 'request-timeout', which is unchanged. A time limit for an open trade window is feature request UltiKits/UltiTrade#41 (UltiKits/UltiTrade#18)."
+removed_key_reason_trade_timeout: "It never took effect and is still ignored. To opt into a fixed open-window time limit, set 'window-timeout' (seconds, 0-600; default 0 means unlimited); existing values of 'trade-timeout' are not copied. A pending trade request still expires after 'request-timeout', which is unchanged (UltiKits/UltiTrade#41, #18)."
 removed_key_reason_moved: "Its value was never shown to players. The reply it described now comes from the '{ENTRY}' entry of this module's language file (lang/<language>.yml, in the same module folder as config/trade.yml), so it follows the server's language setting; to customise it, copy that file to one whose name starts with its language code and a hyphen (for example lang/en-myserver.yml), edit '{ENTRY}' there and set language: en-myserver in plugins/UltiTools/config.yml; an edit made in the official file itself is restored at the next start or module reload (UltiKits/UltiTrade#17)."
 
 log_config_default_save_failed: "Could not save {FILE} after writing its title and messages in the server's language; the new text is used this session, and the file is written again at the next start."
 
 # Comments of config/trade.yml, written above each setting in the server's language (UltiKits/UltiTrade#51)
 config_comment_request_timeout: "Trade request timeout (seconds)"
+config_comment_window_timeout: "Fixed trade window lifetime (seconds, 0-600; 0 means unlimited); reload affects only new trades"
 config_comment_max_distance: "Maximum trade distance (blocks); 0 means no limit"
 config_comment_allow_cross_world: "Allow trading across worlds"
 config_comment_enable_money_trade: "Enable money trading (requires Vault)"
