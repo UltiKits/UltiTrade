@@ -1586,6 +1586,81 @@ class TradeListenerTest {
     @DisplayName("Chat Input Handling")
     class ChatInputHandling {
 
+        @ParameterizedTest(name = "reject {0}")
+        @org.junit.jupiter.params.provider.ValueSource(strings = {
+                "2147483648", "3000000000", "1e100", "2147483647.0000000001",
+                "1.9", "0.9", "1.0000000000000001", "1e-400", "not_a_number"
+        })
+        @DisplayName("Invalid experience amounts preserve the offer and both confirmations (#67)")
+        void invalidExperienceAmountLeavesTheOfferUnchanged(String typed) throws Exception {
+            assertInvalidExperienceAmount(typed, true);
+        }
+
+        @ParameterizedTest(name = "experience disabled: reject {0}")
+        @org.junit.jupiter.params.provider.ValueSource(strings = {
+                "2147483648", "3000000000", "1e100", "2147483647.0000000001",
+                "1.9", "0.9", "1.0000000000000001", "1e-400", "not_a_number"
+        })
+        @DisplayName("Invalid experience amounts cannot withdraw an offer after a reload (#67)")
+        void invalidExperienceAmountWhileDisabledLeavesTheOfferUnchanged(String typed) throws Exception {
+            assertInvalidExperienceAmount(typed, false);
+        }
+
+        private void assertInvalidExperienceAmount(String typed, boolean enabled) throws Exception {
+            com.ultikits.plugins.trade.i18n.TradeSeams.speak(tradeService, "en");
+            TradeSession session = new TradeSession(player1, player2);
+            session.setExp(uuid1, 7);
+            session.setConfirmed(uuid1, true);
+            session.setConfirmed(uuid2, true);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            when(config.isEnableExpTrade()).thenReturn(enabled);
+            // A readable player's maximum possible balance must not hide the narrowing bug.
+            lenient().when(tradeService.getTotalExperience(player1)).thenReturn(Integer.MAX_VALUE);
+            addToWaitingForInput(uuid1, 1);
+            AsyncPlayerChatEvent event = new AsyncPlayerChatEvent(false, player1, typed, new HashSet<>());
+
+            listener.onPlayerChat(event);
+
+            assertThat(event.isCancelled()).isTrue();
+            assertThat(session.getPlayerExp(uuid1)).isEqualTo(7);
+            assertThat(session.isConfirmed(uuid1)).isTrue();
+            assertThat(session.isConfirmed(uuid2)).isTrue();
+            verify(player1).sendMessage(org.bukkit.ChatColor.RED + "Invalid amount!");
+            verify(org.bukkit.Bukkit.getServer().getScheduler()).runTask(any(), any(Runnable.class));
+        }
+
+        @ParameterizedTest(name = "accept {0} as {1}")
+        @org.junit.jupiter.params.provider.CsvSource({
+                "0,0", "0.0,0", "1,1", "1.0,1", "1e3,1000", "2147483647,2147483647"
+        })
+        @DisplayName("Whole experience amounts from zero through int maximum remain valid (#67)")
+        void wholeExperienceAmountIsAcceptedExactly(String typed, int expected) throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            when(tradeService.getTotalExperience(player1)).thenReturn(Integer.MAX_VALUE);
+            addToWaitingForInput(uuid1, 1);
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, typed, new HashSet<>()));
+
+            assertThat(session.getPlayerExp(uuid1)).isEqualTo(expected);
+            verify(player1).sendMessage(org.bukkit.ChatColor.translateAlternateColorCodes('&',
+                    tradeService.i18n("exp_set").replace("{AMOUNT}", String.valueOf(expected))));
+        }
+
+        @Test
+        @DisplayName("Fractional money remains valid; only experience requires whole points (#67)")
+        void fractionalMoneyAmountIsStillAccepted() throws Exception {
+            TradeSession session = new TradeSession(player1, player2);
+            when(tradeService.getSession(uuid1)).thenReturn(session);
+            net.milkbowl.vault.economy.Economy economy = UltiTradeTestHelper.createMockEconomy();
+            when(tradeService.getEconomy()).thenReturn(economy);
+            addToWaitingForInput(uuid1, 0);
+
+            listener.onPlayerChat(new AsyncPlayerChatEvent(false, player1, "1.9", new HashSet<>()));
+
+            assertThat(session.getPlayerMoney(uuid1)).isEqualTo(1.9);
+        }
+
         @org.junit.jupiter.params.ParameterizedTest(name = "level {0}")
         @org.junit.jupiter.params.provider.ValueSource(ints = {21_864, 21_865, 25_000})
         @DisplayName("an experience answer from a player whose total is at the cap is refused with the reason; the offer stays 0 (UltiTrade#65 F1)")

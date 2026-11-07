@@ -19,6 +19,11 @@ public class TradeSession {
     private final UUID player1;
     private final UUID player2;
     private final long startTime;
+
+    // The lifetime promised when this session opened. Reloads and offer changes cannot reset it.
+    private final int windowTimeoutSeconds;
+    private final long windowStartNanos;
+    private boolean windowTimeoutWarningSent;
     
     // Items offered by each player
     private final Map<Integer, ItemStack> player1Items = new HashMap<>();
@@ -44,10 +49,46 @@ public class TradeSession {
     private int revision = 0;
     
     public TradeSession(Player p1, Player p2) {
+        this(p1, p2, 0);
+    }
+
+    /**
+     * Creates a session with a fixed lifetime in seconds; zero (or a negative value) means unlimited.
+     * The existing two-player constructor remains unlimited. The monotonic clock measures elapsed
+     * time even when server ticks lag, without changing the wall-clock timestamp used by trade logs.
+     */
+    public TradeSession(Player p1, Player p2, int windowTimeoutSeconds) {
         this.sessionId = UUID.randomUUID();
         this.player1 = p1.getUniqueId();
         this.player2 = p2.getUniqueId();
         this.startTime = System.currentTimeMillis();
+        this.windowTimeoutSeconds = Math.max(0, windowTimeoutSeconds);
+        this.windowStartNanos = System.nanoTime();
+    }
+
+    public int getWindowTimeoutSeconds() {
+        return windowTimeoutSeconds;
+    }
+
+    /**
+     * Remaining lifetime rounded up to seconds, zero at/after the deadline, or -1 when unlimited.
+     * {@code nowNanos} must come from {@link System#nanoTime()}, not an epoch timestamp.
+     */
+    public int getWindowSecondsRemaining(long nowNanos) {
+        if (windowTimeoutSeconds == 0) {
+            return -1;
+        }
+        long remaining = windowTimeoutSeconds * 1_000_000_000L - (nowNanos - windowStartNanos);
+        return remaining <= 0 ? 0 : (int) ((remaining + 999_999_999L) / 1_000_000_000L);
+    }
+
+    /** Claims the one warning for this session; called only by the synchronous timeout scanner. */
+    public boolean markWindowTimeoutWarning() {
+        if (windowTimeoutWarningSent) {
+            return false;
+        }
+        windowTimeoutWarningSent = true;
+        return true;
     }
     
     public UUID getSessionId() {

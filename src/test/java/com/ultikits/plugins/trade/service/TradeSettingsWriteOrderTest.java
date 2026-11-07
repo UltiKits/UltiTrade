@@ -211,6 +211,12 @@ class TradeSettingsWriteOrderTest {
         serverA.playerJoined(x);
         CountDownLatch release = new CountDownLatch(1);
         Thread first = holdWhileWriting(serverA, x, release);
+        Map<UUID, ?> locksWhileHeld = UltiTradeTestHelper.getField(serverA, "writeLocks");
+        assertThat(locksWhileHeld).as("positive control: the in-use entry really exists").containsKey(xId);
+        assertThat(serverA.toggle(x).getWrite()).as("a timed-out waiter releases its reference")
+                .isEqualTo(TradeLogService.SettingsWrite.BUSY);
+        assertThat((Integer) UltiTradeTestHelper.getField(locksWhileHeld.get(xId), "users"))
+                .as("only the background holder remains counted").isEqualTo(1);
         serverA.playerQuit(xId); // the player leaves while the write is in progress
         Player partner = UltiTradeTestHelper.createMockPlayer("Partner", UUID.randomUUID());
         Thread second = new Thread(() -> serverA.logCompletedTrade(new TradeSession(x, partner), x, partner, 0.0, 0));
