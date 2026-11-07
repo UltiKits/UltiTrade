@@ -371,6 +371,111 @@ class TradePendingReturnClaimStateTest {
         assertThat(serverA.heldClaims()).isEmpty();
     }
 
+    @Test
+    @DisplayName("A failed delete after confirmation leaves an unclaimed empty row, not a held return")
+    void deleteAfterConfirmFailureReportsEmptyRow() throws Exception {
+        TradeService service = serverWith(around(table, "delById", () -> {
+            throw new IllegalStateException("delete unavailable");
+        }, NOTHING));
+        stakeIsPending(service);
+        String id = rows().get(0).getId();
+        PlayerMock player = joining();
+
+        service.deliverPendingReturns(player);
+
+        assertThat(count(savedFile, Material.DIAMOND)).isEqualTo(10);
+        assertThat(rows()).hasSize(1);
+        assertThat(rows().get(0).getDeliveryToken()).isNull();
+        assertThat(rows().get(0).getItems()).isEmpty();
+        assertThat(service.heldClaims()).isEmpty();
+        verify(loggers.get(0)).warn(org.mockito.ArgumentMatchers.any(Throwable.class),
+                argThat((String line) -> line.contains(id) && line.contains("lists no items")
+                        && line.contains("later join") && !line.contains("stays held")));
+
+        service.deliverPendingReturns(player);
+        assertThat(rows()).isEmpty();
+        assertThat(count(player.getInventory().getContents(), Material.DIAMOND)).isEqualTo(10);
+    }
+
+    @Test
+    @DisplayName("A failed join-time cleanup reports an empty row without claiming a hand-over occurred")
+    void emptyRowCleanupFailureReportsEmptyRow() throws Exception {
+        TradeService service = serverWith(around(table, "delById", () -> {
+            throw new IllegalStateException("delete unavailable");
+        }, NOTHING));
+        PendingStakeReturn empty = new PendingStakeReturn();
+        empty.setOwnerUuid(awayId.toString());
+        empty.setItems("");
+        table.insert(empty);
+        PlayerMock player = joining();
+
+        service.deliverPendingReturns(player);
+
+        assertThat(rows()).hasSize(1);
+        assertThat(service.heldClaims()).isEmpty();
+        assertThat(count(player.getInventory().getContents(), Material.DIAMOND)).isZero();
+        verify(loggers.get(0)).warn(org.mockito.ArgumentMatchers.any(Throwable.class),
+                argThat((String line) -> line.contains(empty.getId()) && line.contains("lists no items")
+                        && line.contains("later join") && !line.contains("received") && !line.contains("held")));
+        service.deliverPendingReturns(player);
+        assertThat(rows()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("A failed confirmation still reports a held row rather than an empty-row cleanup")
+    void confirmFailureReportsHeldRow() throws Exception {
+        TradeService service = serverWith(aroundNth(table, "updateIf", 2, () -> {
+            throw new IllegalStateException("confirm unavailable");
+        }, NOTHING));
+        stakeIsPending(service);
+
+        service.deliverPendingReturns(joining());
+
+        assertThat(service.heldClaims()).hasSize(1);
+        assertThat(count(savedFile, Material.DIAMOND)).isEqualTo(10);
+        verify(loggers.get(0)).warn(org.mockito.ArgumentMatchers.any(Throwable.class),
+                argThat((String line) -> line.contains("stays held") && line.contains("/trade pending list")));
+    }
+
+    @Test
+    @DisplayName("Claims distinguish server folders even when both bind to the same blank IP and port")
+    void claimServerIncludesCanonicalServerFolder() throws Exception {
+        server.setIp("");
+        server.setPort(25565);
+        try (org.mockito.MockedStatic<org.bukkit.Bukkit> bukkit = org.mockito.Mockito.mockStatic(
+                org.bukkit.Bukkit.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            bukkit.when(org.bukkit.Bukkit::getWorldContainer).thenReturn(dir.resolve("survival/.").toFile());
+            String first = crashLeavesAHeldRow();
+            bukkit.when(org.bukkit.Bukkit::getWorldContainer).thenReturn(dir.resolve("creative/.").toFile());
+            crashLeavesAHeldRow();
+            String second = rows().stream().map(PendingStakeReturn::getId)
+                    .filter(id -> !id.equals(first)).findFirst().get();
+
+            List<TradeService.HeldClaim> claims = server().heldClaims();
+            assertThat(claims).filteredOn(c -> c.getId().equals(first)).extracting(TradeService.HeldClaim::getServer)
+                    .containsExactly("survival@*:25565");
+            assertThat(claims).filteredOn(c -> c.getId().equals(second)).extracting(TradeService.HeldClaim::getServer)
+                    .containsExactly("creative@*:25565");
+        }
+    }
+
+    @Test
+    @DisplayName("An unreadable server folder retains the address-only claim identity")
+    void claimServerFallsBackWhenFolderCannotBeResolved() throws Exception {
+        server.setIp("127.0.0.1");
+        server.setPort(25566);
+        java.io.File folder = mock(java.io.File.class);
+        org.mockito.Mockito.when(folder.getCanonicalFile()).thenThrow(new java.io.IOException("unavailable"));
+        try (org.mockito.MockedStatic<org.bukkit.Bukkit> bukkit = org.mockito.Mockito.mockStatic(
+                org.bukkit.Bukkit.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            bukkit.when(org.bukkit.Bukkit::getWorldContainer).thenReturn(folder);
+            crashLeavesAHeldRow();
+
+            assertThat(server().heldClaims()).extracting(TradeService.HeldClaim::getServer)
+                    .containsExactly("127.0.0.1:25566");
+        }
+    }
+
     // ==================== Resolving a held row ====================
 
     private String crashLeavesAHeldRow() throws Exception {

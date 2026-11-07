@@ -1515,6 +1515,16 @@ public class TradeService {
         } catch (RuntimeException e) {
             server = "?";
         }
+        try {
+            // A folder label helps distinguish backends using the same bind address, but is not a
+            // globally unique ID. Canonicalize first: Paper commonly returns "." as the container.
+            String folder = Bukkit.getWorldContainer().getCanonicalFile().getName();
+            if (!folder.isEmpty()) {
+                server = folder + "@" + server;
+            }
+        } catch (java.io.IOException | RuntimeException ignored) {
+            // Diagnostics must not prevent a return: retain the bind address when the folder is unavailable.
+        }
         return CLAIM_PREFIX + UUID.randomUUID() + "|" + System.currentTimeMillis() + "|" + server;
     }
 
@@ -1960,7 +1970,7 @@ public class TradeService {
         try {
             pendingReturns.delById(entry.getId());
         } catch (RuntimeException e) {
-            plugin.getLogger().warn(e, i18n("log_pending_return_remove_failed")
+            plugin.getLogger().warn(e, i18n("log_pending_return_empty_remove_failed")
                     .replace("{PLAYER}", player.getName())
                     .replace("{ID}", String.valueOf(entry.getId())));
         }

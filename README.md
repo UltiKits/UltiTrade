@@ -281,7 +281,24 @@ private String guiTitle = "&6与 {PLAYER} 交易";
   at each join that a return of items is waiting for an administrator's check (with the count).
 - **All servers sharing one database must run the same UltiTrade version.** Stop them all, upgrade, then
   start them: a server still running a build from before UltiKits/UltiTrade#55 does not know the CLAIMED
-  state and can hand over an entry that an upgraded server holds.
+  state. It clears the held entry's marker and saved hand-over items, leaving an empty row; an upgraded
+  server deletes that row at the next join. This erases the recovery record rather than redelivering it.
+- **Resolve only interrupted hand-overs, not ones still running.** Before using `/trade pending redeliver`
+  or `/trade pending void`, stop hand-overs for that player on every server sharing the database (for
+  example, stop those servers, then start only the server used for recovery without letting the player
+  join). Check the claiming server's saved player inventory and ender chest first. A redeliver during a
+  live hand-over can leave the player with the items and queue them again; the warning that an operator
+  resolved the entry meanwhile means you must re-check for a possible duplicate before another join.
+  New claims show `<server folder>@<bind IP>:<port>` (for example `survival@*:25565`); when the folder
+  cannot be resolved they show only the address. This is a diagnostic label, not a globally unique ID:
+  keep distinct server folder names or an external mapping when backends share the same label. Existing
+  claims keep the label recorded when they were created.
+- **JSON storage has a crash window.** Pending-return changes reach disk at the framework's next flush
+  (`datasource.flushRate` seconds, and at shutdown). A crash before that flush can lose a saved return or
+  hand the items over twice, even if the player data was saved. SQLite and MySQL write the row at once.
+- **An empty-row cleanup failure is not a held return.** Its warning says the row lists no items and
+  removal will be retried at a later join; it does not appear in `/trade pending list`. A confirmation
+  failure still leaves a held return for the administrator to check (UltiKits/UltiTrade#62).
 - **A trade payment that committed and then failed counts as not made.** If the economy plugin's
   withdrawal or deposit throws an error after its storage had already applied it (the connection was lost
   before the answer arrived), the trade treats it as not moved: money can then be created (a deposit:
@@ -310,7 +327,15 @@ private String guiTitle = "&6与 {PLAYER} 交易";
   （在玩家下次进服时发还，若其正在该服在线则立即发还）或 `/trade pending void <id>`（删除，不发还）逐条处理。这些命令需要 `ultitrade.admin` 权限，可在控制台使用。
   条目被暂扣期间，玩家每次进服都会收到一条提示：有待返还物品正在等待管理员核对（含笔数）。
 - **共享同一数据库的所有服务器必须运行同一版本的 UltiTrade。** 请全部停服、升级后再启动：仍运行 UltiKits/UltiTrade#55 之前版本的服务器不认识「已占用」状态，
-  可能发还已被暂扣的条目。
+  会清除暂扣条目的标记与已交付物品记录，只留下空行；升级后的服务器会在玩家下次进服时删除该行。这会抹去恢复记录，而不是重新发还。
+- **只处理已中断的发还，不要处理仍在进行的发还。** 使用 `/trade pending redeliver` 或 `/trade pending void` 前，先在所有共享数据库的服务器上停止该玩家的发还
+  （例如全部停服，再只启动恢复所用的服务器，期间不让玩家进服），核对占用服务器上保存的玩家背包与末影箱。在发还进行中重新发还，可能让玩家已收到物品又排队再领一次；
+  日志提示服主在发还过程中处理了条目时，应在玩家再次进服前复核是否可能重复。新占用记录显示 `<服务器目录名>@<绑定IP>:<端口>`（如 `survival@*:25565`），
+  无法解析目录时仅显示地址。这只是诊断标签，不保证全局唯一；请使用不同的服务器目录名，或维护同名后端的外部对照。已有记录保留创建时的标签。
+- **JSON 存储存在崩溃窗口。** 待返还记录在框架下次写盘时才落盘（间隔 `datasource.flushRate` 秒，及正常关服时）。此前崩溃可能丢失待返还记录，
+  或在玩家数据已保存后再次发还同样的物品；SQLite 与 MySQL 会立即写入行。
+- **空条目删除失败不代表暂扣。** 此时警告说明该行不含物品，将在玩家下次进服时重试删除；它不会出现在 `/trade pending list`。确认失败仍会保留暂扣条目，
+  需要管理员核对（UltiKits/UltiTrade#62）。
 - **已在经济插件中生效、随后才报错的交易付款按未付款处理。** 若经济插件的扣款或付款在其存储已经生效后才抛出错误（应答返回前连接中断），
   交易会按未转移处理：此时可能凭空产生金币（付款：付款方被退款而收款方保留了这笔钱）或使金币消失（扣款：永远不会退还）。
   控制台会记录一条以 `结果未知：` 开头的 SEVERE 日志，写明玩家与精确金额；请检查该玩家的余额是否有这笔金额的变动并手动更正（UltiKits/UltiTrade#60）。
