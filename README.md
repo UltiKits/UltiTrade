@@ -84,7 +84,7 @@ Set `window-timeout: 120` to close an open trade after two minutes. The shipped 
 the window clock starts when the trade opens, not when its request is sent. Changing an offer,
 confirming, opening a large-trade confirmation page or answering a money/experience prompt does not
 restart it. Both players receive the duration in chat when the windows open, then one warning in the
-last ten seconds. At expiry both see the configured cancellation message with the reason
+last ten seconds (with a limit of ten seconds or less, the opening notice and the warning arrive together). At expiry both see the configured cancellation message with the reason
 "trade window time limit reached; nothing was transferred" under `language: en`.
 
 Expiry uses the same return path as `/trade cancel`: each player gets their own items back, overflow
@@ -100,7 +100,7 @@ The legacy `trade-timeout` key is still ignored and warned about, never copied o
 removed: explicitly set `window-timeout` to opt in. `enable-bossbar` still controls request bars only.
 
 设置 `window-timeout: 120` 可让已打开的交易在两分钟后取消，默认 `0` 不限时，有效范围为 0-600 秒。
-它与请求超时分别计时；修改物品、金币、经验或确认都不会重置。双方开窗时获知总时长，最后十秒收到一次提醒，
+它与请求超时分别计时；修改物品、金币、经验或确认都不会重置。双方开窗时获知总时长，最后十秒收到一次提醒（时限不超过十秒时，开窗通知与提醒同时到达），
 到期经原取消流程各自退回物品、放不下则掉落在原主脚下，离线物品沿用待返还机制，金币和经验不变。
 重载只影响之后打开的新交易，旧交易保留原时限；旧键 `trade-timeout` 仍无效，必须明确设置新键来启用。
 
@@ -313,6 +313,15 @@ private String guiTitle = "&6与 {PLAYER} 交易";
 - **An empty-row cleanup failure is not a held return.** Its warning says the row lists no items and
   removal will be retried at a later join; it does not appear in `/trade pending list`. A confirmation
   failure still leaves a held return for the administrator to check (UltiKits/UltiTrade#62).
+- **A very long server folder name breaks pending-return claims on MySQL.** The claim marker stored in
+  `trade_pending_returns.delivery_token` (`VARCHAR(255)`) includes the server folder name, so a folder name longer
+  than about 140 characters makes every claim on that server fail on MySQL. Keep server folder names short
+  (UltiKits/UltiTrade#95).
+- **A cancel that throws part-way can be retried by the window time limit.** With `window-timeout` set, the expiry
+  check retries an expired trade every 20 ticks until it is cancelled. If the cancel ever throws after returning the
+  first player's items but before closing the trade (a runtime error inside a Bukkit inventory, world or sound call,
+  not ordinary use), each retry returns that player's items again. The console shows an exception; stop
+  the server and remove the duplicated staked items from that player (UltiKits/UltiTrade#97).
 - **A trade payment that committed and then failed counts as not made.** If the economy plugin's
   withdrawal or deposit throws an error after its storage had already applied it (the connection was lost
   before the answer arrived), the trade treats it as not moved: money can then be created (a deposit:
@@ -350,6 +359,11 @@ private String guiTitle = "&6与 {PLAYER} 交易";
   或在玩家数据已保存后再次发还同样的物品；SQLite 与 MySQL 会立即写入行。
 - **空条目删除失败不代表暂扣。** 此时警告说明该行不含物品，将在玩家下次进服时重试删除；它不会出现在 `/trade pending list`。确认失败仍会保留暂扣条目，
   需要管理员核对（UltiKits/UltiTrade#62）。
+- **服务器目录名过长会使 MySQL 上的待返还占用失败。** 写入 `trade_pending_returns.delivery_token`（`VARCHAR(255)`）的占用标记
+  包含服务器目录名；目录名超过约 140 个字符时，该服务器在 MySQL 上的每次占用都会失败。请保持服务器目录名简短（UltiKits/UltiTrade#95）。
+- **取消过程中途抛错时，交易窗口时限可能重复执行取消。** 设置 `window-timeout` 后，到期检查每 20 tick 重试一次已到期的交易，直到其被取消。
+  若取消在退回第一位玩家的物品之后、关闭交易之前抛出异常（Bukkit 背包、世界或音效调用中的运行时错误，正常使用不会出现），
+  每次重试都会再次退回该玩家的物品。控制台会显示异常；请停服并移除该玩家身上重复的交易物品（UltiKits/UltiTrade#97）。
 - **已在经济插件中生效、随后才报错的交易付款按未付款处理。** 若经济插件的扣款或付款在其存储已经生效后才抛出错误（应答返回前连接中断），
   交易会按未转移处理：此时可能凭空产生金币（付款：付款方被退款而收款方保留了这笔钱）或使金币消失（扣款：永远不会退还）。
   控制台会记录一条以 `结果未知：` 开头的 SEVERE 日志，写明玩家与精确金额；请检查该玩家的余额是否有这笔金额的变动并手动更正（UltiKits/UltiTrade#60）。
