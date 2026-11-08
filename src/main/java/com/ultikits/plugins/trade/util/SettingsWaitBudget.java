@@ -7,6 +7,9 @@ import java.util.concurrent.TimeUnit;
  * This bounds lock waiting, not database calls or the total execution time. Nested operations share
  * the outer deadline; try-with-resources removes it even on an early return or exception.
  * A plain ThreadLocal deliberately does not pass a server-thread deadline to background work.
+ * <p>
+ * Internal to this module: it is {@code public} only because callers live in several packages.
+ * It is not an API for other plugins and may change or move without notice (UltiKits/UltiTrade#96).
  */
 public final class SettingsWaitBudget implements AutoCloseable {
     public static final long WAIT_MILLIS = 50;

@@ -7,6 +7,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Optional fixed lifetime for an open trade window: `window-timeout` in `config/trade.yml` (seconds,
+  0–600, shipped `0` = unlimited). Both players are told the duration when the windows open and warned
+  once in the last ten seconds; at expiry the trade is cancelled through the normal cancel path, so each
+  player's items come back (an unavailable player's are kept as a pending return) and no money or
+  experience moves. A reload applies the new value to newly opened trades only. The legacy
+  `trade-timeout` key stays ignored (UltiKits/UltiTrade#41).
+- 新增可选的交易窗口固定时限：`config/trade.yml` 中的 `window-timeout`（秒，0–600，默认 `0` 不限时）。开窗时双方获知时长，
+  最后十秒提醒一次；到期按正常取消流程取消，各自物品退回（无法找到的玩家沿用待返还机制），金币与经验不变。
+  重载只影响之后新开的交易；旧键 `trade-timeout` 仍被忽略（UltiKits/UltiTrade#41）。
+
 ### Fixed
 
 - Failed cleanup of an empty pending-return row now says it lists no items and removal will be retried
