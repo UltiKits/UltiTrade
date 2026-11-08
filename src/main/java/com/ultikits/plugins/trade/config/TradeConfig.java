@@ -88,6 +88,13 @@ public class TradeConfig extends AbstractConfigEntity {
     @ConfigEntry(path = "cleanup-interval-hours", comment = "{config_comment_cleanup_interval_hours}")
     private int cleanupIntervalHours = 24;
     
+    /**
+     * The name this server shows in {@code /trade pending list} for the claims it makes. Empty (the default) keeps the
+     * server folder's name. Only the first 64 characters are used (UltiKits/UltiTrade#95).
+     */
+    @ConfigEntry(path = "server-name", comment = "{config_comment_server_name}")
+    private String serverName = "";
+
     // ==================== Effect Settings ====================
     
     @ConfigEntry(path = "enable-sounds", comment = "{config_comment_enable_sounds}")

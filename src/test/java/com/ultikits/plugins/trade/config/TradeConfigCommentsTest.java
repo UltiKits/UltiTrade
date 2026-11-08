@@ -39,7 +39,7 @@ import static org.mockito.Mockito.when;
 class TradeConfigCommentsTest {
 
     /** The settings whose comments were Chinese: the adoption's scope, counted at master 17e5a6e. */
-    private static final int TOKEN_COMMENTS = 25;
+    private static final int TOKEN_COMMENTS = 26;
 
     @TempDir
     Path tempDir;
@@ -121,8 +121,8 @@ class TradeConfigCommentsTest {
     }
 
     @Test
-    @DisplayName("control: the entity declares twenty-five token comments, and none of its comments is Chinese")
-    void twentyFiveTokensAndNoChineseComment() {
+    @DisplayName("control: the entity declares twenty-six token comments, and none of its comments is Chinese")
+    void twentySixTokensAndNoChineseComment() {
         Map<String, String> comments = declaredComments();
         int tokens = 0;
         for (Map.Entry<String, String> e : comments.entrySet()) {
@@ -136,7 +136,7 @@ class TradeConfigCommentsTest {
     }
 
     @Test
-    @DisplayName("a fresh install under language: en writes every one of the twenty-five comments in English")
+    @DisplayName("a fresh install under language: en writes every one of the twenty-six comments in English")
     void freshInstallWritesEnglishComments() throws Exception {
         load(plugin("en"));
 
@@ -150,11 +150,40 @@ class TradeConfigCommentsTest {
     }
 
     @Test
-    @DisplayName("a fresh install under language: zh writes every one of the twenty-five comments in Chinese")
+    @DisplayName("a fresh install under language: zh writes every one of the twenty-six comments in Chinese")
     void freshInstallWritesChineseComments() throws Exception {
         load(plugin("zh"));
 
         assertCommentsIn("zh");
+    }
+
+    @Test
+    @DisplayName("server-name ships empty and an operator's value is kept as written (UltiKits/UltiTrade#95)")
+    void serverNameShipsEmptyAndKeepsOperatorValue() throws Exception {
+        UltiTrade plugin = plugin("en");
+        TradeConfig fresh = load(plugin);
+        assertThat(fresh.getServerName()).as("empty keeps the folder label").isEmpty();
+        String original = new String(Files.readAllBytes(file().toPath()), StandardCharsets.UTF_8);
+        assertThat(fileOnDisk().isSet("server-name")).isTrue();
+        assertThat(fileOnDisk().getString("server-name")).isEmpty();
+
+        String edited = original.replace(fileLine(original, "server-name:"), "server-name: lobby-1");
+        Files.write(file().toPath(), edited.getBytes(StandardCharsets.UTF_8));
+        TradeConfig config = load(plugin);
+        config.save();
+
+        assertThat(config.getServerName()).isEqualTo("lobby-1");
+        assertThat(new String(Files.readAllBytes(file().toPath()), StandardCharsets.UTF_8))
+                .as("the operator's file is not rewritten").isEqualTo(edited);
+    }
+
+    private static String fileLine(String text, String prefix) {
+        for (String line : text.split("\n")) {
+            if (line.startsWith(prefix)) {
+                return line;
+            }
+        }
+        throw new AssertionError("no line starting with " + prefix);
     }
 
     @org.junit.jupiter.params.ParameterizedTest

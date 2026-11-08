@@ -1576,13 +1576,32 @@ public class TradeService {
         return token != null && token.startsWith(CLAIM_PREFIX);
     }
 
-    private static String newClaimMarker() {
+    /** The longest operator-chosen server name a claim label keeps (UltiKits/UltiTrade#95). */
+    static final int MAX_SERVER_NAME_LENGTH = 64;
+
+    private String newClaimMarker() {
+        return newClaimMarker(config == null ? null : config.getServerName());
+    }
+
+    /**
+     * @param serverName the operator's {@code server-name}; blank keeps the server folder's name
+     */
+    private static String newClaimMarker(String serverName) {
         String server;
         try {
             String ip = Bukkit.getIp();
             server = ((ip == null || ip.isEmpty()) ? "*" : ip) + ":" + Bukkit.getPort();
         } catch (RuntimeException e) {
             server = "?";
+        }
+        String name = serverName == null ? "" : serverName.trim();
+        if (!name.isEmpty()) {
+            // The operator's name for this server, for backends that share a folder name (containers often all run
+            // from /data). Capped so the marker stays well inside delivery_token's VARCHAR(255) on MySQL.
+            if (name.length() > MAX_SERVER_NAME_LENGTH) {
+                name = name.substring(0, MAX_SERVER_NAME_LENGTH);
+            }
+            return CLAIM_PREFIX + UUID.randomUUID() + "|" + System.currentTimeMillis() + "|" + name + "@" + server;
         }
         try {
             // A folder label helps distinguish backends using the same bind address, but is not a
