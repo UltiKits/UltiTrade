@@ -188,6 +188,13 @@ persisted `PlayerTradeSettings`, so it reflects the value as of the player's las
 | ultitrade.placeholder.trade-enabled | Raw boolean string of the target's own trade-toggle state; two aliases (`trade_enabled`, `enabled`) return the identical `"true"`/`"false"` string | placeholder | `%ultitrade_trade_enabled%` or `%ultitrade_enabled%` | n/a | n/a | player | none | TradePlaceholderExpansion#onRequest |
 | ultitrade.placeholder.trade-enabled-display | Localized rendering (the language file's `placeholder_enabled` / `placeholder_disabled`, "Enabled" / "Disabled" under `language: en`, `UltiKits/UltiTrade#16`) of the same toggle state as `.trade-enabled`; two aliases (`trade_enabled_display`, `enabled_display`) return the identical value | placeholder | `%ultitrade_trade_enabled_display%` or `%ultitrade_enabled_display%` | n/a | n/a | player | brief | TradePlaceholderExpansion#onRequest |
 
+## Runtime Compatibility
+
+| ID | Behaviour | Kind | Trigger | Permission | Target | Tier | Manual | Source |
+|---|---|---|---|---|---|---|---|---|
+| ultitrade.compatibility.refuse-old-framework | On Minecraft below 1.21 with UltiTools below 6.4.0, return false at the first step of module activation, before configuration checks, service initialization or PlaceholderAPI registration. Under `language: en`, log exactly `UltiTrade needs UltiTools 6.4.0 or later on Minecraft versions below 1.21 (server: {SERVER}, UltiTools: {FRAMEWORK}). Please update UltiTools.` with both running version strings substituted. SNAPSHOT counts as its numeric version. Unknown versions instead log `UltiTrade could not parse the running versions (server: {SERVER}, UltiTools: {FRAMEWORK}); continuing without the compatibility check.` and continue. | event | module activation | n/a | n/a | admin | brief | UltiTrade#registerSelf, RuntimeCompatibility#check |
+| ultitrade.compatibility.start-current-server | On Minecraft 1.21+, keep the existing UltiTools 6.3.x support: activation continues and logs `UltiTrade enabled!` under `language: en`. Minecraft below 1.21 also continues with UltiTools 6.4.0 or later (including 6.4.0-SNAPSHOT); neither dependency version nor module api-version changes. | event | module activation | n/a | n/a | admin | brief | UltiTrade#registerSelf, RuntimeCompatibility#check |
+
 ## Lifecycle Hooks
 
 `UltiTrade#onUnregister()` is the extension-point hook the framework's `final`

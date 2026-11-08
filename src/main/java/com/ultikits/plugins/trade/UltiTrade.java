@@ -12,6 +12,7 @@ import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.UltiToolsModule;
 
 import org.bukkit.Bukkit;
+import org.bukkit.plugin.Plugin;
 
 import java.io.File;
 import java.io.IOException;
@@ -54,6 +55,23 @@ public class UltiTrade extends UltiToolsPlugin {
 
     @Override
     public boolean registerSelf() {
+        // Only old, stable Bukkit APIs here: do not initialize services or touch InventoryView
+        // until the framework version that rewrites its class/interface calls is known to suffice.
+        String serverVersion = Bukkit.getBukkitVersion();
+        Plugin core = Bukkit.getPluginManager().getPlugin("UltiTools");
+        String frameworkVersion = core == null || core.getDescription() == null
+                ? null : core.getDescription().getVersion();
+        RuntimeCompatibility.Result compatibility = RuntimeCompatibility.check(serverVersion, frameworkVersion);
+        if (compatibility == RuntimeCompatibility.Result.REFUSE) {
+            getLogger().error(Placeholders.fill(i18n("startup_framework_too_old"),
+                    "{SERVER}", String.valueOf(serverVersion), "{FRAMEWORK}", String.valueOf(frameworkVersion)));
+            return false; // The framework closes this module's container; never disable the core plugin.
+        }
+        if (compatibility == RuntimeCompatibility.Result.UNKNOWN) {
+            getLogger().warn(Placeholders.fill(i18n("startup_version_unknown"),
+                    "{SERVER}", String.valueOf(serverVersion), "{FRAMEWORK}", String.valueOf(frameworkVersion)));
+        }
+
         // Deleting a key from TradeConfig does nothing to the operator's existing file, so tell them
         // about any key this version no longer reads (UltiKits/UltiTrade#17, #18).
         warnAboutRemovedConfigKeys();

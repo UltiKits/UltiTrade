@@ -170,6 +170,13 @@ for real-machine verification, not user-facing documentation.
 | ultitrade.placeholder.trade-enabled | PlaceholderAPI installed; the target has toggled trading OFF (`ultitrade.settings.toggle` above) | Request `%ultitrade_trade_enabled%` and `%ultitrade_enabled%` for the target | Both return the literal string `false`, identically | server | |
 | ultitrade.placeholder.trade-enabled-display | `language: en` in UltiTools' own `config.yml`; Same as `ultitrade.placeholder.trade-enabled` above (target toggled off) | Request `%ultitrade_trade_enabled_display%` and `%ultitrade_enabled_display%` for the target | Both return `Disabled`, identically (the language file's `placeholder_disabled`, so it follows `language`, `UltiKits/UltiTrade#16`) | server | |
 
+## Runtime Compatibility
+
+| ID | Preconditions | Steps | Expected | Layer | Covers |
+|---|---|---|---|---|---|
+| ultitrade.compatibility.refuse-old-framework | Isolated Paper 1.20.6 server; UltiTools 6.3.0 or 6.3.1-SNAPSHOT; `language: en`; shipped English catalogue; this module JAR in `plugins/UltiTools/plugins/`; no other module or plugin claims `/trade`; record actual `Bukkit.getBukkitVersion()` and core plugin description version as `{SERVER}` and `{FRAMEWORK}`; server stopped before changing JARs | Start server, wait for startup completion and read the console; from console run `trade pending list`; repeat with the other specified framework version, stopping before replacing JARs | Exactly one module ERROR reads `UltiTrade needs UltiTools 6.4.0 or later on Minecraft versions below 1.21 (server: {SERVER}, UltiTools: {FRAMEWORK}). Please update UltiTools.` with the recorded literal versions; no `UltiTrade enabled!` line; `/trade` is unregistered (console reports an unknown command, not a trade response). UltiTools itself remains enabled and startup completes. | server | |
+| ultitrade.compatibility.start-current-server | Isolated Paper 1.21.11 server; UltiTools 6.3.0; `language: en`; shipped English catalogue; this module JAR installed; fresh database with no held stakes; no other module or plugin claims `/trade`; server stopped before changing JARs; console has `ultitrade.use` and `ultitrade.admin` | Start server, wait for startup completion, read the console, then run console `trade pending list` | Console contains `UltiTrade enabled!` and no module refusal line starting `UltiTrade needs UltiTools 6.4.0 or later on Minecraft versions below 1.21`. The registered command replies `No held trade-stake hand-overs.` (green, `pending_list_empty`), proving the module reached activation on 1.21.11 with the unchanged 6.3.0 framework requirement. | server | |
+
 ## Lifecycle Hooks
 
 The rows below exercise `UltiKits/UltiTrade#15`'s lifecycle-hook migration: `unregisterSelf()` is a
