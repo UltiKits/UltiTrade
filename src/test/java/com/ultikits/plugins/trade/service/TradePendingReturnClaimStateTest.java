@@ -476,10 +476,69 @@ class TradePendingReturnClaimStateTest {
         }
     }
 
+    @Test
+    @DisplayName("A configured server-name replaces the folder in the claim label (UltiTrade#95)")
+    void configuredServerNameReplacesTheFolder() throws Exception {
+        // Containerised backends often all run from the same folder (for example /data); the operator's
+        // server-name tells them apart in /trade pending list (maintainer decision 2026-11-08).
+        server.setIp("");
+        server.setPort(25565);
+        try (org.mockito.MockedStatic<org.bukkit.Bukkit> bukkit = org.mockito.Mockito.mockStatic(
+                org.bukkit.Bukkit.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            bukkit.when(org.bukkit.Bukkit::getWorldContainer).thenReturn(dir.resolve("data/.").toFile());
+            crashLeavesAHeldRow(" lobby-1 ");
+
+            assertThat(server().heldClaims()).extracting(TradeService.HeldClaim::getServer)
+                    .containsExactly("lobby-1@*:25565");
+        }
+    }
+
+    @Test
+    @DisplayName("A blank server-name keeps the folder label")
+    void blankServerNameKeepsTheFolder() throws Exception {
+        server.setIp("");
+        server.setPort(25565);
+        try (org.mockito.MockedStatic<org.bukkit.Bukkit> bukkit = org.mockito.Mockito.mockStatic(
+                org.bukkit.Bukkit.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            bukkit.when(org.bukkit.Bukkit::getWorldContainer).thenReturn(dir.resolve("survival/.").toFile());
+            crashLeavesAHeldRow("   ");
+
+            assertThat(server().heldClaims()).extracting(TradeService.HeldClaim::getServer)
+                    .containsExactly("survival@*:25565");
+        }
+    }
+
+    @Test
+    @DisplayName("A configured server-name longer than 64 characters is shortened to 64 in the claim label")
+    void longServerNameIsShortened() throws Exception {
+        server.setIp("");
+        server.setPort(25565);
+        StringBuilder name = new StringBuilder();
+        for (int i = 0; i < 30; i++) {
+            name.append("node-");
+        }
+        try (org.mockito.MockedStatic<org.bukkit.Bukkit> bukkit = org.mockito.Mockito.mockStatic(
+                org.bukkit.Bukkit.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            bukkit.when(org.bukkit.Bukkit::getWorldContainer).thenReturn(dir.resolve("data/.").toFile());
+            crashLeavesAHeldRow(name.toString());
+
+            assertThat(server().heldClaims()).extracting(TradeService.HeldClaim::getServer)
+                    .containsExactly(name.substring(0, 64) + "@*:25565");
+        }
+    }
+
     // ==================== Resolving a held row ====================
 
     private String crashLeavesAHeldRow() throws Exception {
+        return crashLeavesAHeldRow(null);
+    }
+
+    /** As {@link #crashLeavesAHeldRow()}, on a claiming server whose {@code server-name} is {@code serverName}. */
+    private String crashLeavesAHeldRow(String serverName) throws Exception {
         TradeService serverA = serverWith(around(database.openAs(PendingStakeReturn.class), "transaction", NOTHING, CRASH));
+        if (serverName != null) {
+            org.mockito.Mockito.when(serverA.getConfig().getServerName()).thenReturn(serverName);
+        }
         stakeIsPending(server());
         untilCrash(() -> serverA.deliverPendingReturns(joining()));
         return server().heldClaims().get(0).getId();
@@ -547,6 +606,16 @@ class TradePendingReturnClaimStateTest {
 
         assertThat(rows()).as("the released row is still there for the operator's redelivery").hasSize(1);
         assertThat(rows().get(0).getId()).isEqualTo(heldId[0]);
+        // UltiKits/UltiTrade#95 item 2: the console line itself tells the operator to check for a duplicate.
+        verify(loggers.get(1)).warn(argThat((String line) -> line.contains(player.getName())
+                && line.contains("Check " + player.getName()) && line.contains("duplicate") && line.contains("before their next join")));
+    }
+
+    @Test
+    @DisplayName("The Chinese resolved-meanwhile line also asks the operator to check for a duplicate (UltiTrade#95)")
+    void chineseResolvedMeanwhileLineAsksForADuplicateCheck() {
+        assertThat(CatalogueText.text("zh", "log_pending_return_resolved_meanwhile"))
+                .contains("{PLAYER}").contains("重复").contains("下次进服前");
     }
 
     private static List<String> messages(PlayerMock player) {

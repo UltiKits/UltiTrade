@@ -110,6 +110,7 @@ request-timeout: 30           # 交易请求超时时间（秒，5-600）
 window-timeout: 0             # 交易窗口固定时限（秒，0-600；0为不限时；重载只影响新交易）
 max-distance: 50              # 最大交易距离（格，0 无限制，最大 1000）
 allow-cross-world: false      # 是否允许跨世界交易
+server-name: ''               # /trade pending list 中显示的本服名称（留空用服务器文件夹名，最多 64 字符）
 
 # 交易功能
 enable-money-trade: true      # 启用金币交易
@@ -172,6 +173,7 @@ enable-clickable-buttons: true # 启用聊天可点击按钮
 ### 未发布 / Unreleased
 
 - Added an opt-in fixed trade-window lifetime (`window-timeout`), with localized notices and safe stake return on expiry (#41).
+- Added optional `server-name` for the claim label in `/trade pending list`; the resolved-meanwhile warning now asks for a duplicate check (#95). 新增可选 `server-name`，用于 `/trade pending list` 的服务器标签；“处理期间已被服主处理”的警告现在会提示检查重复物品（#95）。
 - 需要 UltiTools-API 6.3.0 或更高版本（`api-version: 630`）
 
 ### v1.0.0 (2026-02-18)
@@ -303,10 +305,13 @@ private String guiTitle = "&6与 {PLAYER} 交易";
   join). Check the claiming server's saved player inventory and ender chest first. A redeliver during a
   live hand-over can leave the player with the items and queue them again; the warning that an operator
   resolved the entry meanwhile means you must re-check for a possible duplicate before another join.
-  New claims show `<server folder>@<bind IP>:<port>` (for example `survival@*:25565`); when the folder
-  cannot be resolved they show only the address. This is a diagnostic label, not a globally unique ID:
-  keep distinct server folder names or an external mapping when backends share the same label. Existing
-  claims keep the label recorded when they were created.
+  The resolved-meanwhile console warning itself says to check the player for a duplicate before their next
+  join. New claims show `<server-name>@<bind IP>:<port>` when `server-name` is set in `config/trade.yml`
+  (trimmed, at most 64 characters), otherwise `<server folder>@<bind IP>:<port>` (for example
+  `survival@*:25565`); when no name is set and the folder cannot be resolved they show only the address.
+  This is a diagnostic label, not a globally unique ID: when several servers share one database and run
+  from folders with the same name (containers often all use `/data`), give each a distinct `server-name`.
+  Existing claims keep the label recorded when they were created (UltiKits/UltiTrade#95).
 - **JSON storage has a crash window.** Pending-return changes reach disk at the framework's next flush
   (`datasource.flushRate` seconds, and at shutdown). A crash before that flush can lose a saved return or
   hand the items over twice, even if the player data was saved. SQLite and MySQL write the row at once.
