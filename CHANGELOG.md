@@ -18,9 +18,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - 新增可选的交易窗口固定时限：`config/trade.yml` 中的 `window-timeout`（秒，0–600，默认 `0` 不限时）。开窗时双方获知时长，
   最后十秒提醒一次；到期按正常取消流程取消，各自物品退回（无法找到的玩家沿用待返还机制），金币与经验不变。
   重载只影响之后新开的交易；旧键 `trade-timeout` 仍被忽略（UltiKits/UltiTrade#41）。
+- Optional `server-name` in `config/trade.yml` (shipped empty): the name this server writes into new
+  pending-return claims, shown in `/trade pending list` as `<server-name>@<bind IP>:<port>`. Empty keeps the
+  server folder's name as before; the value is trimmed and at most 64 characters are used. Useful when several
+  servers share one database and run from folders with the same name (UltiKits/UltiTrade#95).
+- `config/trade.yml` 新增可选的 `server-name`（默认留空）：本服写入新待返还占用记录的名称，在 `/trade pending list` 中显示为
+  `<server-name>@<绑定 IP>:<端口>`。留空则与以前一样使用服务器文件夹名；取值会去掉首尾空格，最多使用 64 个字符。适用于多台服务器共用一个
+  数据库且文件夹名相同的情况（UltiKits/UltiTrade#95）。
 
 ### Fixed
 
+- The console warning for a saved trade stake that an operator resolved while it was being handed over now
+  ends by telling the operator to check the player for a duplicate of those items before their next join, as
+  the README already advised (UltiKits/UltiTrade#95).
+- 交易物品在发还过程中被服主处理时的控制台警告，现在会在结尾提示服主在玩家下次进服前检查其是否持有这些物品的重复副本，
+  与 README 的建议一致（UltiKits/UltiTrade#95）。
 - Failed cleanup of an empty pending-return row now says it lists no items and removal will be retried
   at a later join, rather than incorrectly sending operators to the held-return list. Confirmation
   failures still report a held row. New claim labels include the server folder name before the bind
