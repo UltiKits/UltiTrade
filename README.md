@@ -267,6 +267,43 @@ private String guiTitle = "&6与 {PLAYER} 交易";
 | `SerializedItemStack` | 物品序列化 (JSON) |
 | `TradeSession` | 活跃交易会话 |
 
+## Cancelled-trade item returns / 取消交易后的物品返还
+
+Cancelling returns each participant's own stake. An online owner receives items in inventory; overflow
+drops at their actual feet. If the server cannot resolve an owner, **first save the stake for that owner**
+in `trade_pending_returns`, even when their offline location is unavailable. A successful save keeps
+the items assigned to the original owner for their next join; a missing location alone never transfers ownership.
+
+Only after that save fails does fallback apply: drop at the original owner's real last position if
+available; otherwise return the stake to the **original trade initiator**. An online initiator receives
+items through the same inventory/actual-feet overflow path and is told: "The other trader's staked items
+could not be saved for them and their location is unavailable; the items have been returned to you."
+An offline initiator has the items saved under their UUID for their next join. Every redirect writes an
+operator WARNING naming the original owner, recipient and item types/counts. A redirected stake is no
+longer claimable by the original owner; the initiator's own stake always remains theirs.
+
+Saved items retain complete Bukkit item YAML and metadata. Initial storage uses an explicit ORM
+transaction and readback of uncertain outcomes, and survives a normal stop/start before collection.
+At the recipient's next join only what fits is delivered; the remainder stays saved for a later join,
+**not** dropped. No world spawn is invented as fallback. If neither storage nor a valid fallback can
+retain the items, an error names the owner, recipient and items for operator reconciliation. These
+guarantees cover normal operation and normal restarts, not automatic exactly-once hard-crash recovery;
+held CLAIMED entries still need operator review below.
+
+取消交易后，各方取回自己的押物。在线物主先收进背包，余量掉在其真实脚下。服务器无法解析物主时，
+**先在 `trade_pending_returns` 中为原物主保存押物**，即使无法取得其离线位置也一样。保存成功后由原物主下次进服领取；
+仅仅缺少位置绝不会改变物品归属。
+
+只有保存失败后才降级：若原物主真实位置可用，沿用在该位置掉落的处理；否则改交**最初发起交易的人**。
+发起人在线时按背包优先、真实脚下掉落余量处理，并收到「无法为对方保存押物且无法取得其位置；其押入的物品已返还给你。」
+发起人离线时按其 UUID 保存，供下次进服领取。每次重定向都记录 WARNING 日志，包含原物主、收件人、物品类型与数量。
+已重定向的押物不会再由原物主领取；发起人自己的押物始终归本人。
+
+待领取记录保留完整 Bukkit 物品 YAML 与元数据；初始保存使用显式 ORM 事务，不确定的结果先读回确认，正常停服再启动后仍可领取。
+进服时只发背包装得下的部分，余量继续保存，腾出空间后重新进服领取，**不会掉在地上**。任何分支都不拿世界出生点冒充离线位置。
+若保存及合法降级都无法保留物品，错误会写明原物主、收件人和物品，供服主核对。以上保证适用于正常操作与正常停启，
+不承诺硬崩溃后自动恰好一次恢复；CLAIMED 暂扣条目仍按下文人工核对。
+
 ## ⚠️ Known limitations / 已知限制
 
 - **The settings lock budget is not a database timeout.** A `/trade block`, `/trade unblock` or trade request
@@ -283,9 +320,16 @@ private String guiTitle = "&6与 {PLAYER} 交易";
   reads do not fill the cache. UltiTrade preserves that flag instead of clearing another plugin's signal.
   Remove or repair the plugin causing the interrupt and restart the server; retrying the command alone does
   not clear the flag.
-- **A crash while a saved stake is being returned holds that return for the operator.** When a trade
-  is cancelled while one participant cannot be found, their staked items are kept in
-  `trade_pending_returns` and handed back at their next join. The table records each hand-over's state:
+- **A complete storage outage with no real owner location and an offline initiator can interrupt cancellation.**
+  Nothing is dropped at spawn; the error names the original owner, recipient and items. Cancellation
+  is not a crash-recovery transaction: inspect that error and the actual inventories/pending rows
+  before retrying or shutting down; do not assume the remaining stakes were already returned.
+- **保存完全不可用、原物主位置未知且发起人也离线时，取消交易可能中断。** 不会改为在出生点掉落；
+  错误会写明原物主、收件人和物品。取消过程不是崩溃恢复事务；重试或停服前请核对该错误、真实背包与待领取记录，
+  不要假定其他押物都已返还。
+- **A hard crash after the CLAIMED commit but before the player file is written leaves the return parked for review.**
+  Saved returns in `trade_pending_returns` belong to the recipient described above (the original owner,
+  or the initiator after redirection) and are delivered at that recipient's next join. The table records each hand-over's state:
   before handing over, a join marks the entry CLAIMED (only one server can), and once the player's data
   save returns the entry is removed (UltiKits/UltiTrade#55). An entry left CLAIMED by a crash (or a failed
   save) is never handed over again automatically, because whether its items reached the player cannot be
@@ -293,7 +337,9 @@ private String guiTitle = "&6与 {PLAYER} 交易";
   entries. Check the player's inventory and ender chest, then resolve each entry with
   `/trade pending list`, `/trade pending redeliver <id>` (handed over at the player's next join, or at once
   if they are online on that server) or `/trade pending void <id>` (removed, not handed over). The
-  commands need `ultitrade.admin` and work from the console. While an entry is held, the player is told
+  commands require both `ultitrade.use` and `ultitrade.admin` for a player and work from the console.
+  After a crash, inspect these parked entries before choosing redelivery or voiding; this is not
+  automatic hard-crash exactly-once recovery. While an entry is held, the player is told
   at each join that a return of items is waiting for an administrator's check (with the count).
 - **All servers sharing one database must run the same UltiTrade version.** Stop them all, upgrade, then
   start them: a server still running a build from before UltiKits/UltiTrade#55 does not know the CLAIMED
@@ -343,16 +389,22 @@ private String guiTitle = "&6与 {PLAYER} 交易";
   numerically and is not affected.
 - **On Paper a failed player-data save is not reported to the module.** Paper's `Player#saveData()` logs
   its own `Failed to save player data for <name>` and returns normally, so the module cannot tell a stake
-  hand-over's player save failed (UltiKits/UltiTrade#60).
+  hand-over's player save failed (UltiKits/UltiTrade#60). A normal return is not proof that the player
+  file reached disk. Check disk health and the server log first, then reconcile the player's actual
+  items and any held entries before redelivering; an unreported failure may leave no held entry.
+- **On older servers without in-place title updates, an already-open window's title does not refresh immediately.** Its contents
+  still refresh; close it and open a new trade window to see the changed title. This is an accepted
+  title-only degradation, not a promise that this module change fixes every older-server API gap.
 - **Above about 411,616 experience points (about level 320), Paper's own experience arithmetic drifts.** After a
   trade the sender's remaining experience is rebuilt with `Player#giveExp`, which on Paper can store a few to about
   100 points more or less than given at those totals; the server's `/xp` command behaves the same way. The
   module reads a player's total exactly (UltiKits/UltiTrade#65).
-- **服务器在发还保存的押入物品时崩溃，这次发还会被暂扣，交由服主处理。** 交易取消时若服务器找不到一方，其押入物品保存在
-  `trade_pending_returns` 中，并在其下次进服时发还。该表记录每次发还的状态：发还前进服会将条目标记为「已占用」（只有一台服务器能成功），
-  玩家数据保存完成后再删除条目（UltiKits/UltiTrade#55）。因崩溃（或保存失败）而停留在「已占用」状态的条目不会再自动发还，因为仅凭该表无法判断物品是否已送达。
+- **若在 CLAIMED 提交后、玩家文件写入前硬崩溃，这次发还会暂扣，交由服主核对。** `trade_pending_returns` 中的记录归上文指定的收件人
+  （原物主，或重定向后的发起人），在该收件人下次进服时发还。该表记录每次发还的状态：发还前进服会将条目标记为「已占用」（只有一台服务器能成功），
+  玩家数据保存方法返回后再删除条目（返回并非落盘证明，见下文；UltiKits/UltiTrade#55）。因崩溃（或保存失败）而停留在「已占用」状态的条目不会再自动发还，因为仅凭该表无法判断物品是否已送达。
   服务器启动及每次重载时，控制台会提示此类条目的数量。请先检查玩家背包与末影箱，再用 `/trade pending list`、`/trade pending redeliver <id>`
-  （在玩家下次进服时发还，若其正在该服在线则立即发还）或 `/trade pending void <id>`（删除，不发还）逐条处理。这些命令需要 `ultitrade.admin` 权限，可在控制台使用。
+  （在玩家下次进服时发还，若其正在该服在线则立即发还）或 `/trade pending void <id>`（删除，不发还）逐条处理。玩家执行这些命令需要 `ultitrade.use` 和 `ultitrade.admin`，也可在控制台使用。
+  硬崩溃后应先检查这些暂扣条目，再决定重发或作废；这不是硬崩溃后的自动恰好一次恢复。
   条目被暂扣期间，玩家每次进服都会收到一条提示：有待返还物品正在等待管理员核对（含笔数）。
 - **共享同一数据库的所有服务器必须运行同一版本的 UltiTrade。** 请全部停服、升级后再启动：仍运行 UltiKits/UltiTrade#55 之前版本的服务器不认识「已占用」状态，
   会清除暂扣条目的标记与已交付物品记录，只留下空行；升级后的服务器会在玩家下次进服时删除该行。这会抹去恢复记录，而不是重新发还。
@@ -377,7 +429,10 @@ private String guiTitle = "&6与 {PLAYER} 交易";
   以其他形式手写的值（如用 `trade_enabled = 'false'` 代替 `0`，用 `total_money_traded = '1.50'` 代替 `1.5`）永远不会比较相等，该玩家之后的每次修改都会提示
   「你的交易设置正在保存中，请稍后重试」，其交易统计也不会被计入，直到该单元格改写为 `0`/`1` 或普通数字为止。MySQL 按数值比较数字，不受影响。
 - **在 Paper 上，玩家数据保存失败不会通知本模块。** Paper 的 `Player#saveData()` 只记录其自身的 `Failed to save player data for <name>` 并正常返回，
-  因此本模块无法得知押入物品发还时的玩家数据保存失败（UltiKits/UltiTrade#60）。
+  因此本模块无法得知押入物品发还时的玩家数据保存失败（UltiKits/UltiTrade#60）。方法正常返回不等于玩家文件已落盘的证明。
+  请先检查磁盘和服务端日志，再核对玩家现有物品与暂扣条目，确认后才重发；吞掉写入错误时也可能没有暂扣条目。
+- **不支持原地更新标题的旧服务器上，已打开窗口的标题不会即时刷新。** 窗口内容仍会刷新；关闭并重新开启交易窗口后才显示新标题。
+  这是已接受的标题降级，不代表本次模块修改独自修复了旧服务器的所有 API 兼容问题。
 - **经验超过约 411,616 点（约 320 级）时，Paper 自身的经验计算存在偏差。** 交易后发送方剩余的经验通过 `Player#giveExp` 重建，
   在这一数量级上 Paper 实际保存的数值可能比给予的多或少数点至约 100 点；服务器自带的 `/xp` 命令也是如此。本模块读取玩家经验总量是精确的（UltiKits/UltiTrade#65）。
 
