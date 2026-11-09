@@ -5,7 +5,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 本文件记录本项目的所有重要更改，格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)。
 
-## [Unreleased]
+## [2.1.0] - 2026-11-09
 
 ### Added
 
@@ -26,8 +26,48 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `<server-name>@<绑定 IP>:<端口>`。留空则与以前一样使用服务器文件夹名；取值会去掉首尾空格，最多使用 64 个字符。适用于多台服务器共用一个
   数据库且文件夹名相同的情况（UltiKits/UltiTrade#95）。
 
+- On Minecraft versions below 1.21, the module now refuses to enable on UltiTools older than 6.4.0 and
+  logs one error naming the server and UltiTools versions ("UltiTrade needs UltiTools 6.4.0 or later on
+  Minecraft versions below 1.21 …"); the UltiTools core plugin keeps running. On 1.21 and later nothing
+  changes, and UltiTools 6.3.0 or later is still enough. If either version cannot be read, the module logs
+  a warning and starts without the check (UltiKits/UltiTrade#93, UltiKits/UltiTools-Reborn#655).
+- 在 Minecraft 1.21 以下版本上，若 UltiTools 低于 6.4.0，本模块会拒绝启用，并记录一条写明服务器与 UltiTools 版本的错误
+  （「UltiTrade needs UltiTools 6.4.0 or later on Minecraft versions below 1.21 …」）；UltiTools 核心插件照常运行。
+  1.21 及以上版本不受影响，仍只需 UltiTools 6.3.0 或更高版本。无法解析任一版本时记录一条警告，不做该检查直接启动
+  （UltiKits/UltiTrade#93、UltiKits/UltiTools-Reborn#655）。
+- The module JAR now carries MIT licence metadata and a `LICENSE` file (UltiKits/UltiTrade#91).
+- 模块新增 MIT 许可证元数据与 `LICENSE` 文件（UltiKits/UltiTrade#91）。
+
+### Changed
+
+- When a trade is cancelled while the partner is offline and their real last location cannot be read
+  (including servers without an offline-location API), the partner's stake now goes to the player who
+  started the trade. Before, it was always saved for the offline partner, and if that save failed it was
+  dropped at the first world's spawn. An online initiator receives it in the inventory (overflow drops at
+  their feet) and is told so; an offline initiator gets it saved as a pending return under their UUID,
+  delivered at their next join and kept across a normal restart. Items that do not fit at a join now stay
+  saved for a later join instead of dropping. If the offline owner's real location is known, their stake is
+  still saved for them, and a failed save drops it at that real location; the world spawn is no longer used
+  as a stand-in (UltiKits/UltiTrade#92, UltiKits/UltiTools-Reborn#655).
+- 交易取消时若对方离线且无法读取其真实离线位置（包括没有离线位置 API 的服务器），对方的押物改为返还给发起交易的玩家。
+  以前一律为离线方保存，保存失败时掉落在第一个世界的出生点。发起人在线时放入背包（放不下的掉在其脚下）并收到提示；
+  发起人离线时按其 UUID 存为待返还记录，下次进服时发还，正常停服重启不会丢失。进服时装不下的部分现在继续保存，等下次进服再领，
+  不再掉在地上。若能取得离线物主的真实位置，仍为其保存，保存失败时掉落在该真实位置；不再以世界出生点代替
+  （UltiKits/UltiTrade#92、UltiKits/UltiTools-Reborn#655）。
+- `/trade block`, `/trade unblock` and trade requests (including shift+right-click) now share one wait
+  allowance of about 50 ms across all their settings-lock attempts, instead of waiting up to 50 ms again at
+  each check (UltiKits/UltiTrade#68).
+- `/trade block`、`/trade unblock` 与交易请求（包括 Shift+右键）现在在全部设置锁尝试中共用约 50 毫秒的等待额度，
+  不再在每次检查时各等最多 50 毫秒（UltiKits/UltiTrade#68）。
+
 ### Fixed
 
+- Typing a fractional experience amount (such as `1.5`) or one above 2,147,483,647 in the trade window's
+  chat prompt is now refused with "Invalid amount!" and leaves both offers and both confirmations unchanged,
+  also after experience trading has been disabled by a reload. A whole-number decimal such as `1.0` is
+  accepted (UltiKits/UltiTrade#67).
+- 在交易窗口的聊天输入中填写带小数的经验数量（如 `1.5`）或超过 2,147,483,647 的数量，现在会以「Invalid amount!」拒绝，
+  双方报价与确认状态均不改变，经验交易被重载关闭后同样如此。`1.0` 这类整数值的小数写法仍可接受（UltiKits/UltiTrade#67）。
 - The console warning for a saved trade stake that an operator resolved while it was being handed over now
   ends by telling the operator to check the player for a duplicate of those items before their next join, as
   the README already advised (UltiKits/UltiTrade#95).
@@ -49,6 +89,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   flush crash window explicit in the README (UltiKits/UltiTrade#62).
 - 明确混用旧版与升级版会抹去暂扣恢复记录，而非重复发还；说明处理暂扣前应停止发还并核对占用服务器上保存的玩家数据，
   同时在 README 中明确已有的 JSON 写盘崩溃窗口限制（UltiKits/UltiTrade#62）。
+- Documented the settings-lock allowance limits (not a database timeout; statistics skipped in a
+  disabled-core fallback; another plugin interrupting the server thread), that an already-open window's title
+  does not refresh on Minecraft 1.19.2–1.19.3, and aligned partial-reload reporting with UltiTools 6.3.2
+  (UltiKits/UltiTrade#68, UltiKits/UltiTrade#92, UltiKits/UltiTrade#94).
+- 补充说明设置锁等待额度的限制（不是数据库超时；核心停用回退时统计可能被跳过；其他插件中断服务器线程）、
+  Minecraft 1.19.2–1.19.3 上已打开窗口标题不会即时刷新，并使部分重载的说明与 UltiTools 6.3.2 一致
+  （UltiKits/UltiTrade#68、UltiKits/UltiTrade#92、UltiKits/UltiTrade#94）。
 
 ## [2.0.0] - 2026-10-21
 
